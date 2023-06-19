@@ -54,7 +54,7 @@ void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale state transition
     }
 
     // Check to make sure the 'power' has been updated recently
-    if (StandardMetrics.ms_v_bat_power->IsStale() && StandardMetrics.ms_v_bat_power->AsFloat() == 0) {
+    if (StandardMetrics.ms_v_bat_power->IsStale() && StandardMetrics.ms_v_bat_power->AsFloat() != 0) {
         ESP_LOGD(TAG, "Power is stale. Manually setting to zero");
         SetBatteryCurrent(0);
         SetBatteryPower(0);
