@@ -29,8 +29,8 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
 
     // Set poll state transition variables to shorter autostale than default
     // in case their ECUs go to sleep before the 'false' poll
-    StandardMetrics.ms_v_env_on->SetAutoStale(SM_STALE_MIN);
-    // StandardMetrics.ms_v_door_chargeport->SetAutoStale(SM_STALE_MIN); // Maybe 120 seconds is OK... The plug-in controller doesn't seem to respond very quickly.
+    StandardMetrics.ms_v_env_on->SetAutoStale(30); 
+    StandardMetrics.ms_v_door_chargeport->SetAutoStale(30);
 }
 
 void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale state transition variables

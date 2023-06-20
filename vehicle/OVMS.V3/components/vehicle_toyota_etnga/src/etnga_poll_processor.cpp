@@ -6,8 +6,6 @@
    (C) 2023       Jerry Kezar <solterra@kezarnet.com>
 
    Licensed under the MIT License. See the LICENSE file for details.
-
-   Code adapted from Michael Geddes & Geir Øyvind Vælidalo vehicle modules
 */
 
 #include "ovms_log.h"
@@ -50,7 +48,7 @@ void OvmsVehicleToyotaETNGA::IncomingPollReply(canbus* bus, uint16_t type, uint1
             break;
 
         default:
-            ESP_LOGD(TAG, "Unknown module: %03" PRIx32, m_poll_moduleid_low);
+            ESP_LOGW(TAG, "Unknown module: %03" PRIx32, m_poll_moduleid_low);
             return;
     }
 }
@@ -86,7 +84,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
 
         default:
             // Handle unsupported PID
-            ESP_LOGD(TAG, "Unsupported PID: %04X", pid);
+            ESP_LOGW(TAG, "Unsupported PID: %04X", pid);
             break;
     }
 }
@@ -122,7 +120,7 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
 
         default:
             // Handle unsupported PID
-            ESP_LOGD(TAG, "Unsupported PID: %04X", pid);
+            ESP_LOGW(TAG, "Unsupported PID: %04X", pid);
             break;
     }
 }
@@ -141,7 +139,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
 
         default:
             // Handle unsupported PID
-            ESP_LOGD(TAG, "Unsupported PID: %04X", pid);
+            ESP_LOGW(TAG, "Unsupported PID: %04X", pid);
             break;
     }
 }
@@ -196,7 +194,7 @@ void OvmsVehicleToyotaETNGA::RequestVIN()
     }
     else
     {
-        ESP_LOGE(TAG, "RequestVIN: Failed with error code %d", res);
+        ESP_LOGW(TAG, "RequestVIN: Failed with error code %d", res);
     }
 }
 
@@ -231,7 +229,7 @@ void OvmsVehicleToyotaETNGA::RequestChargeMode()
         else
         {
             retryCount++;
-            ESP_LOGE(TAG, "RequestChargeMode: Request failed with error code %d. Retrying (%d/%d)", res, retryCount, maxRetries);
+            ESP_LOGW(TAG, "RequestChargeMode: Request failed with error code %d. Retrying (%d/%d)", res, retryCount, maxRetries);
         }
     }
 
@@ -272,7 +270,7 @@ void OvmsVehicleToyotaETNGA::RequestChargeType()
         else
         {
             retryCount++;
-            ESP_LOGE(TAG, "RequestChargeType: Request failed with error code %d. Retrying (%d/%d)", res, retryCount, maxRetries);
+            ESP_LOGW(TAG, "RequestChargeType: Request failed with error code %d. Retrying (%d/%d)", res, retryCount, maxRetries);
         }
     }
 
