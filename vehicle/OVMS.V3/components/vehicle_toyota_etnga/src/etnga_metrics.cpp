@@ -37,7 +37,7 @@ void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale state transition
 {
     // Check to make sure the 'ready' signal has been updated recently
     if (StandardMetrics.ms_v_env_awake->IsStale() && StandardMetrics.ms_v_env_awake->AsBool()) {
-        ESP_LOGD(TAG, "Ready is stale. Manually setting to off");
+        ESP_LOGD(TAG, "Awake is stale. Manually setting to off");
         SetAwake(false);
     }
 
