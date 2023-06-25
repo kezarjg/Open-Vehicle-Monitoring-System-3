@@ -19,14 +19,14 @@
 
 static const OvmsVehicle::poll_pid_t obdii_polls[] = {
     // State variables polls
-  { HYBRID_CONTROL_SYSTEM_TX, HYBRID_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_READY_SIGNAL, { 0, 10, 10, 0}, 0, ISOTP_STD },
-  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGING_LID, { 0, 10, 0, 10}, 0, ISOTP_STD },
+  { HYBRID_CONTROL_SYSTEM_TX, HYBRID_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_READY_SIGNAL, { 0, 1, 1, 0}, 0, ISOTP_STD },
+  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGING_LID, { 0, 1, 0, 1}, 0, ISOTP_STD },
 
     // Driving polls
   { HYBRID_CONTROL_SYSTEM_TX, HYBRID_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_VOLTAGE_AND_CURRENT, { 0, 1, 1, 1}, 0, ISOTP_STD },
-  { VEHICLE_OBD_BROADCAST_MODULE_TX, HPCM_HYBRIDPTCTR_RX, VEHICLE_POLL_TYPE_OBDIICURRENT, PID_ODOMETER, { 0, 0, 1, 0}, 0, ISOTP_STD },
-  { VEHICLE_OBD_BROADCAST_MODULE_TX, HPCM_HYBRIDPTCTR_RX, VEHICLE_POLL_TYPE_OBDIICURRENT, PID_VEHICLE_SPEED, { 0, 0, 1, 0}, 0, ISOTP_STD },
-  { VEHICLE_OBD_BROADCAST_MODULE_TX, HPCM_HYBRIDPTCTR_RX, VEHICLE_POLL_TYPE_OBDIICURRENT, PID_AMBIENT_TEMPERATURE, {0, 60, 60, 60}, 0, ISOTP_STD },
+  { HYBRID_CONTROL_SYSTEM_TX, HYBRID_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_ODOMETER, { 0, 0, 1, 0}, 0, ISOTP_STD },
+  { HYBRID_CONTROL_SYSTEM_TX, HYBRID_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_VEHICLE_SPEED, { 0, 0, 1, 0}, 0, ISOTP_STD },
+  { HYBRID_CONTROL_SYSTEM_TX, HYBRID_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_AMBIENT_TEMPERATURE, {0, 60, 60, 60}, 0, ISOTP_STD },
   { HYBRID_BATTERY_SYSTEM_TX, HYBRID_BATTERY_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_TEMPERATURES, {0, 60, 60, 60}, 0, ISOTP_STD },
   { HYBRID_CONTROL_SYSTEM_TX, HYBRID_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_SHIFT_POSITION, { 0, 0, 15, 0}, 0, ISOTP_STD }, 
 
@@ -34,8 +34,10 @@ static const OvmsVehicle::poll_pid_t obdii_polls[] = {
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_SOC, { 0, 15, 15, 15}, 0, ISOTP_STD },
 
     // Charging polls
-  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_PISW_STATUS, { 0, 0, 0, 10}, 0, ISOTP_STD },
-  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGING, { 0, 0, 0, 10}, 0, ISOTP_STD },
+  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_PISW_STATUS, { 0, 0, 0, 1}, 0, ISOTP_STD },
+  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGING, { 0, 0, 0, 1}, 0, ISOTP_STD },
+  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_CHARGING_POWER, { 0, 0, 0, 1}, 0, ISOTP_STD },
+  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGER_INPUT_POWER, { 0, 0, 0, 1}, 0, ISOTP_STD },
 
     POLL_LIST_END
 };
@@ -63,8 +65,34 @@ OvmsVehicleToyotaETNGA::~OvmsVehicleToyotaETNGA()
     ESP_LOGI(TAG, "Shutdown Toyota eTNGA platform module");
 }
 
+void OvmsVehicleToyotaETNGA::NotifyVehicleOn()
+{
+    ESP_LOGV(TAG, "Notification of vehicle on - Reset energy metrics for trip reporting");
+    // Vehicle started. Reset the trip statistics
+    StandardMetrics.ms_v_bat_energy_used->SetValue(0);
+    StandardMetrics.ms_v_bat_energy_recd->SetValue(0);
+    lastBatteryEnergyLogTime = 0;
+}
+
+void OvmsVehicleToyotaETNGA::NotifyChargeStart()
+{
+    ESP_LOGV(TAG, "Notification of charge start - Reset energy metrics for trip reporting");
+    // Vehicle started. Reset the trip statistics
+    StandardMetrics.ms_v_bat_energy_used->SetValue(0);
+    StandardMetrics.ms_v_bat_energy_recd->SetValue(0);
+    lastBatteryEnergyLogTime = 0;
+    
+    StandardMetrics.ms_v_charge_kwh->SetValue(0);
+    lastChargerEnergyLogTime = 0;
+
+    StandardMetrics.ms_v_charge_kwh_grid->SetValue(0);
+    lastGridEnergyLogTime = 0;
+    
+}
+
 void OvmsVehicleToyotaETNGA::Ticker1(uint32_t ticker)
 {
+    //ESP_LOGI(TAG, "Entering Ticker1: %d", ticker);
     ResetStaleMetrics();
 
     switch (static_cast<PollState>(m_poll_state)) {

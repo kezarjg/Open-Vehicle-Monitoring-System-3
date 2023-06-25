@@ -38,9 +38,15 @@ protected:
     OvmsMetricFloat* m_v_bat_temp_heater;
     OvmsMetricFloat* m_v_pos_trip_start;
     
+    void NotifyVehicleOn();
+    void NotifyChargeStart();
+
 private:
     static constexpr const char* TAG = "v-toyota-etnga";
     bool isNewChargeSession = false;
+    uint32_t lastBatteryEnergyLogTime;
+    uint32_t lastChargerEnergyLogTime;
+    uint32_t lastGridEnergyLogTime;
 
     void InitializeMetrics();  // Initializes the metrics specific to this vehicle module
     void ResetStaleMetrics();  // Checks if state transition metrics are stale (and resets them)
@@ -53,11 +59,13 @@ private:
 
     // Data calculation functions
     float CalculateAmbientTemperature(const std::string& data);
+    float CalculateBatteryChargingPower(const std::string& data);
     float CalculateBatteryCurrent(const std::string& data);
     float CalculateBatteryPower(float voltage, float current);
     float CalculateBatterySOC(const std::string& data);
     std::vector<float> CalculateBatteryTemperatures(const std::string& data);
     float CalculateBatteryVoltage(const std::string& data);
+    float CalculateChargerInputPower(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
     bool CalculateChargingStatus(const std::string& data);
     float CalculateOdometer(const std::string& data);
@@ -69,6 +77,7 @@ private:
     // Metric setter functions
     void SetAmbientTemperature(float temperature);
     void SetAwake(bool awake);
+    void SetBatteryChargingPower(float power);
     void SetBatteryCurrent(float current);
     void SetBatteryPower(float power);
     void SetBatterySOC(float soc);
@@ -78,6 +87,7 @@ private:
     void SetChargeMode(int chargeMode);
     void SetChargeType(int chargeType);
     void SetChargeState(std::string chargeState);
+    void SetChargerInputPower(float power);
     void SetChargingDoorStatus(bool status);
     void SetChargingStatus(bool status);
     void SetOdometer(float odometer);
@@ -128,7 +138,8 @@ enum CANAddress
 // CAN PIDs
 enum CANPID
 {
-    PID_AMBIENT_TEMPERATURE = 0x46,
+    PID_AMBIENT_TEMPERATURE = 0x1F46,
+    PID_BATTERY_CHARGING_POWER = 0x10D4,
     PID_BATTERY_COOLANT_TEMPERATURE = 0x1848,
     PID_BATTERY_HEATER_STATUS = 0x2806,
     PID_BATTERY_HEATER_TEMPERATURE = 0x1824,
@@ -141,12 +152,21 @@ enum CANPID
     PID_CHARGING_CONTROL_STATUS = 0x1668,
     PID_CHARGING_LID = 0x1625,
     PID_CHARGING_VOLTAGE_TYPE = 0x161C,
-    PID_ODOMETER = 0xA6,
+    PID_ODOMETER = 0x1FA6,
     PID_PISW_STATUS = 0x1669,
     PID_READY_SIGNAL = 0x1076,
     PID_SHIFT_POSITION = 0x1061,
-    PID_VEHICLE_SPEED = 0x0D,
-    PID_VIN = 0xF190
+    PID_VEHICLE_SPEED = 0x1F0D,
+    PID_VIN = 0xF190,
+
+    PID_CHARGER_INPUT_POWER = 0x161D,
+    PID_AC_INPUT_CURRENT = 0x1654,
+
+    
+    PID_DC_CHARGER_PRESENT_CURRENT = 0x166C,
+
+    PID_DC_CHARGER_PRESENT_VOLTAGE = 0x166B
+
 };
 
 // RX buffer access functions

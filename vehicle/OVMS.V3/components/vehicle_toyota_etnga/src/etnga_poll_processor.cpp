@@ -80,6 +80,24 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
             break;
         }
 
+        case PID_ODOMETER: {
+            float odometer = CalculateOdometer(m_rxbuf);
+            SetOdometer(odometer);
+            break;
+        }
+
+        case PID_VEHICLE_SPEED: {
+            float speed = CalculateVehicleSpeed(m_rxbuf);
+            SetVehicleSpeed(speed);
+            break;
+        }
+
+        case PID_AMBIENT_TEMPERATURE: {
+            float temperature = CalculateAmbientTemperature(m_rxbuf);
+            SetAmbientTemperature(temperature);
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:
@@ -116,6 +134,25 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
             break;
         }
 
+        case PID_BATTERY_CHARGING_POWER: {
+            // Only valid during AC or DC charging
+            if (StandardMetrics.ms_v_charge_inprogress) {
+                float batteryChargingPower = CalculateBatteryChargingPower(m_rxbuf);
+                SetBatteryChargingPower(batteryChargingPower);
+            }
+            break;
+        }
+
+        case PID_CHARGER_INPUT_POWER: {
+            // Only valid during AC charging
+            ESP_LOGD(TAG, "ms_v_charge_inprogress: %s, charge_mode == \"Standard\": %s", StandardMetrics.ms_v_charge_inprogress ? "true" : "false", (std::string(StandardMetrics.ms_v_charge_mode->AsString()) == "Standard") ? "true" : "false");
+            if (StandardMetrics.ms_v_charge_inprogress && std::string(StandardMetrics.ms_v_charge_mode->AsString()) == "Standard") {
+                float chargerInputPower = CalculateChargerInputPower(m_rxbuf);
+                SetChargerInputPower(chargerInputPower);
+            }
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:
@@ -147,23 +184,6 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
 void OvmsVehicleToyotaETNGA::IncomingHPCMHybridPtCtr(uint16_t pid)
 {
     switch (pid) {
-        case PID_ODOMETER: {
-            float odometer = CalculateOdometer(m_rxbuf);
-            SetOdometer(odometer);
-            break;
-        }
-
-        case PID_VEHICLE_SPEED: {
-            float speed = CalculateVehicleSpeed(m_rxbuf);
-            SetVehicleSpeed(speed);
-            break;
-        }
-
-        case PID_AMBIENT_TEMPERATURE: {
-            float temperature = CalculateAmbientTemperature(m_rxbuf);
-            SetAmbientTemperature(temperature);
-            break;
-        }
 
         // Add more cases for other PIDs if needed
 
