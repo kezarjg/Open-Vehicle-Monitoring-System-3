@@ -22,20 +22,25 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
     if (StandardMetrics.ms_v_env_awake->AsBool()) {
         // There is life.
         TransitionToAwakeState();
+    } else if (StandardMetrics.ms_v_bat_12v_voltage->AsFloat() > StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat()) {
+        // Voltage is high. Maybe awake as well...
+        ESP_LOGI(TAG, "Aux 12V has exceeded the threshold");
+        TransitionToAwakeState();
     }
-
-    // TODO:    Need to add a battery voltage check as well
-    //          If the vehicle is awake but the CAN bus is 'stuck'
 }
 
 void OvmsVehicleToyotaETNGA::HandleAwakeState()
 {
+    std::string chargeState = StandardMetrics.ms_v_charge_state->AsString();
+    
     if (!StandardMetrics.ms_v_env_awake->AsBool()) {
         // No CAN communication for 120s - stop polling
         TransitionToSleepState();
     } else if (StandardMetrics.ms_v_env_on->AsBool()) {
+        // If the vehicle is switched on
         TransitionToReadyState();
-    } else if (StandardMetrics.ms_v_door_chargeport->AsBool()) {
+    } else if (StandardMetrics.ms_v_door_chargeport->AsBool() && !chargeState == "done") {
+        // If the charge door is open and we've not already completed a charge
         TransitionToChargingState();
     }
 }
@@ -66,7 +71,7 @@ void OvmsVehicleToyotaETNGA::HandleChargingState()
 
             // Get the one-time metrics for charging
             RequestChargeMode();
-            RequestChargeType();
+            RequestChargeType();    // TODO: Somestimes this reports 'CCS' incorrectly
         } else if (!StandardMetrics.ms_v_charge_pilot->AsBool()) {
             // A charging cable was disconnected, update charge state to 'undefined'
             SetChargeState("undefined");
@@ -78,7 +83,7 @@ void OvmsVehicleToyotaETNGA::HandleChargingState()
         }
     } else if (chargeState == "done") {
         // Charging session was finished.
-        SetChargeState("undefined");
+        TransitionToAwakeState();
     } else {
         // Not sure how we got here, but go back to the start
         ESP_LOGW(TAG, "Unexpected charge state: %s", chargeState.c_str());
@@ -110,7 +115,6 @@ void OvmsVehicleToyotaETNGA::TransitionToReadyState()
 void OvmsVehicleToyotaETNGA::TransitionToChargingState()
 {
     // Perform actions needed for transitioning to the CHARGING state
-    isNewChargeSession = false; // Reset charge session information
     SetChargeState("undefined");
     SetPollState(PollState::CHARGING); // Update the state
 }

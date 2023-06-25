@@ -43,7 +43,6 @@ protected:
 
 private:
     static constexpr const char* TAG = "v-toyota-etnga";
-    bool isNewChargeSession = false;
     uint32_t lastBatteryEnergyLogTime;
     uint32_t lastChargerEnergyLogTime;
     uint32_t lastGridEnergyLogTime;
