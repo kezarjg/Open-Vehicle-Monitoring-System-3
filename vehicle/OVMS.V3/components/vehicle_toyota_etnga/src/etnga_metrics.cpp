@@ -29,7 +29,6 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
 
     // Set poll state transition variables to shorter autostale than default
     // in case their ECUs go to sleep before the 'false' poll
-    StandardMetrics.ms_v_env_on->SetAutoStale(10); 
     StandardMetrics.ms_v_door_chargeport->SetAutoStale(10);
 }
 
@@ -173,18 +172,22 @@ void OvmsVehicleToyotaETNGA::SetBatteryChargingPower(float power)
 {
     ESP_LOGD(TAG, "Battery Charging Power: %f", power);
 
+    float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
+
     if (!lastChargerEnergyLogTime == 0)
     {
-        const float hoursSinceLastUpdate = static_cast<float>((esp_log_timestamp() - lastChargerEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
-        const float energy = power * hoursSinceLastUpdate;
-
-        ESP_LOGD(TAG, "Time update: %f hours", hoursSinceLastUpdate);
-        ESP_LOGD(TAG, "Battery Charging Energy: %f kWh", energy);
-
-        StandardMetrics.ms_v_charge_kwh->SetValue(StandardMetrics.ms_v_charge_kwh->AsFloat() + energy);
-
+        hoursSinceLastUpdate = static_cast<float>((esp_log_timestamp() - lastChargerEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
     }
 
+    const float energy = power * hoursSinceLastUpdate;
+
+    ESP_LOGD(TAG, "Time update: %f hours", hoursSinceLastUpdate);
+    ESP_LOGD(TAG, "Battery Charging Energy: %f kWh", energy);
+
+    // Add the energy to the integrater
+    StandardMetrics.ms_v_charge_kwh->SetValue(StandardMetrics.ms_v_charge_kwh->AsFloat() + energy);
+
+    // Update the update time for the next energy period
     lastChargerEnergyLogTime = esp_log_timestamp();
 
 }
@@ -197,29 +200,31 @@ void OvmsVehicleToyotaETNGA::SetBatteryCurrent(float current)
 
 void OvmsVehicleToyotaETNGA::SetBatteryPower(float power)
 {
-    ESP_LOGD(TAG, "Power: %f", power);
+    ESP_LOGD(TAG, "Battery Power: %f", power);
     StandardMetrics.ms_v_bat_power->SetValue(power);
+
+    float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
 
     if (!lastBatteryEnergyLogTime == 0)
     {
-        const float hoursSinceLastUpdate = static_cast<float>((esp_log_timestamp() - lastBatteryEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
-        const float energy = power * hoursSinceLastUpdate;
-
-        ESP_LOGD(TAG, "Time update: %f hours", hoursSinceLastUpdate);
-        ESP_LOGD(TAG, "Energy: %f kWh", energy);
-
-        if (power > 0)
-        {
-            StandardMetrics.ms_v_bat_energy_used->SetValue(StandardMetrics.ms_v_bat_energy_used->AsFloat() + energy);
-        }
-        else if (power < 0)
-        {
-            StandardMetrics.ms_v_bat_energy_recd->SetValue(StandardMetrics.ms_v_bat_energy_recd->AsFloat() + energy);
-        }
+        hoursSinceLastUpdate = static_cast<float>((esp_log_timestamp() - lastBatteryEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
     }
 
-    lastBatteryEnergyLogTime = esp_log_timestamp();
+    const float energy = power * hoursSinceLastUpdate;
 
+    ESP_LOGD(TAG, "Battery Energy: %f kWh", energy);
+
+    if (power > 0)
+    {
+        StandardMetrics.ms_v_bat_energy_used->SetValue(StandardMetrics.ms_v_bat_energy_used->AsFloat() + energy);
+    }
+    else if (power < 0)
+    {
+        StandardMetrics.ms_v_bat_energy_recd->SetValue(StandardMetrics.ms_v_bat_energy_recd->AsFloat() + energy);
+    }
+
+    // Update the update time for the next energy period
+    lastBatteryEnergyLogTime = esp_log_timestamp();
 }
 
 void OvmsVehicleToyotaETNGA::SetBatterySOC(float soc)
@@ -320,20 +325,21 @@ void OvmsVehicleToyotaETNGA::SetChargerInputPower(float power)
     ESP_LOGD(TAG, "Changer Input Power: %f", power);
     StandardMetrics.ms_v_charge_power->SetValue(power);
 
+    float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
+
     if (!lastGridEnergyLogTime == 0)
-    {
-        const float hoursSinceLastUpdate = static_cast<float>((esp_log_timestamp() - lastGridEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
-        const float energy = power * hoursSinceLastUpdate;
+        {
+        hoursSinceLastUpdate = static_cast<float>((esp_log_timestamp() - lastGridEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
+        }
 
-        ESP_LOGD(TAG, "Time update: %f hours", hoursSinceLastUpdate);
-        ESP_LOGD(TAG, "Grid Energy: %f kWh", energy);
+    const float energy = power * hoursSinceLastUpdate;
 
-        StandardMetrics.ms_v_charge_kwh_grid->SetValue(StandardMetrics.ms_v_charge_kwh_grid->AsFloat() + energy);
+    ESP_LOGD(TAG, "Grid Energy: %f kWh", energy);
 
-    }
+    StandardMetrics.ms_v_charge_kwh_grid->SetValue(StandardMetrics.ms_v_charge_kwh_grid->AsFloat() + energy);
 
+    // Update the update time for the next energy period
     lastGridEnergyLogTime = esp_log_timestamp();
-
 }
 
 void OvmsVehicleToyotaETNGA::SetChargingDoorStatus(bool status)

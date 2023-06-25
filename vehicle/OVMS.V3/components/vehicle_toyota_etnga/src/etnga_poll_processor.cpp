@@ -136,7 +136,7 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
 
         case PID_BATTERY_CHARGING_POWER: {
             // Only valid during AC or DC charging
-            if (StandardMetrics.ms_v_charge_inprogress) {
+            if (StandardMetrics.ms_v_charge_inprogress->AsBool()) {
                 float batteryChargingPower = CalculateBatteryChargingPower(m_rxbuf);
                 SetBatteryChargingPower(batteryChargingPower);
             }
@@ -145,8 +145,7 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
 
         case PID_CHARGER_INPUT_POWER: {
             // Only valid during AC charging
-            ESP_LOGD(TAG, "ms_v_charge_inprogress: %s, charge_mode == \"Standard\": %s", StandardMetrics.ms_v_charge_inprogress ? "true" : "false", (std::string(StandardMetrics.ms_v_charge_mode->AsString()) == "Standard") ? "true" : "false");
-            if (StandardMetrics.ms_v_charge_inprogress && std::string(StandardMetrics.ms_v_charge_mode->AsString()) == "Standard") {
+            if (StandardMetrics.ms_v_charge_inprogress->AsBool() && std::string(StandardMetrics.ms_v_charge_mode->AsString()) == "Standard") {
                 float chargerInputPower = CalculateChargerInputPower(m_rxbuf);
                 SetChargerInputPower(chargerInputPower);
             }
