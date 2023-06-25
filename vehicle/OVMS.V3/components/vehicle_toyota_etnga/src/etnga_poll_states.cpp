@@ -22,7 +22,7 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
     if (StandardMetrics.ms_v_env_awake->AsBool()) {
         // There is life.
         TransitionToAwakeState();
-    } else if (StandardMetrics.ms_v_bat_12v_voltage->AsFloat() > StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat()) {
+    } else if (StandardMetrics.ms_v_bat_12v_voltage->AsFloat() > (StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat()+0.2f)) {
         // Voltage is high. Maybe awake as well...
         ESP_LOGI(TAG, "Aux 12V has exceeded the threshold");
         TransitionToAwakeState();

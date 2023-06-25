@@ -121,7 +121,7 @@ void OvmsVehicleToyotaETNGA::Ticker1(uint32_t ticker)
 void OvmsVehicleToyotaETNGA::Ticker60(uint32_t ticker)
 {
     // Request VIN if not already set
-if (StandardMetrics.ms_v_vin->AsString().empty() && (m_poll_state == PollState::AWAKE || m_poll_state == PollState::READY)) {
+if (StandardMetrics.ms_v_vin->AsString().empty() && (m_poll_state == PollState::READY)) {
         RequestVIN();
     }
 }
