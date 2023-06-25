@@ -220,7 +220,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryPower(float power)
     }
     else if (power < 0)
     {
-        StandardMetrics.ms_v_bat_energy_recd->SetValue(StandardMetrics.ms_v_bat_energy_recd->AsFloat() + energy);
+        StandardMetrics.ms_v_bat_energy_recd->SetValue(StandardMetrics.ms_v_bat_energy_recd->AsFloat() - energy);
     }
 
     // Update the update time for the next energy period
