@@ -39,7 +39,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
     } else if (StandardMetrics.ms_v_env_on->AsBool()) {
         // If the vehicle is switched on
         TransitionToReadyState();
-    } else if (StandardMetrics.ms_v_door_chargeport->AsBool() && !chargeState == "done") {
+    } else if (StandardMetrics.ms_v_door_chargeport->AsBool() && !(chargeState == "done")) {
         // If the charge door is open and we've not already completed a charge
         TransitionToChargingState();
     }
