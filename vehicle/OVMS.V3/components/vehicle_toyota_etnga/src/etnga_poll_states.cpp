@@ -72,6 +72,7 @@ void OvmsVehicleToyotaETNGA::HandleChargingState()
             // Get the one-time metrics for charging
             RequestChargeMode();
             RequestChargeType();    // TODO: Somestimes this reports 'CCS' incorrectly
+
         } else if (!StandardMetrics.ms_v_charge_pilot->AsBool()) {
             // A charging cable was disconnected, update charge state to 'undefined'
             SetChargeState("undefined");

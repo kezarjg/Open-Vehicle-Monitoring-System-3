@@ -62,6 +62,7 @@ private:
     float CalculateBatteryCurrent(const std::string& data);
     float CalculateBatteryPower(float voltage, float current);
     float CalculateBatterySOC(const std::string& data);
+    float CalculateBatterySOCBMS(const std::string& data);
     std::vector<float> CalculateBatteryTemperatures(const std::string& data);
     float CalculateBatteryVoltage(const std::string& data);
     float CalculateChargerInputPower(const std::string& data);
@@ -80,6 +81,7 @@ private:
     void SetBatteryCurrent(float current);
     void SetBatteryPower(float power);
     void SetBatterySOC(float soc);
+    void SetBatterySOCBMS(float soc);
     void SetBatteryTemperatures(const std::vector<float>& temperatures);
     void SetBatteryTemperatureStatistics(const std::vector<float>& temperatures);
     void SetBatteryVoltage(float voltage);
@@ -110,6 +112,7 @@ private:
     void RequestVIN();
     void RequestChargeMode();
     void RequestChargeType();
+    void DiagnosticSession();
     
 };
 
@@ -137,6 +140,7 @@ enum CANAddress
 // CAN PIDs
 enum CANPID
 {
+    PID_ACTIVE_DIAGNOSTIC_SESSION = 0xF186,
     PID_AC_INPUT_CURRENT = 0x1654,
     PID_AMBIENT_TEMPERATURE = 0x1F46,
     PID_BATTERY_CHARGING_POWER = 0x10D4,

@@ -56,6 +56,10 @@ void OvmsVehicleToyotaETNGA::IncomingPollReply(canbus* bus, uint16_t type, uint1
 void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
 {
     switch (pid) {
+        case PID_ACTIVE_DIAGNOSTIC_SESSION: {
+            break;
+        }
+
         case PID_BATTERY_VOLTAGE_AND_CURRENT: {
             float batVoltage = CalculateBatteryVoltage(m_rxbuf);
             float batCurrent = CalculateBatteryCurrent(m_rxbuf);
@@ -110,6 +114,10 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
 void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
 {
     switch (pid) {
+        case PID_ACTIVE_DIAGNOSTIC_SESSION: {
+            break;
+        }
+
         case PID_CHARGING_LID: {
             bool chargingDoorStatus = CalculateChargingDoorStatus(m_rxbuf);
             SetChargingDoorStatus(chargingDoorStatus);
@@ -164,6 +172,16 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
 void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
 {
     switch (pid) {
+        case PID_ACTIVE_DIAGNOSTIC_SESSION: {
+            break;
+        }
+
+        case PID_BATTERY_SOC_BMS: {
+            float SOC = CalculateBatterySOCBMS(m_rxbuf);
+            SetBatterySOCBMS(SOC);
+            break;
+        }
+
         case PID_BATTERY_TEMPERATURES: {
             std::vector<float> temperatures = CalculateBatteryTemperatures(m_rxbuf);
             SetBatteryTemperatures(temperatures);
@@ -214,6 +232,30 @@ void OvmsVehicleToyotaETNGA::RequestVIN()
     else
     {
         ESP_LOGW(TAG, "RequestVIN: Failed with error code %d", res);
+    }
+}
+
+void OvmsVehicleToyotaETNGA::DiagnosticSession()
+{
+    std::string response;
+    int res = PollSingleRequest(
+        m_can2,
+        PLUG_IN_CONTROL_SYSTEM_TX,
+        PLUG_IN_CONTROL_SYSTEM_RX,
+        VEHICLE_POLL_TYPE_OBDIISESSION,
+        0x03,
+        response,
+        1000,
+        ISOTP_STD
+    );
+
+    if (res == POLLSINGLE_OK)
+    {
+        ESP_LOGW(TAG, "DiagnosticSession: Worked");
+    }
+    else
+    {
+        ESP_LOGW(TAG, "DiagnosticSession: Failed with error code %d", res);
     }
 }
 

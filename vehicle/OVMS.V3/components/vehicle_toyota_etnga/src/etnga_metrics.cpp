@@ -34,7 +34,7 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
 
 void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale state transition variables
 {
-    // Check to make sure the 'ready' signal has been updated recently
+    // Check to make sure the 'awake' signal has been updated recently
     if (StandardMetrics.ms_v_env_awake->IsStale() && StandardMetrics.ms_v_env_awake->AsBool()) {
         ESP_LOGD(TAG, "Awake is stale. Manually setting to off");
         SetAwake(false);
@@ -50,6 +50,18 @@ void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale state transition
     if (StandardMetrics.ms_v_door_chargeport->IsStale() && StandardMetrics.ms_v_door_chargeport->AsBool()) {
         ESP_LOGD(TAG, "Charging Door is stale. Manually setting to off");
         SetChargingDoorStatus(false);
+    }
+
+    // Check to make sure the 'pilot' signal has been updated recently
+    if (StandardMetrics.ms_v_charge_pilot->IsStale() && StandardMetrics.ms_v_charge_pilot->AsBool()) {
+        ESP_LOGD(TAG, "Pilot Status is stale. Manually setting to off");
+        SetPISWStatus(false);
+    }
+
+    // Check to make sure the 'charging inprogress' signal has been updated recently
+    if (StandardMetrics.ms_v_charge_inprogress->IsStale() && StandardMetrics.ms_v_charge_inprogress->AsBool()) {
+        ESP_LOGD(TAG, "Charging Inprogress is stale. Manually setting to off");
+        SetChargingStatus(false);
     }
 
     // Check to make sure the 'power' has been updated recently
@@ -83,7 +95,12 @@ float OvmsVehicleToyotaETNGA::CalculateBatteryPower(float voltage, float current
 
 float OvmsVehicleToyotaETNGA::CalculateBatterySOC(const std::string& data)
 {
-    return static_cast<float>(GetRxBInt8(data, 0));
+    return static_cast<float>(GetRxUInt8(data, 0));
+}
+
+float OvmsVehicleToyotaETNGA::CalculateBatterySOCBMS(const std::string& data)
+{
+    return GetRxBByte(data, 0) * 100.0f / 255.0f;
 }
 
 std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryTemperatures(const std::string& data)
@@ -241,6 +258,20 @@ void OvmsVehicleToyotaETNGA::SetBatterySOC(float soc)
     }
 }
 
+void OvmsVehicleToyotaETNGA::SetBatterySOCBMS(float soc)
+{
+    if (soc == 0.0 && m_v_bat_soc_bms->AsFloat() > 1.0)
+    {
+        // Ignore zero SOC if previousSOC was greater than 1
+        ESP_LOGD(TAG, "Ignoring invalid SOC value: %f", soc);
+    }
+    else
+    {
+        ESP_LOGD(TAG, "SOC BMS: %f", soc);
+        m_v_bat_soc_bms->SetValue(soc);
+    }
+}
+
 void OvmsVehicleToyotaETNGA::SetBatteryTemperatures(const std::vector<float>& temperatures)
 {
     StandardMetrics.ms_v_bat_cell_temp->SetValue(temperatures);
@@ -322,7 +353,7 @@ void OvmsVehicleToyotaETNGA::SetChargeState(std::string chargeState)
 
 void OvmsVehicleToyotaETNGA::SetChargerInputPower(float power)
 {
-    ESP_LOGD(TAG, "Changer Input Power: %f", power);
+    ESP_LOGD(TAG, "Charger Input Power: %f", power);
     StandardMetrics.ms_v_charge_power->SetValue(power);
 
     float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
