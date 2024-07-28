@@ -95,7 +95,7 @@ float OvmsVehicleToyotaETNGA::CalculateBatteryPower(float voltage, float current
 
 float OvmsVehicleToyotaETNGA::CalculateBatterySOC(const std::string& data)
 {
-    return static_cast<float>(GetRxUInt8(data, 0));
+    return static_cast<float>(GetRxBByte(data, 0));
 }
 
 float OvmsVehicleToyotaETNGA::CalculateBatterySOCBMS(const std::string& data)
