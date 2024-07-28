@@ -194,7 +194,6 @@ OvmsServerV3::OvmsServerV3(const char* name)
   m_mgconn = NULL;
   m_sendall = false;
   m_lasttx = 0;
-  m_lasttx_stream = 0;
   m_lasttx_sendall = 0;
   m_peers = 0;
   m_streaming = 0;
@@ -297,36 +296,29 @@ void OvmsServerV3::TransmitModifiedMetrics()
 
 void OvmsServerV3::TransmitMetric(OvmsMetric* metric)
   {
-  auto const metric_name = metric->m_name;
+  std::string metric_name(metric->m_name);
 
   if (!m_metrics_filter.CheckFilter(metric_name))
     return;
 
   std::string topic(m_topic_prefix);
   topic.append("metric/");
-  topic.append(metric_name);
-
-  // Replace '.' inside the metric name by '/' for MQTT like namespacing.
-  for(size_t i = m_topic_prefix.length(); i < topic.length(); i++)
-    {
-      if(topic[i] == '.')
-        topic[i] = '/';
-    }
+  topic.append(mqtt_topic(metric_name));
 
   std::string val = metric->AsString();
 
   mg_mqtt_publish(m_mgconn, topic.c_str(), m_msgid++,
     MG_MQTT_QOS(0) | MG_MQTT_RETAIN, val.c_str(), val.length());
-  ESP_LOGI(TAG,"Tx metric %s=%s",topic.c_str(),val.c_str());
+  ESP_LOGD(TAG,"Tx metric %s=%s",topic.c_str(),val.c_str());
   }
 
 int OvmsServerV3::TransmitNotificationInfo(OvmsNotifyEntry* entry)
   {
   std::string topic(m_topic_prefix);
   topic.append("notify/info/");
-  topic.append(entry->m_subtype);
+  topic.append(mqtt_topic(entry->m_subtype));
 
-  const extram::string result = mp_encode(entry->GetValue());
+  const extram::string result = entry->GetValue();
 
   int id = m_msgid++;
   mg_mqtt_publish(m_mgconn, topic.c_str(), id,
@@ -339,9 +331,9 @@ int OvmsServerV3::TransmitNotificationError(OvmsNotifyEntry* entry)
   {
   std::string topic(m_topic_prefix);
   topic.append("notify/error/");
-  topic.append(entry->m_subtype);
+  topic.append(mqtt_topic(entry->m_subtype));
 
-  const extram::string result = mp_encode(entry->GetValue());
+  const extram::string result = entry->GetValue();
 
   int id = m_msgid++;
   mg_mqtt_publish(m_mgconn, topic.c_str(), id,
@@ -354,9 +346,9 @@ int OvmsServerV3::TransmitNotificationAlert(OvmsNotifyEntry* entry)
   {
   std::string topic(m_topic_prefix);
   topic.append("notify/alert/");
-  topic.append(entry->m_subtype);
+  topic.append(mqtt_topic(entry->m_subtype));
 
-  const extram::string result = mp_encode(entry->GetValue());
+  const extram::string result = entry->GetValue();
 
   int id = m_msgid++;
   mg_mqtt_publish(m_mgconn, topic.c_str(), id,
@@ -370,7 +362,7 @@ int OvmsServerV3::TransmitNotificationData(OvmsNotifyEntry* entry)
   char base[32];
   std::string topic(m_topic_prefix);
   topic.append("notify/data/");
-  topic.append(entry->m_subtype);
+  topic.append(mqtt_topic(entry->m_subtype));
   topic.append("/");
   topic.append(itoa(entry->m_id,base,10));
   topic.append("/");
@@ -537,11 +529,19 @@ void OvmsServerV3::IncomingEvent(std::string event, void* data)
   if (!StandardMetrics.ms_s_v3_connected->AsBool()) return;
 
   std::string topic(m_topic_prefix);
-  topic.append("event");
 
-  ESP_LOGI(TAG,"Tx event %s",event.c_str());
+  // Legacy: publish event name on fixed topic
+  topic.append("event");
   mg_mqtt_publish(m_mgconn, topic.c_str(), m_msgid++,
     MG_MQTT_QOS(0), event.c_str(), event.length());
+
+  // Publish MQTT style event topic, payload reserved for event data serialization:
+  topic.append("/");
+  topic.append(mqtt_topic(event));
+  mg_mqtt_publish(m_mgconn, topic.c_str(), m_msgid++,
+    MG_MQTT_QOS(0), "", 0);
+
+  ESP_LOGD(TAG,"Tx event %s",event.c_str());
   }
 
 void OvmsServerV3::RunCommand(std::string client, std::string id, std::string command)
@@ -759,16 +759,6 @@ void OvmsServerV3::SetStatus(const char* status, bool fault /*=false*/, State ne
 
 void OvmsServerV3::MetricModified(OvmsMetric* metric)
   {
-  if (!StandardMetrics.ms_s_v3_connected->AsBool()) return;
-
-  if (m_streaming)
-    {
-    OvmsMutexLock mg(&m_mgconn_mutex);
-    if (!m_mgconn)
-      return;
-    metric->ClearModified(MyOvmsServerV3Modifier);
-    TransmitMetric(metric);
-    }
   }
 
 bool OvmsServerV3::NotificationFilter(OvmsNotifyType* type, const char* subtype)
@@ -928,12 +918,21 @@ void OvmsServerV3::Ticker1(std::string event, void* data)
       TransmitPendingNotificationsData();
 
     bool caron = StandardMetrics.ms_v_env_on->AsBool();
+
     // Next send time depends on the state of the car
-    int next = (m_peers != 0) ? m_updatetime_connected :
-               (caron) ? m_updatetime_on :
-               (StandardMetrics.ms_v_charge_inprogress->AsBool()) ? m_updatetime_charging :
-               (StandardMetrics.ms_v_env_awake->AsBool()) ? m_updatetime_awake :
-               m_updatetime_idle;
+    int next = m_updatetime_idle;
+
+    // Use the lowest enabled update value
+    if (m_peers != 0 && m_updatetime_connected < next)
+      next = m_updatetime_connected;
+    if ((caron && m_streaming > 0) && m_streaming < next)
+      next = m_streaming;
+    if (caron && m_updatetime_on < next)
+      next = m_updatetime_on;
+    if (StandardMetrics.ms_v_charge_inprogress->AsBool() && m_updatetime_charging < next)
+      next = m_updatetime_charging;
+    if (StandardMetrics.ms_v_env_awake->AsBool() && m_updatetime_awake < next)
+      next = m_updatetime_awake;
 
     if ((m_lasttx_sendall == 0) ||
         (m_updatetime_sendall > 0 && now > (m_lasttx_sendall + m_updatetime_sendall)))
@@ -945,12 +944,7 @@ void OvmsServerV3::Ticker1(std::string event, void* data)
     else if ((m_lasttx==0)||(now>(m_lasttx+next)))
       {
       TransmitModifiedMetrics();
-      m_lasttx = m_lasttx_stream = now;
-      }
-    else if (m_streaming && caron && m_peers && now > m_lasttx_stream+m_streaming)
-      {
-      // TODO: transmit streaming metrics
-      m_lasttx_stream = now;
+      m_lasttx = now;
       }
     }
   }

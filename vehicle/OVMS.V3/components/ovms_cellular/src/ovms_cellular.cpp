@@ -340,7 +340,9 @@ void modem::SetPowerMode(PowerMode powermode)
     case Sleep:
     case DeepSleep:
       if ((original!=On)&&(original!=Sleep)&&(original!=DeepSleep))
-        SendSetState1(PoweringOn); // We are not in the task, so queue the state change
+        SendSetState1(PowerOffOn); // We are not in the task, so queue the state change
+        // We don't know the actual power state of the modem, it can be still powered on
+        // after a crash. PowerOffOn initiates a power cycle, which works in any case.
       break;
 
     case Off:
@@ -1688,6 +1690,16 @@ void cellular_muxtx(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int arg
 void cellular_cmd(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv)
   {
   std::string msg;
+
+  PowerMode pm = MyModem ? MyModem->GetPowerMode() : Off;
+  if (pm != On && pm != Devel)
+    {
+    if (verbosity >= COMMAND_RESULT_MINIMAL)
+      {
+      writer->puts("ERROR: MODEM not powered on!");
+      }
+    return;
+    }
 
   MyModem->m_cmd_output.clear();
   MyModem->m_cmd_running = true;

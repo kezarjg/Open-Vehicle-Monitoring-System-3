@@ -29,18 +29,23 @@
 #include "ovms_utils.h"
 #include <string.h>
 
+#ifdef bind
+#undef bind
+#endif
+using namespace std::placeholders;
+
 /**
  * Incoming poll reply messages
  */
-void OvmsHyundaiIoniqEv::IncomingPollReply(canbus *bus, uint16_t type, uint16_t pid, uint8_t *data, uint8_t length, uint16_t mlremain)
+void OvmsHyundaiIoniqEv::IncomingPollReply(const OvmsPoller::poll_job_t &job, uint8_t* data, uint8_t length)
 {
   XARM("OvmsHyundaiIoniqEv::IncomingPollReply");
   /*
-  ESP_LOGV(TAG, "IPR %03x TYPE:%x PID:%02x %x %02x %02x %02x %02x %02x %02x %02x %02x", m_poll_moduleid_low, type, pid, length, data[0], data[1], data[2], data[3],
+  ESP_LOGV(TAG, "IPR %03x TYPE:%x PID:%02x %x %02x %02x %02x %02x %02x %02x %02x %02x", job.moduleid_rec, type, pid, length, data[0], data[1], data[2], data[3],
      data[4], data[5], data[6], data[7]);
   */
   bool process_all = false;
-  switch (m_poll_moduleid_low) {
+  switch (job.moduleid_rec) {
     // ****** IGMP *****
     case 0x778:
       process_all = true;
@@ -81,7 +86,7 @@ void OvmsHyundaiIoniqEv::IncomingPollReply(canbus *bus, uint16_t type, uint16_t 
       break;
 
     default:
-      ESP_LOGD(TAG, "Unknown module: %03" PRIx32, m_poll_moduleid_low);
+      ESP_LOGD(TAG, "Unknown module: %03" PRIx32, job.moduleid_rec);
       XDISARM;
       return;
   }
@@ -93,33 +98,33 @@ void OvmsHyundaiIoniqEv::IncomingPollReply(canbus *bus, uint16_t type, uint16_t 
     // Assemble first and following frames to get complete reply
 
     // init rx buffer on first (it tells us whole length)
-    if (m_poll_ml_frame == 0) {
-      obd_module = m_poll_moduleid_low;
-      obd_rxtype = type;
-      obd_rxpid = pid;
+    if (job.mlframe == 0) {
+      obd_module = job.moduleid_rec;
+      obd_rxtype = job.type;
+      obd_rxpid = job.pid;
       obd_frame = 0;
       rxbuf.clear();
       ESP_LOGV(TAG, "IoniqISOTP: IPR %03" PRIx32 " TYPE:%x PID: %03x Buffer: %d - Start",
-        m_poll_moduleid_low, type, pid, length + mlremain);
-      rxbuf.reserve(length + mlremain);
+        job.moduleid_rec, job.type, job.pid, length + job.mlremain);
+      rxbuf.reserve(length + job.mlremain);
     }
     else {
       if (obd_frame == 0xffff) {
         XDISARM;
         return; // Aborted
       }
-      if ((obd_rxtype != type) || (obd_rxpid != pid) || (obd_module != m_poll_moduleid_low)) {
+      if ((obd_rxtype != job.type) || (obd_rxpid != job.pid) || (obd_module != job.moduleid_rec)) {
         ESP_LOGD(TAG, "IoniqISOTP: IPR %03" PRIx32 " TYPE:%x PID: %03x Dropped Frame",
-          m_poll_moduleid_low, type, pid);
+          job.moduleid_rec, job.type, job.pid);
         XDISARM;
         return;
       }
       ++obd_frame;
-      if (obd_frame != m_poll_ml_frame) {
+      if (obd_frame != job.mlframe) {
         obd_frame = 0xffff;
         rxbuf.clear();
         ESP_LOGD(TAG, "IoniqISOTP: IPR %03" PRIx32 " TYPE:%x PID: %03x Skipped Frame: %d",
-          m_poll_moduleid_low, type, pid, obd_frame);
+          job.moduleid_rec, job.type, job.pid, obd_frame);
         XDISARM;
         return;
       }
@@ -128,50 +133,71 @@ void OvmsHyundaiIoniqEv::IncomingPollReply(canbus *bus, uint16_t type, uint16_t 
     rxbuf.insert(rxbuf.end(), data, data + length);
     /*
     ESP_LOGV(TAG, "IoniqISOTP: IPR %03x TYPE:%x PID: %03x Frame: %d Append: %d Expected: %d - Append",
-      m_poll_moduleid_low, type, pid, m_poll_ml_frame, length, mlremain);
+      job.moduleid_rec, job.type, job.pid, m_poll_ml_frame, length, job.mlremain);
     */
-    if (mlremain > 0) {
+    if (job.mlremain > 0) {
       // we need more - return for now.
       XDISARM;
       return;
     }
 
-    ESP_LOGD(TAG, "IoniqISOTP: IPR %03" PRIx32 " TYPE:%x PID: %03x Frames: %d Message Size: %d",
-      m_poll_moduleid_low, type, pid, obd_frame, rxbuf.size());
-    ESP_BUFFER_LOGD(TAG, rxbuf.data(), rxbuf.size());
-    switch (m_poll_moduleid_low) {
-      case 0x778:
-        IncomingIGMP_Full(bus, type, pid, rxbuf);
-        break;
-      case 0x7ce:
-        IncomingCM_Full(bus, type, pid, rxbuf);
-        break;
-      case 0x7ec:
-        IncomingBMC_Full(bus, type, pid, rxbuf);
-        break;
-      // ****** BCM ******
-      case 0x7a8:
-        IncomingBCM_Full(bus, type, pid, rxbuf);
-        break;
-      // ****** ?? Misc inc speed ******
-      case 0x7bb:
-        IncomingOther_Full(bus, type, pid, rxbuf);
-        break;
-      // ******* VMCU ******
-      case 0x7ea:
-        IncomingVMCU_Full(bus, type, pid, rxbuf);
-        break;
-    }
+    Incoming_Full(job.type, job.moduleid_sent, job.moduleid_rec, job.pid, rxbuf);
     obd_frame = 0xffff; // Received all - drop until we have a new frame 0
     rxbuf.clear();
   }
   XDISARM;
 }
 
+void OvmsHyundaiIoniqEv::Incoming_Full(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, const std::string &data)
+{
+  ESP_LOGD(TAG, "IoniqISOTP: IPR %03" PRIx32 " TYPE:%x PID: %03x Message Size: %d",
+      module_rec, type, pid, data.size());
+  ESP_BUFFER_LOGV(TAG, data.data(), data.size());
+  switch (type) {
+    case VEHICLE_POLL_TYPE_READDATA:
+      switch (module_rec) {
+        case 0x778:
+          IncomingIGMP_Full(type, pid, data);
+          break;
+        case 0x7ce:
+          IncomingCM_Full(type, pid, data);
+          break;
+        case 0x7ec:
+          IncomingBMC_Full(type, pid, data);
+          break;
+        // ****** BCM ******
+        case 0x7a8:
+          IncomingBCM_Full(type, pid, data);
+          break;
+        // ****** ?? Misc inc speed ******
+        case 0x7bb:
+          IncomingOther_Full(type, pid, data);
+          break;
+        // ******* VMCU ******
+        case 0x7ea:
+          IncomingVMCU_Full(type, pid, data);
+          break;
+      }
+      break;
+    case VEHICLE_POLL_TYPE_OBDIIVEHICLE:
+      switch (pid) {
+        case 2: // VIN
+          ProcessVIN(data);
+          break;
+      }
+      break;
+  }
+}
+void OvmsHyundaiIoniqEv::Incoming_Fail(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, int errorcode)
+{
+  ESP_LOGE(TAG, "IoniqISOTP: IPR %03" PRIx32 " TYPE:%x PID: %03x Error: %d",
+    module_rec, type, pid, errorcode);
+}
+
 /**
  * Handle incoming messages from cluster.
  */
-void OvmsHyundaiIoniqEv::IncomingCM_Full(canbus *bus, uint16_t type, uint16_t pid, const std::string &data)
+void OvmsHyundaiIoniqEv::IncomingCM_Full(uint16_t type, uint16_t pid, const std::string &data)
 {
   XARM("OvmsHyundaiIoniqEv::IncomingCM_Full");
   switch (pid) {
@@ -192,7 +218,7 @@ void OvmsHyundaiIoniqEv::IncomingCM_Full(canbus *bus, uint16_t type, uint16_t pi
 /**
  * Handle incoming messages from Aircon poll.
  */
-void OvmsHyundaiIoniqEv::IncomingOther_Full(canbus *bus, uint16_t type, uint16_t pid, const std::string &data)
+void OvmsHyundaiIoniqEv::IncomingOther_Full(uint16_t type, uint16_t pid, const std::string &data)
 {
   // 0x7b3->0x7bb
   XARM("OvmsHyundaiIoniqEv::IncomingOther_Full");
@@ -220,7 +246,7 @@ void OvmsHyundaiIoniqEv::IncomingOther_Full(canbus *bus, uint16_t type, uint16_t
  *
  * - Aux battery SOC, Voltage and current
  */
-void OvmsHyundaiIoniqEv::IncomingVMCU_Full(canbus *bus, uint16_t type, uint16_t pid, const std::string &data)
+void OvmsHyundaiIoniqEv::IncomingVMCU_Full(uint16_t type, uint16_t pid, const std::string &data)
 {
   // 0x7ea
 
@@ -310,7 +336,7 @@ void OvmsHyundaiIoniqEv::IncomingVMCU_Full(canbus *bus, uint16_t type, uint16_t 
  * - Cell voltage max / min + cell #
  * + more
  */
-void OvmsHyundaiIoniqEv::IncomingBMC_Full(canbus *bus, uint16_t type, uint16_t pid, const std::string &data)
+void OvmsHyundaiIoniqEv::IncomingBMC_Full(uint16_t type, uint16_t pid, const std::string &data)
 {
   // 0x7e4->0x7ec
   XARM("OvmsHyundaiIoniqEv::IncomingBMC_Full");
@@ -645,7 +671,7 @@ void OvmsHyundaiIoniqEv::IncomingBMC_Full(canbus *bus, uint16_t type, uint16_t p
  * Handle incoming messages from BCM-poll
  *
  */
-void OvmsHyundaiIoniqEv::IncomingBCM_Full(canbus *bus, uint16_t type, uint16_t pid, const std::string &data)
+void OvmsHyundaiIoniqEv::IncomingBCM_Full(uint16_t type, uint16_t pid, const std::string &data)
 {
   XARM("OvmsHyundaiIoniqEv::IncomingBCM_Full");
   //0x7a8
@@ -728,7 +754,7 @@ void OvmsHyundaiIoniqEv::IncomingBCM_Full(canbus *bus, uint16_t type, uint16_t p
  * Handle incoming messages from IGMP-poll
  *
  */
-void OvmsHyundaiIoniqEv::IncomingIGMP_Full(canbus *bus, uint16_t type, uint16_t pid, const std::string &data)
+void OvmsHyundaiIoniqEv::IncomingIGMP_Full(uint16_t type, uint16_t pid, const std::string &data)
 {
   XARM("OvmsHyundaiIoniqEv::IncomingIGMP_Full");
   // 0x778
@@ -894,74 +920,112 @@ void OvmsHyundaiIoniqEv::IncomingIGMP_Full(canbus *bus, uint16_t type, uint16_t 
   XDISARM;
 }
 
-int OvmsHyundaiIoniqEv::RequestVIN()
+IqVinStatus OvmsHyundaiIoniqEv::ProcessVIN(const std::string &response)
 {
-  //ESP_LOGD(TAG, "RequestVIN: Sending Request");
-  if (!StdMetrics.ms_v_env_awake->AsBool()) {
-    ESP_LOGD(TAG, "RequestVIN: Not Awake Request not sent");
-    return -3;
+  uint32_t byte;
+  if (!get_uint_buff_be<1>(response, 0, byte)) {
+    ESP_LOGE(TAG, "ProcessVIN: Bad Buffer");
+    return IqVinStatus::BadBuffer;
   }
-  std::string response;
-  int res = PollSingleRequest( m_can1,
-      VEHICLE_OBD_BROADCAST_MODULE_TX, VEHICLE_OBD_BROADCAST_MODULE_RX,
-      VEHICLE_POLL_TYPE_OBDIIVEHICLE,  2, response, 1000);
-  if (res != POLLSINGLE_OK) {
-    switch (res) {
-      case POLLSINGLE_TIMEOUT:
-        ESP_LOGE(TAG, "RequestVIN: Request Timeout");
-        break;
-      case POLLSINGLE_TXFAILURE:
-        ESP_LOGE(TAG, "RequestVIN: Request TX Failure");
-        break;
-      default:
-        ESP_LOGE(TAG, "RequestVIN: UDC Error %d", res);
+  else if (byte == 1)
+  {
+    std::string vin;
+    if ( !get_buff_string(response, 1, 17, vin)) {
+      return IqVinStatus::BadBuffer;
     }
+    if (vin.length() > 5 && vin[4] == '-') {
+      vin = vin.substr(0, 3) + vin.substr(10) + "-------";
+    }
+    StandardMetrics.ms_v_vin->SetValue(vin);
+    ESP_BUFFER_LOGD(TAG, response.data(), response.size());
 
-    return res;
+    vin.copy(m_vin, sizeof(m_vin) - 1);
+    m_vin[sizeof(m_vin) - 1] = '\0';
+    ESP_LOGD(TAG, "ProcessVIN: Success: '%s'", vin.c_str());
+    return IqVinStatus::Success;
+  }
+  else if (!get_uint_buff_be<1>(response, 4, byte)) {
+    ESP_LOGE(TAG, "ProcessVIN: Bad Buffer");
+    return IqVinStatus::BadBuffer;
+  }
+  else if (byte != 1) {
+    ESP_LOGI(TAG, "ProcessVIN: Ignore Response");
+    return IqVinStatus::BadFormat;
   }
   else {
-    uint32_t byte;
-    if (!get_uint_buff_be<1>(response, 4, byte)) {
-      ESP_LOGE(TAG, "RequestVIN: Bad Buffer");
-      return POLLSINGLE_TIMEOUT;
-    }
-    else if (byte != 1) {
-      ESP_LOGI(TAG, "RequestVIN: Ignore Response");
-      return POLLSINGLE_TIMEOUT;
+    std::string vin;
+    if ( get_buff_string(response, 5, 17, vin)) {
+      if (vin.length() > 5 && vin[4] == '-') {
+        vin = vin.substr(0, 3) + vin.substr(10) + "-------";
+      }
+      StandardMetrics.ms_v_vin->SetValue(vin);
+      ESP_BUFFER_LOGD(TAG, response.data(), response.size());
+
+      vin.copy(m_vin, sizeof(m_vin) - 1);
+      m_vin[sizeof(m_vin) - 1] = '\0';
+      ESP_LOGD(TAG, "ProcessVIN: Success: '%s'->'%s'", vin.c_str(), m_vin);
+      return IqVinStatus::Success;
     }
     else {
-      std::string vin;
-      if ( get_buff_string(response, 5, 17, vin)) {
-        if (vin.length() > 5 && vin[4] == '-') {
-          vin = vin.substr(0, 3) + vin.substr(10) + "-------";
-        }
-        StandardMetrics.ms_v_vin->SetValue(vin);
-        ESP_BUFFER_LOGD(TAG, response.data(), response.size());
-
-        vin.copy(m_vin, sizeof(m_vin) - 1);
-        m_vin[sizeof(m_vin) - 1] = '\0';
-        ESP_LOGD(TAG, "RequestVIN: Success: '%s'->'%s'", vin.c_str(), m_vin);
-        return POLLSINGLE_OK;
-      }
-      else {
-        ESP_LOGE(TAG, "RequestVIN.String: Bad Buffer");
-        return POLLSINGLE_TIMEOUT;
-      }
+      ESP_LOGE(TAG, "ProcessVIN: Bad VIN Buffer");
+      return IqVinStatus::BadBuffer;
     }
   }
+}
+
+bool OvmsHyundaiIoniqEv::PollRequestVIN()
+{
+  if (!StdMetrics.ms_v_env_awake->AsBool()) {
+    ESP_LOGV(TAG, "PollRequestVIN: Not Awake Request not sent");
+    return false;
+  }
+  auto poll_entry = std::shared_ptr<OvmsPoller::OnceOffPoll>(
+      new OvmsPoller::OnceOffPoll(
+        std::bind(&OvmsHyundaiIoniqEv::Incoming_Full, this, _1, _2, _3, _4, _5),
+        std::bind(&OvmsHyundaiIoniqEv::Incoming_Fail, this, _1, _2, _3, _4, _5),
+        0x7e2, 0x7ea,
+        VEHICLE_POLL_TYPE_OBDIIVEHICLE,  2,
+        ISOTP_STD, 0, 3/*retries*/ ));
+  PollRequest(m_can1, "!xiq.vin", poll_entry);
+  return true;
+}
+
+IqVinStatus OvmsHyundaiIoniqEv::RequestVIN()
+{
+  //ESP_LOGD(TAG, "RequestVIN: Sending Request");
+
+  if (!StdMetrics.ms_v_env_awake->AsBool()) {
+    ESP_LOGD(TAG, "RequestVIN: Not Awake Request not sent");
+    return IqVinStatus::NotAwake;
+  }
+
+  std::string response;
+  int res = PollSingleRequest( m_can1,
+      0x7e2, 0x7ea,
+      VEHICLE_POLL_TYPE_OBDIIVEHICLE,  2, response, 1000);
+  switch (res) {
+    case POLLSINGLE_OK:
+      return ProcessVIN(response);
+    case POLLSINGLE_TIMEOUT:
+      ESP_LOGE(TAG, "RequestVIN: Request Timeout");
+      return IqVinStatus::Timeout;
+    case POLLSINGLE_TXFAILURE:
+      ESP_LOGE(TAG, "RequestVIN: Request TX Failure");
+      return IqVinStatus::TxFail;
+    default:
+      ESP_LOGE(TAG, "RequestVIN: UDC Error %d: %s", res, OvmsPoller::PollResultCodeName(res));
+  }
+  return IqVinStatus::ProtocolErr;
 }
 
 /**
  * Get console ODO units
  *
- * Currently from configuration
  */
 metric_unit_t OvmsHyundaiIoniqEv::GetConsoleUnits()
 {
-  XARM("OvmsHyundaiIoniqEv::GetConsoleUnits");
-  metric_unit_t res = MyConfig.GetParamValueBool("xkn", "consoleKilometers", true) ? Kilometers : Miles;
-  XDISARM;
-  return res;
+  // Always KM.
+  return Kilometers;
 }
 
 /**
@@ -972,7 +1036,7 @@ metric_unit_t OvmsHyundaiIoniqEv::GetConsoleUnits()
 bool OvmsHyundaiIoniqEv::IsLHD()
 {
   XARM("OvmsHyundaiIoniqEv::IsLHD");
-  bool res = MyConfig.GetParamValueBool("xkn", "leftDrive", true);
+  bool res = MyConfig.GetParamValueBool("xiq", "leftDrive", true);
   XDISARM;
   return res;
 }
