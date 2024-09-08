@@ -17,7 +17,7 @@
 //    READY (2)             : Vehicle is "Ready" to drive or being driven
 //    CHARGING (3)          : Vehicle is charging
 
-static const OvmsVehicle::poll_pid_t obdii_polls[] = {
+static const OvmsPoller::poll_pid_t obdii_polls[] = {
     // State variables polls
   { HYBRID_CONTROL_SYSTEM_TX, HYBRID_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_READY_SIGNAL, { 0, 1, 1, 0}, 0, ISOTP_STD },
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGING_LID, { 0, 1, 0, 1}, 0, ISOTP_STD },

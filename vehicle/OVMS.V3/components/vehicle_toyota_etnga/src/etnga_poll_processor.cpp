@@ -11,44 +11,44 @@
 #include "ovms_log.h"
 #include "vehicle_toyota_etnga.h"
 
-void OvmsVehicleToyotaETNGA::IncomingPollReply(canbus* bus, uint16_t type, uint16_t pid, uint8_t* data, uint8_t length, uint16_t mlremain)
+void OvmsVehicleToyotaETNGA::IncomingPollReply(const OvmsPoller::poll_job_t &job, uint8_t* data, uint8_t length)
 {
     // Check if this is the first frame of the multi-frame response
-    if (m_poll_ml_frame == 0) {
+    if (job.mlframe == 0) {
         m_rxbuf.clear();
-        m_rxbuf.reserve(length + mlremain);
+        m_rxbuf.reserve(length + job.mlremain);
     }
 
     // Append the data to the receive buffer
     m_rxbuf.append(reinterpret_cast<char*>(data), length);
 
     // Check if response is complete
-    if (mlremain != 0)
+    if (job.mlremain != 0)
         return;
 
     // Log the received response
-    ESP_LOGV(TAG, "IncomingPollReply: PID %02X: len=%d %s", pid, m_rxbuf.size(), hexencode(m_rxbuf).c_str());
+    ESP_LOGV(TAG, "IncomingPollReply: PID %02X: len=%d %s", job.pid, m_rxbuf.size(), hexencode(m_rxbuf).c_str());
 
     // Process based on m_poll_moduleid_low
-    switch (m_poll_moduleid_low) {
+    switch (job.moduleid_rec) {
         case HYBRID_BATTERY_SYSTEM_RX:
-            IncomingHybridBatterySystem(pid);
+            IncomingHybridBatterySystem(job.pid);
             break;
 
         case HYBRID_CONTROL_SYSTEM_RX:
-            IncomingHybridControlSystem(pid);
+            IncomingHybridControlSystem(job.pid);
             break;
 
         case PLUG_IN_CONTROL_SYSTEM_RX:
-            IncomingPlugInControlSystem(pid);
+            IncomingPlugInControlSystem(job.pid);
             break;
 
         case HPCM_HYBRIDPTCTR_RX:
-            IncomingHPCMHybridPtCtr(pid);
+            IncomingHPCMHybridPtCtr(job.pid);
             break;
 
         default:
-            ESP_LOGW(TAG, "Unknown module: %03" PRIx32, m_poll_moduleid_low);
+            ESP_LOGW(TAG, "Unknown module: %03" PRIx32, job.moduleid_rec);
             return;
     }
 }
