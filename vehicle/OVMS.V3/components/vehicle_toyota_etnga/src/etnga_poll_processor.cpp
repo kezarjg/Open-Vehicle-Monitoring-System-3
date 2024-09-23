@@ -57,7 +57,7 @@ void OvmsVehicleToyotaETNGA::IncomingPollReply(const OvmsPoller::poll_job_t &job
     }
 }
 
-void OvmsVehicleToyotaETNGA::IncomingAirConditionerSystem(uinit16_t pid)
+void OvmsVehicleToyotaETNGA::IncomingAirConditionerSystem(uint16_t pid)
 {
     switch (pid) {
         case PID_AMBIENT_TEMPERATURE: {
