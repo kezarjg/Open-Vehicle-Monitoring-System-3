@@ -31,6 +31,10 @@ void OvmsVehicleToyotaETNGA::IncomingPollReply(const OvmsPoller::poll_job_t &job
 
     // Process based on m_poll_moduleid_low
     switch (job.moduleid_rec) {
+        case AIR_CONDITIONER_RX:
+            IncomingAirConditionerSystem(job.pid);
+            break;
+
         case HYBRID_BATTERY_SYSTEM_RX:
             IncomingHybridBatterySystem(job.pid);
             break;
@@ -50,6 +54,24 @@ void OvmsVehicleToyotaETNGA::IncomingPollReply(const OvmsPoller::poll_job_t &job
         default:
             ESP_LOGW(TAG, "Unknown module: %03" PRIx32, job.moduleid_rec);
             return;
+    }
+}
+
+void OvmsVehicleToyotaETNGA::IncomingAirConditionerSystem(uinit16_t pid)
+{
+    switch (pid) {
+        case PID_AMBIENT_TEMPERATURE: {
+            float temperature = CalculateAmbientTemperature(m_rxbuf);
+            SetAmbientTemperature(temperature);
+            break;
+        }
+
+        // Add more cases for other PIDs if needed
+
+        default:
+            // Handle unsupported PID
+            ESP_LOGW(TAG, "Unsupported PID: %04X", pid);
+            break;
     }
 }
 
@@ -93,12 +115,6 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
         case PID_VEHICLE_SPEED: {
             float speed = CalculateVehicleSpeed(m_rxbuf);
             SetVehicleSpeed(speed);
-            break;
-        }
-
-        case PID_AMBIENT_TEMPERATURE: {
-            float temperature = CalculateAmbientTemperature(m_rxbuf);
-            SetAmbientTemperature(temperature);
             break;
         }
 

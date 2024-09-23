@@ -51,6 +51,7 @@ private:
     void ResetStaleMetrics();  // Checks if state transition metrics are stale (and resets them)
 
     // Incoming message handling functions
+    void IncomingAirConditionerSystem(uint16_t pid);
     void IncomingHPCMHybridPtCtr(uint16_t pid);
     void IncomingHybridBatterySystem(uint16_t pid);
     void IncomingHybridControlSystem(uint16_t pid);
@@ -128,6 +129,8 @@ enum PollState
 // CAN bus addresses
 enum CANAddress
 {
+    AIR_CONDITIONER_TX = 0x7C4,
+    AIR_CONDITIONER_RX = 0x7CC,
     HYBRID_BATTERY_SYSTEM_TX = 0x747,
     HYBRID_BATTERY_SYSTEM_RX = 0x74F,
     HYBRID_CONTROL_SYSTEM_TX = 0x7D2,
@@ -142,7 +145,8 @@ enum CANPID
 {
     PID_ACTIVE_DIAGNOSTIC_SESSION = 0xF186,
     PID_AC_INPUT_CURRENT = 0x1654,
-    PID_AMBIENT_TEMPERATURE = 0x1F46,
+    PID_AMBIENT_TEMPERATURE = 0x1002,
+    PID_BATTERY_CAPACITY = 0x1D3E, 
     PID_BATTERY_CHARGING_POWER = 0x10D4,
     PID_BATTERY_COOLANT_TEMPERATURE = 0x1848,
     PID_BATTERY_HEATER_STATUS = 0x2806,
@@ -152,11 +156,13 @@ enum CANPID
     PID_BATTERY_SOC_BMS = 0x1F5B,
     PID_BATTERY_WATER_PUMP_SPEED = 0x110E,
     PID_BATTERY_VOLTAGE_AND_CURRENT = 0x1F9A,
+    PID_CABIN_TEMPERATURE = 0x1001,
     PID_CHARGER_INPUT_POWER = 0x161D,
     PID_CHARGING = 0x10D1,
     PID_CHARGING_CONTROL_STATUS = 0x1668,
     PID_CHARGING_LID = 0x1625,
     PID_CHARGING_VOLTAGE_TYPE = 0x161C,
+    PID_HVAC_SETPOINT = 0x1036,
     PID_ODOMETER = 0x1FA6,
     PID_PISW_STATUS = 0x1669,
     PID_READY_SIGNAL = 0x1076,

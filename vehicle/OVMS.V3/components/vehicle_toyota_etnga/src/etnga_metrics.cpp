@@ -75,7 +75,7 @@ void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale state transition
 // Data calculation functions
 float OvmsVehicleToyotaETNGA::CalculateAmbientTemperature(const std::string& data)
 {
-    return static_cast<float>(GetRxBInt8(data, 0)) - 40.0f;
+    return static_cast<float>(GetRxBInt16(data, 4)) / 100.0f;
 }
 
 float OvmsVehicleToyotaETNGA::CalculateBatteryChargingPower(const std::string& data)
@@ -302,8 +302,8 @@ void OvmsVehicleToyotaETNGA::SetBatteryTemperatureStatistics(const std::vector<f
     StandardMetrics.ms_v_bat_pack_tavg->SetValue(averageTemperature);
     StandardMetrics.ms_v_bat_pack_tstddev->SetValue(standardDeviation);
 
-    // There is no single battery temperature value, so I'm using the min Temperature
-    StandardMetrics.ms_v_bat_temp->SetValue(minTemperature);
+    // There is no single battery temperature value, so I'm using the average Temperature
+    StandardMetrics.ms_v_bat_temp->SetValue(averageTemperature);
 }
 
 void OvmsVehicleToyotaETNGA::SetBatteryVoltage(float voltage)
