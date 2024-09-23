@@ -25,6 +25,13 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
     } else if (StandardMetrics.ms_v_bat_12v_voltage->AsFloat() > (StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat()+0.2f)) {
         // Voltage is high. Maybe awake as well...
         ESP_LOGI(TAG, "Aux 12V has exceeded the threshold");
+        // Send a CAN reset.
+        esp_err_t result = m_can2->Reset();
+        if (result == ESP_OK) {
+            ESP_LOGI(TAG, "CAN bus reset successfully");
+        } else {
+            ESP_LOGE(TAG, "CAN bus reset failed, error code: %d", result);
+        }
         TransitionToAwakeState();
     }
 }
