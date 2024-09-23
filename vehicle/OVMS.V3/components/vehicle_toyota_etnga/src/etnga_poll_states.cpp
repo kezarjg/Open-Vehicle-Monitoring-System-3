@@ -25,6 +25,13 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
     } else if (StandardMetrics.ms_v_bat_12v_voltage->AsFloat() > (StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat()+0.2f)) {
         // Voltage is high. Maybe awake as well...
         ESP_LOGI(TAG, "Aux 12V has exceeded the threshold");
+        // Send a CAN reset.
+        esp_err_t result = m_can2->Reset();
+        if (result == ESP_OK) {
+            ESP_LOGI(TAG, "CAN bus reset successfully");
+        } else {
+            ESP_LOGE(TAG, "CAN bus reset failed, error code: %d", result);
+        }
         TransitionToAwakeState();
     }
 }
@@ -56,15 +63,15 @@ void OvmsVehicleToyotaETNGA::HandleChargingState()
 {
     std::string chargeState = StandardMetrics.ms_v_charge_state->AsString();
 
-    if (chargeState == "undefined") {
+    if (chargeState == "door_open") {
         if (StandardMetrics.ms_v_charge_pilot->AsBool()) {
-            // A charging cable was connected, update charge state to 'prepare'
-            SetChargeState("prepare");
+            // A charging cable was connected, update charge state to 'connected'
+            SetChargeState("connected");
         } else if (!StandardMetrics.ms_v_door_chargeport->AsBool()) {
             // Charge port door was closed or timeout, go back to 'Awake' state
             TransitionToAwakeState();
         }
-    } else if (chargeState == "prepare") {
+    } else if (chargeState == "connected") {
         if (StandardMetrics.ms_v_charge_inprogress->AsBool()) {
             // Charging session in progress, update charge state to 'charging'
             SetChargeState("charging");
@@ -74,21 +81,18 @@ void OvmsVehicleToyotaETNGA::HandleChargingState()
             RequestChargeType();    // TODO: Somestimes this reports 'CCS' incorrectly
 
         } else if (!StandardMetrics.ms_v_charge_pilot->AsBool()) {
-            // A charging cable was disconnected, update charge state to 'undefined'
-            SetChargeState("undefined");
+            // A charging cable was disconnected, update charge state to 'door_open'
+            SetChargeState("door_open");
         }
     } else if (chargeState == "charging") {
         if (!StandardMetrics.ms_v_charge_inprogress->AsBool()) {
-            // Charging session no longer in progress, update charge state to 'done'
-            SetChargeState("done");
+            // Charging session no longer in progress, update charge state to 'connected'
+            SetChargeState("connected");
         }
-    } else if (chargeState == "done") {
-        // Charging session was finished.
-        TransitionToAwakeState();
     } else {
         // Not sure how we got here, but go back to the start
         ESP_LOGW(TAG, "Unexpected charge state: %s", chargeState.c_str());
-        SetChargeState("undefined");
+        SetChargeState("door_open");
     }
 
     // TODO: Need to find a 'Charging Done' PID
@@ -116,6 +120,6 @@ void OvmsVehicleToyotaETNGA::TransitionToReadyState()
 void OvmsVehicleToyotaETNGA::TransitionToChargingState()
 {
     // Perform actions needed for transitioning to the CHARGING state
-    SetChargeState("undefined");
+    SetChargeState("door_open");
     SetPollState(PollState::CHARGING); // Update the state
 }
