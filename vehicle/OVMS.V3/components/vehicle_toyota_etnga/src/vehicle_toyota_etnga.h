@@ -66,6 +66,7 @@ private:
     float CalculateBatterySOCBMS(const std::string& data);
     std::vector<float> CalculateBatteryTemperatures(const std::string& data);
     float CalculateBatteryVoltage(const std::string& data);
+    float CalculateCabinTemperature(const std::string& data);
     float CalculateChargerInputPower(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
     bool CalculateChargingStatus(const std::string& data);
@@ -86,6 +87,7 @@ private:
     void SetBatteryTemperatures(const std::vector<float>& temperatures);
     void SetBatteryTemperatureStatistics(const std::vector<float>& temperatures);
     void SetBatteryVoltage(float voltage);
+    void SetCabinTemperature(float temperature);
     void SetChargeMode(int chargeMode);
     void SetChargeType(int chargeType);
     void SetChargeState(std::string chargeState);

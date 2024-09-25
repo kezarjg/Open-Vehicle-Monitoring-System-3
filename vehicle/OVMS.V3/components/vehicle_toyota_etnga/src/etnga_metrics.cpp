@@ -75,7 +75,7 @@ void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale state transition
 // Data calculation functions
 float OvmsVehicleToyotaETNGA::CalculateAmbientTemperature(const std::string& data)
 {
-    return static_cast<float>(GetRxBInt16(data, 4)) / 100.0f;
+    return static_cast<float>(GetRxBInt16(data, 0)) / 100.0f;
 }
 
 float OvmsVehicleToyotaETNGA::CalculateBatteryChargingPower(const std::string& data)
@@ -119,6 +119,11 @@ std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryTemperatures(const st
 float OvmsVehicleToyotaETNGA::CalculateBatteryVoltage(const std::string& data)
 {
     return static_cast<float>(GetRxBUint16(data, 2)) / 64.0f;
+}
+
+float OvmsVehicleToyotaETNGA::CalculateCabinTemperature(const std::string& data)
+{
+    return static_cast<float>(GetRxBInt16(data, 0)) / 100.0f;
 }
 
 float OvmsVehicleToyotaETNGA::CalculateChargerInputPower(const std::string& data)
@@ -171,7 +176,7 @@ void OvmsVehicleToyotaETNGA::SetAmbientTemperature(float temperature)
     if (temperature == -40.0f)
     {
         // Ignore -40 temperature
-        ESP_LOGD(TAG, "Ignoring invalid temperature value: %f", temperature);
+        ESP_LOGI(TAG, "Ignoring invalid temperature value: %f", temperature);
     }
     else
     {
@@ -211,7 +216,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryChargingPower(float power)
 
 void OvmsVehicleToyotaETNGA::SetBatteryCurrent(float current)
 {
-    ESP_LOGD(TAG, "Current: %f", current);
+    ESP_LOGV(TAG, "Current: %f", current);
     StandardMetrics.ms_v_bat_current->SetValue(current);
 }
 
@@ -249,11 +254,11 @@ void OvmsVehicleToyotaETNGA::SetBatterySOC(float soc)
     if (soc == 0.0 && StandardMetrics.ms_v_bat_soc->AsFloat() > 1.0)
     {
         // Ignore zero SOC if previousSOC was greater than 1
-        ESP_LOGD(TAG, "Ignoring invalid SOC value: %f", soc);
+        ESP_LOGI(TAG, "Ignoring invalid SOC value: %f", soc);
     }
     else
     {
-        ESP_LOGD(TAG, "SOC: %f", soc);
+        ESP_LOGV(TAG, "SOC: %f", soc);
         StandardMetrics.ms_v_bat_soc->SetValue(soc);
     }
 }
@@ -263,11 +268,11 @@ void OvmsVehicleToyotaETNGA::SetBatterySOCBMS(float soc)
     if (soc == 0.0 && m_v_bat_soc_bms->AsFloat() > 1.0)
     {
         // Ignore zero SOC if previousSOC was greater than 1
-        ESP_LOGD(TAG, "Ignoring invalid SOC value: %f", soc);
+        ESP_LOGI(TAG, "Ignoring invalid SOC value: %f", soc);
     }
     else
     {
-        ESP_LOGD(TAG, "SOC BMS: %f", soc);
+        ESP_LOGV(TAG, "SOC BMS: %f", soc);
         m_v_bat_soc_bms->SetValue(soc);
     }
 }
@@ -308,7 +313,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryTemperatureStatistics(const std::vector<f
 
 void OvmsVehicleToyotaETNGA::SetBatteryVoltage(float voltage)
 {
-    ESP_LOGD(TAG, "Voltage: %f", voltage);
+    ESP_LOGV(TAG, "Voltage: %f", voltage);
     StandardMetrics.ms_v_bat_voltage->SetValue(voltage);
 }
 
@@ -319,6 +324,20 @@ void OvmsVehicleToyotaETNGA::SetChargeMode(int chargeMode)
 
     ESP_LOGD(TAG, "Charge Mode: %s", chargeModeValue.c_str());
     StandardMetrics.ms_v_charge_mode->SetValue(chargeModeValue);
+}
+
+void OvmsVehicleToyotaETNGA::SetCabinTemperature(float temperature)
+{
+    if (temperature == -40.0f)
+    {
+        // Ignore -40 temperature
+        ESP_LOGI(TAG, "Ignoring invalid temperature value: %f", temperature);
+    }
+    else
+    {
+        ESP_LOGD(TAG, "Cabin Temperature: %f", temperature);
+        StandardMetrics.ms_v_env_cabintemp->SetValue(temperature);
+    }
 }
 
 void OvmsVehicleToyotaETNGA::SetChargeType(int chargeType)
@@ -375,19 +394,19 @@ void OvmsVehicleToyotaETNGA::SetChargerInputPower(float power)
 
 void OvmsVehicleToyotaETNGA::SetChargingDoorStatus(bool status)
 {
-    ESP_LOGD(TAG, "Charging Door Status: %s", status ? "Open" : "Closed");
+    ESP_LOGV(TAG, "Charging Door Status: %s", status ? "Open" : "Closed");
     StandardMetrics.ms_v_door_chargeport->SetValue(status);
 }
 
 void OvmsVehicleToyotaETNGA::SetChargingStatus(bool status)
 {
-    ESP_LOGD(TAG, "Charging Status: %s", status ? "Charging" : "Not Charging");
+    ESP_LOGV(TAG, "Charging Status: %s", status ? "Charging" : "Not Charging");
     StandardMetrics.ms_v_charge_inprogress->SetValue(status);
 }
 
 void OvmsVehicleToyotaETNGA::SetOdometer(float odometer)
 {
-    ESP_LOGD(TAG, "Odometer: %f", odometer);
+    ESP_LOGV(TAG, "Odometer: %f", odometer);
     StandardMetrics.ms_v_pos_odometer->SetValue(odometer);  // Set the odometer metric
 
     if (m_v_pos_trip_start->IsStale())
@@ -404,7 +423,7 @@ void OvmsVehicleToyotaETNGA::SetOdometer(float odometer)
 
 void OvmsVehicleToyotaETNGA::SetPISWStatus(bool status)
 {
-    ESP_LOGD(TAG, "Pilot Status: %s", status ? "Connected" : "Not Connected");
+    ESP_LOGV(TAG, "Pilot Status: %s", status ? "Connected" : "Not Connected");
     StandardMetrics.ms_v_charge_pilot->SetValue(status);
 }
 
@@ -421,7 +440,8 @@ void OvmsVehicleToyotaETNGA::SetPollState(int state)
 
 void OvmsVehicleToyotaETNGA::SetReadyStatus(bool status)
 {
-    ESP_LOGD(TAG, "Ready Status: %s", status ? "Ready" : "Not Ready");
+    //TODO: Disabled for development
+    //ESP_LOGD(TAG, "Ready Status: %s", status ? "Ready" : "Not Ready");
     StandardMetrics.ms_v_env_on->SetValue(status);
 }
 
@@ -453,18 +473,18 @@ void OvmsVehicleToyotaETNGA::SetShiftPosition(int position)
             break;
     }
 
-    ESP_LOGD(TAG, "Gear: %s", shiftPositionText);
+    ESP_LOGV(TAG, "Gear: %s", shiftPositionText);
     StandardMetrics.ms_v_env_gear->SetValue(gear);
 }
 
 void OvmsVehicleToyotaETNGA::SetVehicleSpeed(float speed)
 {
-    ESP_LOGD(TAG, "Speed: %f", speed);
+    ESP_LOGV(TAG, "Speed: %f", speed);
     StandardMetrics.ms_v_pos_speed->SetValue(speed);
 }
 
 void OvmsVehicleToyotaETNGA::SetVehicleVIN(std::string vin)
 {
-    ESP_LOGD(TAG, "VIN: %s", vin.c_str());
+    ESP_LOGV(TAG, "VIN: %s", vin.c_str());
     StandardMetrics.ms_v_vin->SetValue(std::move(vin));
 }

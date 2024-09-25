@@ -66,6 +66,11 @@ void OvmsVehicleToyotaETNGA::IncomingAirConditionerSystem(uint16_t pid)
             break;
         }
 
+        case PID_CABIN_TEMPERATURE: {
+            float temperature = CalculateCabinTemperature(m_rxbuf);
+            SetCabinTemperature(temperature);
+            break;
+        }
         // Add more cases for other PIDs if needed
 
         default:
