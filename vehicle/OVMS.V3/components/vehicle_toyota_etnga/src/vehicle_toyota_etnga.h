@@ -70,6 +70,7 @@ private:
     float CalculateChargerInputPower(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
     bool CalculateChargingStatus(const std::string& data);
+    float CalculateHVACSetpoint(const std::string& data);
     float CalculateOdometer(const std::string& data);
     bool CalculatePISWStatus(const std::string& data);
     bool CalculateReadyStatus(const std::string& data);
@@ -94,6 +95,7 @@ private:
     void SetChargerInputPower(float power);
     void SetChargingDoorStatus(bool status);
     void SetChargingStatus(bool status);
+    void SetHVACSetpoint(float temperature);
     void SetOdometer(float odometer);
     void SetPISWStatus(bool status);
     void SetPollState(int state);

@@ -80,7 +80,7 @@ float OvmsVehicleToyotaETNGA::CalculateAmbientTemperature(const std::string& dat
 
 float OvmsVehicleToyotaETNGA::CalculateBatteryChargingPower(const std::string& data)
 {
-    return static_cast<float>(GetRxBUint16(data,0)- 32768) / 100.0f ;
+    return static_cast<float>(GetRxBUint16(data, 0)- 32768) / 100.0f ;
 }
 
 float OvmsVehicleToyotaETNGA::CalculateBatteryCurrent(const std::string& data)
@@ -128,7 +128,7 @@ float OvmsVehicleToyotaETNGA::CalculateCabinTemperature(const std::string& data)
 
 float OvmsVehicleToyotaETNGA::CalculateChargerInputPower(const std::string& data)
 {
-    return static_cast<float>(GetRxBUint16(data,0)) * 5.0f / 1000.0f ;
+    return static_cast<float>(GetRxBUint16(data, 0)) * 5.0f / 1000.0f ;
 }
 
 bool OvmsVehicleToyotaETNGA::CalculateChargingDoorStatus(const std::string& data)
@@ -141,6 +141,26 @@ bool OvmsVehicleToyotaETNGA::CalculateChargingStatus(const std::string& data)
     // 0x00 = None
     // 0x03 = Charging / Discharging Mode
     return GetRxBInt8(data, 0);
+}
+
+float OvmsVehicleToyotaETNGA::CalculateHVACSetpoint(const std::string& data)
+{
+    int rawValue = GetRxBInt8(data, 0);
+    
+    // Calculate the HVAC setpoint based on the piecewise function
+    if (rawValue == 0) {
+        return 0.0f;
+    } else if (rawValue < 28) {
+        return (rawValue / 2.0f) + 15.5f;
+    } else if (rawValue < 55) {
+        return (rawValue - 1) * 5.0f / 9.0f;
+    } else if (rawValue == 55) {
+        return 100.0f;
+    } else if (rawValue < 100) {
+        return (rawValue / 2.0f) - 34.0f;
+    } else {
+        return (rawValue - 74) * 5.0f / 9.0f;
+    }
 }
 
 float OvmsVehicleToyotaETNGA::CalculateOdometer(const std::string& data)
@@ -180,7 +200,7 @@ void OvmsVehicleToyotaETNGA::SetAmbientTemperature(float temperature)
     }
     else
     {
-        ESP_LOGD(TAG, "Ambient Temperature: %f", temperature);
+        ESP_LOGV(TAG, "Ambient Temperature: %f", temperature);
         StandardMetrics.ms_v_env_temp->SetValue(temperature);
     }
 }
@@ -222,7 +242,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryCurrent(float current)
 
 void OvmsVehicleToyotaETNGA::SetBatteryPower(float power)
 {
-    ESP_LOGD(TAG, "Battery Power: %f", power);
+    ESP_LOGV(TAG, "Battery Power: %f", power);
     StandardMetrics.ms_v_bat_power->SetValue(power);
 
     float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
@@ -234,7 +254,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryPower(float power)
 
     const float energy = power * hoursSinceLastUpdate;
 
-    ESP_LOGD(TAG, "Battery Energy: %f kWh", energy);
+    ESP_LOGV(TAG, "Battery Energy: %f kWh", energy);
 
     if (power > 0)
     {
@@ -319,10 +339,9 @@ void OvmsVehicleToyotaETNGA::SetBatteryVoltage(float voltage)
 
 void OvmsVehicleToyotaETNGA::SetChargeMode(int chargeMode)
 {
-
     std::string chargeModeValue = (chargeMode == 0x00) ? "Standard" : "Performance";
 
-    ESP_LOGD(TAG, "Charge Mode: %s", chargeModeValue.c_str());
+    ESP_LOGV(TAG, "Charge Mode: %s", chargeModeValue.c_str());
     StandardMetrics.ms_v_charge_mode->SetValue(chargeModeValue);
 }
 
@@ -335,7 +354,7 @@ void OvmsVehicleToyotaETNGA::SetCabinTemperature(float temperature)
     }
     else
     {
-        ESP_LOGD(TAG, "Cabin Temperature: %f", temperature);
+        ESP_LOGV(TAG, "Cabin Temperature: %f", temperature);
         StandardMetrics.ms_v_env_cabintemp->SetValue(temperature);
     }
 }
@@ -404,6 +423,12 @@ void OvmsVehicleToyotaETNGA::SetChargingStatus(bool status)
     StandardMetrics.ms_v_charge_inprogress->SetValue(status);
 }
 
+void OvmsVehicleToyotaETNGA::SetHVACSetpoint(float temperature)
+{
+    ESP_LOGV(TAG, "HVAC Setpoint: %f", temperature);
+    StandardMetrics.ms_v_env_cabinsetpoint->SetValue(temperature);
+}
+
 void OvmsVehicleToyotaETNGA::SetOdometer(float odometer)
 {
     ESP_LOGV(TAG, "Odometer: %f", odometer);
@@ -440,8 +465,7 @@ void OvmsVehicleToyotaETNGA::SetPollState(int state)
 
 void OvmsVehicleToyotaETNGA::SetReadyStatus(bool status)
 {
-    //TODO: Disabled for development
-    //ESP_LOGD(TAG, "Ready Status: %s", status ? "Ready" : "Not Ready");
+    ESP_LOGV(TAG, "Ready Status: %s", status ? "Ready" : "Not Ready");
     StandardMetrics.ms_v_env_on->SetValue(status);
 }
 
