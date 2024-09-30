@@ -64,7 +64,7 @@ OvmsVehicleToyotaETNGA::OvmsVehicleToyotaETNGA()
     RegisterCanBus(2, CAN_MODE_ACTIVE, CAN_SPEED_500KBPS);
 
     // Set polling state
-    PollSetState(PollState::SLEEP);
+    PollSetState(PollState::AWAKE);
 
     // Set polling PID list
     PollSetPidList(m_can2, obdii_polls);
