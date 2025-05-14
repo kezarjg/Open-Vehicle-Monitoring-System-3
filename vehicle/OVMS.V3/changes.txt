@@ -1,6 +1,101 @@
 Open Vehicle Monitor System v3 - Change log
 
 ????-??-?? ???  ???????  OTA release
+- Smart EQ 453:
+    TPMS pressure alert settings at Features
+    add information commads xsq climate|counter|mtdata|reset|start|total
+- Nissan Leaf:
+    ZE1 inital release
+    Fix: Poll state not set to off when charging stopped by OVMS
+    Enh: SOH_instrument now float not int to support ZE1 instrument values 
+    Enh: Copy v.b.p.temp.max to v.b.temp so that max battery temp displays in app
+- Smart EQ 453:
+    DDT4all simple support, a full List of commands at www.smart-EMOTION.de
+- VW e-Up (OBD): decode & display battery cell level health status & battery module
+    health history, provide v.b.capacity (net capacity in kWh)
+  New metrics:
+    xvu.b.c.soh               -- Array: SOH [%] of each HV battery cell
+    xvu.b.hist.soh.mod.<NN>   -- Array: SOH [%] history of each battery module (NN=01…14/17)
+  New web page:
+    /xvu/battsoh          -- Battery pack & cell SOH info
+- Smart EQ 453:
+    add timebased Pre-heat/cool Control 
+      - can set at Website -> Smart ED/EQ 4.Gen -> Climate/Heater 
+      - at App Features #4: on = 1 off = 2, #5 time like 05:15 = 515, #6 5/10/15 Minutes = 0/1/2
+    add GPS powersaving mode at parking
+    add 12V alert raised, the car starts the 12V charging process for 15 Minutes
+    add Network type switch, option to lock LTE only. Needed, when the Provider has no Datastream at GSM
+- CAN: add error flag decoding (included in can status output)
+  New commands:
+    can <bus> explain [errorflags]    -- Decode error flags into human readable text 
+- DBC Files
+  Add unit support
+  Add extended signals/multiplexing support
+  Add support for enum values.
+- OVMS Server v3: Ability to define less frequent MQTT communication to save data charges and power
+  Events:
+    Excludes clock.* events from being published at the start of every minute.
+  New configs:
+    [server.v3] events.legacy_topic  -- Whether to publish every event on the legacy /event topic as well as
+                                        the MQTT-style topic. Defaults to true to preserve existing behaviour.
+                                        Recommended to set to false if you don't use the legacy topic.
+    [server.v3] updatetime.keepalive -- Max number of seconds to allow the MQTT connection to be idle before
+                                        sending PINGREQ. Should be set slightly shorter than the network's
+                                        NAT timeout and the timeout of your MQTT server. If these are unknown
+                                        you can use trial and error. Symptoms of keepalive being too high are
+                                        a lack of metric updates after a certain point, or "Disconnected from
+                                        OVMS Server V3" appearing in the log. In previous releases this used
+                                        the Mongoose default of 60. New default value 1740 aligns with
+                                        observed Hologram timeout of 1800.
+- Metrics
+  add new Standard Metrics
+    v.b.capacity          -- Main battery usable capacity [kWh]
+    v.c.timestamp         -- Date & time of last charge end [DateLocal]
+    v.g.timestamp         -- Date & time of last generation end [DateLocal]
+- Server V2:
+  add to MsgStat
+    v.c.kwh.grid          -- Energy drawn from grid during running session [kWh]
+    v.c.kwh.grid.total    -- Energy drawn from grid total (life time) [kWh]
+    v.c.timestamp         -- Date & time of last charge end [seconds]
+    v.b.capacity          -- Main battery usable capacity [kWh]
+  add to MsgFirmware
+    m.net.mdm.mode        -- Cellular connection mode and status [LTE,Online]
+  add to MsgGen
+    v.g.timestamp         -- Date & time of last generation end [seconds]
+- Vehicle: keep charge time as long as chargeport active
+- Vehicle: Implement events and scripting for Auxillary batttery monitor
+  New events:
+    vehicle.aux.12v.normal
+    vehicle.aux.12v.charging
+    vehicle.aux.12v.blip
+    vehicle.aux.12v.dip
+    vehicle.aux.12v.charging.blip
+    vehicle.aux.12v.charging.dip
+    vehicle.aux.12v.low
+  New commands:
+    vehicle aux [status]
+    vehicle aux monitor [status]
+    vehicle aux monitor enable [[low-threshold] [charging-threshold]]
+    vehicle aux monitor disable
+  Duktape Support:
+    OvmsVehicle.AuxMon.Enable
+    OvmsVehicle.AuxMon.Disable
+    OvmsVehicle.AuxMon.Status
+
+- Cellular: GPS run state signals added.
+  New events:
+    system.modem.gpsstart       -- GPS has started
+    system.modem.gpsstop        -- GPS has stopped
+- Cellular: receive & send SMS, forward SMS & USSD to user. Note: no system notification
+  support (and not planned), this is primarily meant to forward provider info only
+  sent via SMS or USSD or expected to be received via SMS.
+  New events:
+    system.modem.received.sms
+  New notifications:
+    [info] modem.received.sms
+    [info] modem.received.ussd
+  New commands:
+    cellular sendsms <receiver> <text> [<text>…]
 - MG:
   Add new vehicle MG4
   Supports Short, Medium and Long Range Variants
@@ -11,6 +106,11 @@ Open Vehicle Monitor System v3 - Change log
     add TPMS pressure
     add Internal Temp
     add Doors status
+    add Charging Metrics
+    add BMS Temperatures
+    add Charging metrics
+    add option to change TMPS Sensors position
+    add option for IOS users to display TMPS values
 - Support for completion in vfs commands.
 - Separate Polling from the Vehicle implementation
   New commands:
@@ -35,6 +135,8 @@ Open Vehicle Monitor System v3 - Change log
     OvmsMetrics.IsStale
     OmvsMetrics.IsFresh
     OvmsMetrics.Age
+
+
 2024-03-23 MB   3.3.004  OTA release
 - MG EV Added support for MG5 (2020 - 2023) Short Range
 - MG EV Added support for MG ZS EV (2023 - ) and MG5 (2020 - 2023) Long Range

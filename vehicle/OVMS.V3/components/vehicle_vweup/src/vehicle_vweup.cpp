@@ -29,7 +29,7 @@
 #include <string>
 static const char *TAG = "v-vweup";
 
-#define VERSION "0.23.1"
+#define VERSION "0.25.1"
 
 #include <stdio.h>
 #include <string>
@@ -296,7 +296,7 @@ OvmsVehicleVWeUp::vehicle_command_t OvmsVehicleVWeUp::ProcessMsgCommand(string& 
  */
 OvmsVehicleVWeUp::vehicle_command_t OvmsVehicleVWeUp::MsgCommandCA(std::string &result, int command, const char* args)
 {
-  if (command == CMD_SetChargeAlerts)
+  if (command == CMD_SetChargeAlerts && args && *args)
   {
     std::istringstream sentence(args);
     std::string token;
@@ -326,7 +326,7 @@ OvmsVehicleVWeUp::vehicle_command_t OvmsVehicleVWeUp::MsgCommandCA(std::string &
   return Success;
 }
   
-  void OvmsVehicleVWeUp::ConfigChanged(OvmsConfigParam *param)
+void OvmsVehicleVWeUp::ConfigChanged(OvmsConfigParam *param)
 {
   if (param && param->GetName() != "xvu") {
     return;
@@ -565,10 +565,12 @@ void OvmsVehicleVWeUp::SetSOH(float soh_new)
 {
   float soh_fct    = soh_new / 100;
   float cap_ah     = soh_fct * ((vweup_modelyear > 2019) ? 120.0f :  50.0f);
+  float cap_kwh    = soh_fct * ((vweup_modelyear > 2019) ? 32.3f  :  16.4f);
   float range_full = soh_fct * ((vweup_modelyear > 2019) ? 260.0f : 160.0f);
   float soc_fct    = StdMetrics.ms_v_bat_soc->AsFloat() / 100;
   StdMetrics.ms_v_bat_soh->SetValue(soh_new);
   StdMetrics.ms_v_bat_cac->SetValue(cap_ah);
+  StdMetrics.ms_v_bat_capacity->SetValue(cap_kwh);
   StdMetrics.ms_v_bat_range_full->SetValue(range_full);
   StdMetrics.ms_v_bat_range_ideal->SetValue(range_full * soc_fct);
 }

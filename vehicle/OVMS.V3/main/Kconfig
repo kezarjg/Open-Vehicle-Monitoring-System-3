@@ -63,10 +63,14 @@ config OVMS_HW_ASYNC_QUEUE_SIZE
 
 config OVMS_HW_EVENT_QUEUE_SIZE
     int "EVENT queue size"
-    default 20
+    range 80 200
+    default 100
     depends on OVMS
     help
-        The size of the EVENT queue.
+        The size of the EVENT job queue. Att: this needs to be large enough to
+        allow all event registrations during boot and all deregistrations during
+        shutdown. If too small, the system will not be able to boot/reboot,
+        aborting with a "queue overflow" log entry.
 
 config OVMS_HW_NETMANAGER_QUEUE_SIZE
     int "NETMANAGER queue size"
@@ -412,14 +416,14 @@ config OVMS_VEHICLE_RENAULTZOE
     help
         Enable to include support for Renault Zoe vehicles.
 
-config OVMS_VEHICLE_RENAULTZOE_PH2_OBD
-    bool "Include support for Renault Zoe Phase2 vehicles (OBD port version)"
+config OVMS_VEHICLE_RENAULTZOE_PH2
+    bool "Include support for Renault Zoe Phase2 vehicles"
     default y
     depends on OVMS
     depends on OVMS_COMP_CANOPEN
     depends on OVMS_COMP_POLLER
     help
-        Enable to include support for Renault Zoe Phase 2 vehicles (OBD port version).
+        Enable to include support for Renault Zoe Phase 2 vehicles.
         
 config OVMS_VEHICLE_MAXED3
     bool "Include support for Maxus eDeliver3 vehicle"
