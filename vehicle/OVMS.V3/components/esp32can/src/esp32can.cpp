@@ -378,12 +378,18 @@ esp32can::esp32can(const char* name, int txpin, int rxpin)
   m_rxpin = (gpio_num_t)rxpin;
   MyESP32can = this;
 
-  // Due to startup order, we can't talk to MAX7317 during
-  // initialisation. So, we'll just enter reset mode for the
-  // on-chip controller, and let housekeeping power us down
-  // after startup.
   m_powermode = Off;
   m_tx_abort = false;
+
+#if defined(CONFIG_OVMS_HW_REMAP_GPIO) && defined(ESP32CAN_PIN_RS)
+  // Configure the RS PIN of the CAN transceiver
+  gpio_set_direction((gpio_num_t)ESP32CAN_PIN_RS,GPIO_MODE_OUTPUT);
+#endif // defined(CONFIG_OVMS_HW_REMAP_GPIO) && defined(ESP32CAN_PIN_RS)
+
+  MyESP32can->SetTransceiverMode(CAN_MODE_LISTEN);
+
+  // Enter controller reset mode:
+  ESP_LOGD(TAG, "Reset mode state on init: %d", MODULE_ESP32CAN->MOD.B.RM);
   MODULE_ESP32CAN->MOD.B.RM = 1;
 
   // Launch ISR allocator task on core 0:
@@ -500,6 +506,7 @@ esp_err_t esp32can::InitController()
 
 esp_err_t esp32can::Start(CAN_mode_t mode, CAN_speed_t speed)
   {
+  // Check speed availability on current hardware:
   switch (speed)
     {
     case CAN_SPEED_33KBPS:
@@ -516,15 +523,16 @@ esp_err_t esp32can::Start(CAN_mode_t mode, CAN_speed_t speed)
       break;
     }
 
+  // Restarting an already started bus (e.g. for mode change)?
+  if (m_mode != CAN_MODE_OFF)
+    {
+    Stop();
+    }
+
   canbus::Start(mode, speed);
 
   m_mode = mode;
   m_speed = speed;
-
-#ifdef CONFIG_OVMS_COMP_MAX7317
-  // Power up the matching SN65 transciever
-  MyPeripherals->m_max7317->Output(MAX7317_CAN1_EN, 0);
-#endif // #ifdef CONFIG_OVMS_COMP_MAX7317
 
   // Enable module
   DPORT_SET_PERI_REG_MASK(DPORT_PERIP_CLK_EN_REG, DPORT_CAN_CLK_EN);
@@ -559,6 +567,8 @@ esp_err_t esp32can::Start(CAN_mode_t mode, CAN_speed_t speed)
     return err;
     }
 
+  MyESP32can->SetTransceiverMode(mode);
+
   // And record that we are powered on
   pcp::SetPowerMode(On);
 
@@ -574,6 +584,8 @@ esp_err_t esp32can::Stop()
   // Clear TX queue
   xQueueReset(m_txqueue);
 
+  MyESP32can->SetTransceiverMode(CAN_MODE_LISTEN);
+
   ESP32CAN_ENTER_CRITICAL();
 
   // Abort TX
@@ -586,11 +598,6 @@ esp_err_t esp32can::Stop()
 
   ESP32CAN_EXIT_CRITICAL();
 
-#ifdef CONFIG_OVMS_COMP_MAX7317
-  // Power down the matching SN65 transciever
-  MyPeripherals->m_max7317->Output(MAX7317_CAN1_EN, 1);
-#endif // #ifdef CONFIG_OVMS_COMP_MAX7317
-
   // And record that we are powered down
   pcp::SetPowerMode(Off);
   m_mode = CAN_MODE_OFF;
@@ -598,6 +605,25 @@ esp_err_t esp32can::Stop()
   return ESP_OK;
   }
 
+/**
+ * SetTransceiverMode: enable or disable write driver of transceiver
+ * Pin RS of SN65 to 0 or 1 
+ * 
+ */
+void esp32can::SetTransceiverMode(CAN_mode_t mode)
+  {
+  int rs_state = (mode == CAN_MODE_ACTIVE) ? 0 : 1;
+  
+#ifdef CONFIG_OVMS_COMP_MAX7317
+  // Enable TX driver of matching SN65 transceiver
+  MyPeripherals->m_max7317->Output(MAX7317_CAN1_EN, rs_state);
+#endif // #ifdef CONFIG_OVMS_COMP_MAX7317
+
+#if defined(CONFIG_OVMS_HW_REMAP_GPIO) && defined(ESP32CAN_PIN_RS)
+  // Enable TX driver of matching SN65 transceiver
+  gpio_set_level((gpio_num_t)ESP32CAN_PIN_RS, rs_state);
+#endif // defined(CONFIG_OVMS_HW_REMAP_GPIO) && defined(ESP32CAN_PIN_RS)
+  }
 
 /**
  * ChangeResetMode: enter/leave reset mode with verification & timeout

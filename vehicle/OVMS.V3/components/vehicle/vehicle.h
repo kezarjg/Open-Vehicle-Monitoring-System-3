@@ -272,6 +272,9 @@ class OvmsVehicle : public InternalRamAllocated
       }
     OvmsPoller::VehicleSignal *GetPollerSignal();
 
+    int PollSingleRequest(canbus*  bus, uint32_t txid, uint32_t rxid,
+                      uint8_t polltype, uint16_t pid, const std::string &payload, std::string& response,
+                      int timeout_ms=3000, uint8_t protocol=ISOTP_STD);
     int PollSingleRequest(canbus* bus, uint32_t txid, uint32_t rxid,
                       std::string request, std::string& response,
                       int timeout_ms=3000, uint8_t protocol=ISOTP_STD);
@@ -347,6 +350,13 @@ class OvmsVehicle : public InternalRamAllocated
     int m_last_parktime;                    // duration of current/most recent parking period [s]
     int m_last_chargetime;                  // duration of current/most recent charge [s]
     int m_last_gentime;                     // duration of current/most recent generator run [s]
+
+    // Scheduled schedulede state tracking
+    int m_precondition_last_triggered_day;    // Last day schedule was triggered (0-6, Sun-Sat, -1=never)
+    int m_precondition_last_triggered_hour;   // Last hour schedule was triggered (0-23, -1=never)
+    int m_precondition_last_triggered_min;    // Last minute schedule was triggered (0-59, -1=never)
+    bool m_climate_restart;                   // Climate duration restart
+    int m_climate_restart_ticker;             // Ticker to suppress repeated climate starts
 
     float m_drive_startsoc;                 // SOC at drive start (vehicle.on)
     float m_drive_startrange;               // Range estimation at drive start (vehicle.on)
@@ -428,6 +438,12 @@ class OvmsVehicle : public InternalRamAllocated
     virtual void NotifiedVehicleChargePilotOff() {}
     virtual void NotifiedVehicleChargeTimermodeOn() {}
     virtual void NotifiedVehicleChargeTimermodeOff() {}
+    virtual void NotifiedVehicleGenStart() {}
+    virtual void NotifiedVehicleGenStop() {}
+    virtual void NotifiedVehicleGenPilotOn() {}
+    virtual void NotifiedVehicleGenPilotOff() {}
+    virtual void NotifiedVehicleGenTimermodeOn() {}
+    virtual void NotifiedVehicleGenTimermodeOff() {}
     virtual void NotifiedVehicleAux12vOn() {}
     virtual void NotifiedVehicleAux12vOff() {}
     virtual void NotifiedVehicleCharge12vStart() {}
@@ -514,11 +530,15 @@ class OvmsVehicle : public InternalRamAllocated
 #endif // #ifdef CONFIG_OVMS_COMP_TPMS
 
   public:
-    virtual std::vector<std::string> GetTpmsLayout();
+    virtual std::vector<std::string> GetTpmsLayout();       // override to customize TPMS wheel layout
+    virtual std::vector<std::string> GetTpmsLayoutNames();  // override to customize TPMS wheel layout
+    virtual bool UsesTpmsSensorMapping() { return false; }  // return true if using m_tpms_index[]
 
   protected:
     uint32_t m_tpms_lastcheck;              // monotonictime of last TPMS alert check
     std::vector<short> m_tpms_laststate;    // last TPMS alert state for change detection
+    std::vector<int> m_tpms_index;          // TPMS wheel sensor index mapping via config vehicle tpms.<wheelcode>
+                                            // (corresponding to GetTpmsLayout(), default FL=0,FR=1,RL=2,RR=3)
 
   protected:
     virtual void NotifyTpmsAlerts();
@@ -527,6 +547,9 @@ class OvmsVehicle : public InternalRamAllocated
     virtual vehicle_command_t CommandStat(int verbosity, OvmsWriter* writer);
     virtual vehicle_command_t CommandStatTrip(int verbosity, OvmsWriter* writer);
     virtual vehicle_command_t ProcessMsgCommand(std::string &result, int command, const char* args);
+    
+    // Scheduled schedulede
+    virtual void CheckPreconditionSchedule();
 
   public:
     virtual bool SetFeature(int key, const char* value);
@@ -715,9 +738,18 @@ class OvmsVehicleFactory
     static void vehicle_status(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
     static void vehicle_wakeup(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
     static void vehicle_homelink(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
-    static void vehicle_climatecontrol(int verbosity, OvmsWriter* writer, bool on);
+
+    static void vehicle_climatecontrol(int verbosity, OvmsWriter* writer, bool on);    
     static void vehicle_climatecontrol_on(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
     static void vehicle_climatecontrol_off(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
+    static void vehicle_climate_schedule_set(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
+    static void vehicle_climate_schedule_list(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
+    static void vehicle_climate_schedule_clear(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
+    static void vehicle_climate_schedule_copy(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
+    static void vehicle_climate_schedule_enable(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
+    static void vehicle_climate_schedule_disable(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
+    static void vehicle_climate_schedule_status(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
+
     static void vehicle_lock(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
     static void vehicle_unlock(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
     static void vehicle_valet(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
@@ -734,6 +766,7 @@ class OvmsVehicleFactory
     static void vehicle_charge_cooldown(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
     static void vehicle_stat(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
     static void vehicle_stat_trip(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
+
     static void bms_status(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
     static void bms_reset(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);
     static void bms_alerts(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv);

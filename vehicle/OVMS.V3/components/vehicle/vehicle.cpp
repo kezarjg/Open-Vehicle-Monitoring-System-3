@@ -67,7 +67,7 @@ OvmsVehicleFactory::OvmsVehicleFactory()
   m_currentvehicletype.clear();
 
   MyEvents.RegisterEvent(TAG,"system.shuttingdown",std::bind(&OvmsVehicleFactory::EventSystemShuttingDown, this, _1, _2));
-
+  
   OvmsCommand* cmd_vehicle = MyCommandApp.RegisterCommand("vehicle","Vehicle framework", vehicle_status, "", 0, 0, false);
   cmd_vehicle->RegisterCommand("module","Set (or clear) vehicle module",vehicle_module,"<type>",0,1,true,vehicle_validate);
   cmd_vehicle->RegisterCommand("list","Show list of available vehicle modules",vehicle_list);
@@ -78,6 +78,16 @@ OvmsVehicleFactory::OvmsVehicleFactory()
   OvmsCommand* cmd_climate = MyCommandApp.RegisterCommand("climatecontrol","(De)Activate Climate Control");
   cmd_climate->RegisterCommand("on","Activate Climate Control",vehicle_climatecontrol_on);
   cmd_climate->RegisterCommand("off","Deactivate Climate Control",vehicle_climatecontrol_off);
+  // Add schedule subcommand
+  OvmsCommand* cmd_climate_schedule = cmd_climate->RegisterCommand("schedule", "Climate control schedules");
+  cmd_climate_schedule->RegisterCommand("set", "Set schedule for a day", vehicle_climate_schedule_set, "<day> <times>", 2, 2);
+  cmd_climate_schedule->RegisterCommand("list", "List all configured schedules", vehicle_climate_schedule_list);
+  cmd_climate_schedule->RegisterCommand("clear", "Clear schedule for day", vehicle_climate_schedule_clear, "<day|all>", 1, 1);
+  cmd_climate_schedule->RegisterCommand("copy", "Copy schedule from one day to others", vehicle_climate_schedule_copy, "<source-day> <target-days>", 2, 2);
+  cmd_climate_schedule->RegisterCommand("enable", "Enable scheduled precondition", vehicle_climate_schedule_enable);
+  cmd_climate_schedule->RegisterCommand("disable", "Disable scheduled precondition", vehicle_climate_schedule_disable);
+  cmd_climate_schedule->RegisterCommand("status", "Show schedule status", vehicle_climate_schedule_status);
+
   MyCommandApp.RegisterCommand("lock","Lock vehicle",vehicle_lock,"<pin>",1,1);
   MyCommandApp.RegisterCommand("unlock","Unlock vehicle",vehicle_unlock,"<pin>",1,1);
   MyCommandApp.RegisterCommand("valet","Activate valet mode",vehicle_valet,"<pin>",1,1);
@@ -320,6 +330,596 @@ const char* OvmsVehicleFactory::ActiveVehicleShortName()
   return m_currentvehicle ? m_currentvehicle->VehicleShortName() : "";
   }
 
+void OvmsVehicleFactory::vehicle_climate_schedule_set(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv)
+{
+  OvmsVehicle* current = MyVehicleFactory.ActiveVehicle();
+  if (!current)
+  {
+    writer->puts("Error: No vehicle module loaded");
+    return;
+  }
+
+  const char* day = argv[0];
+  const char* times = argv[1];
+
+  // Validate day
+  const char* valid_days[] = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"};
+  bool day_valid = false;
+  for (int i = 0; i < 7; i++)
+  {
+    if (strcasecmp(day, valid_days[i]) == 0)
+    {
+      day_valid = true;
+      break;
+    }
+  }
+
+  if (!day_valid)
+  {
+    writer->puts("ERROR: Invalid day. Use: mon, tue, wed, thu, fri, sat, sun");
+    return;
+  }
+
+  // Validate and normalize time format: HH:MM[/duration][,HH:MM[/duration],...]
+  std::string time_str(times);
+  std::string normalized_schedule;
+  size_t start = 0;
+  size_t end = time_str.find(',');
+
+  while (start != std::string::npos)
+  {
+    std::string entry = (end == std::string::npos) ?
+                        time_str.substr(start) :
+                        time_str.substr(start, end - start);
+
+    // Split by '/' for time/duration
+    size_t slash_pos = entry.find('/');
+    std::string time_part = (slash_pos != std::string::npos) ?
+                            entry.substr(0, slash_pos) : entry;
+    
+    // Validate time part (HH:MM or H:MM)
+    size_t colon_pos = time_part.find(':');
+    if (colon_pos == std::string::npos || colon_pos == 0)
+    {
+      writer->printf("ERROR: Invalid time format '%s'. Use HH:MM or H:MM\n", entry.c_str());
+      return;
+    }
+
+    int hour = atoi(time_part.substr(0, colon_pos).c_str());
+    int min = atoi(time_part.substr(colon_pos + 1).c_str());
+
+    if (hour < 0 || hour > 23 || min < 0 || min > 59)
+    {
+      writer->printf("ERROR: Invalid time '%s'. Hour must be 0-23, minute must be 0-59\n", time_part.c_str());
+      return;
+    }
+
+    // Validate duration if present
+    int duration = -1;
+    if (slash_pos != std::string::npos)
+    {
+      std::string duration_str = entry.substr(slash_pos + 1);
+      duration = atoi(duration_str.c_str());
+      if (duration < 5 || duration > 30)
+      {
+        writer->printf("ERROR: Invalid duration '%s'. Use 5 to 30 minutes\n", duration_str.c_str());
+        return;
+      }
+    }
+
+    // Normalize to HH:MM[/duration] format
+    char normalized_entry[16];
+    if (duration >= 0)
+    {
+      snprintf(normalized_entry, sizeof(normalized_entry), "%02d:%02d/%d", hour, min, duration);
+    }
+    else
+    {
+      snprintf(normalized_entry, sizeof(normalized_entry), "%02d:%02d", hour, min);
+    }
+
+    // Append to normalized schedule
+    if (!normalized_schedule.empty())
+      normalized_schedule += ",";
+    normalized_schedule += normalized_entry;
+
+    // Move to next entry
+    if (end == std::string::npos)
+      break;
+    start = end + 1;
+    end = time_str.find(',', start);
+  }
+
+  // Save normalized schedule to config
+  std::string config_key = std::string("climate.schedule.") + day;
+  MyConfig.SetParamValue("vehicle", config_key.c_str(), normalized_schedule.c_str());
+
+  writer->printf("Climate control schedule set for %s: %s\n", day, normalized_schedule.c_str());
+  ESP_LOGI(TAG, "Climate control schedule set for %s: %s", day, normalized_schedule.c_str());
+}
+
+void OvmsVehicleFactory::vehicle_climate_schedule_list(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv)
+{
+  const char* day_names[] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
+  const char* day_full[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+
+  writer->puts("Climate control schedules:");
+  writer->puts("==========================");
+
+  bool has_schedules = false;
+
+  for (int i = 0; i < 7; i++)
+  {
+    std::string config_key = std::string("climate.schedule.") + day_names[i];
+    std::string schedule = MyConfig.GetParamValue("vehicle", config_key.c_str());
+    
+    if (!schedule.empty())
+    {
+      has_schedules = true;
+      writer->printf("%-10s: %s\n", day_full[i], schedule.c_str());
+    }
+  }
+
+  if (!has_schedules)
+  {
+    writer->puts("No schedules configured.");
+  }
+
+  // Show next scheduled event
+  time_t rawtime;
+  struct tm* timeinfo;
+  time(&rawtime);
+  timeinfo = localtime(&rawtime);
+
+  if (timeinfo != NULL && has_schedules)
+  {
+    int current_day = timeinfo->tm_wday;
+    int current_hour = timeinfo->tm_hour;
+    int current_min = timeinfo->tm_min;
+    int current_total_min = current_day * 24 * 60 + current_hour * 60 + current_min;
+
+    int next_day = -1;
+    int next_hour = -1;
+    int next_min = -1;
+    int next_duration = 0;
+    int next_total_min = current_total_min + 10000;
+
+    for (int day_offset = 0; day_offset < 7; day_offset++)
+    {
+      int check_day = (current_day + day_offset) % 7;
+      int day_index = check_day;
+
+      std::string config_key = std::string("climate.schedule.") + day_names[day_index];
+      std::string schedule = MyConfig.GetParamValue("vehicle", config_key.c_str());
+      
+      if (!schedule.empty())
+      {
+        size_t start = 0;
+        size_t end = schedule.find(',');
+
+        while (start != std::string::npos)
+        {
+          std::string entry = (end == std::string::npos) ?
+                              schedule.substr(start) :
+                              schedule.substr(start, end - start);
+
+          size_t slash_pos = entry.find('/');
+          std::string time_part = (slash_pos != std::string::npos) ?
+                                  entry.substr(0, slash_pos) : entry;
+          
+          size_t colon_pos = time_part.find(':');
+          if (colon_pos != std::string::npos && colon_pos > 0)
+          {
+            int hour = atoi(time_part.substr(0, colon_pos).c_str());
+            int min = atoi(time_part.substr(colon_pos + 1).c_str());
+            int duration = 0;
+            
+            if (slash_pos != std::string::npos)
+            {
+              duration = atoi(entry.substr(slash_pos + 1).c_str());
+            }
+
+            int schedule_total_min = check_day * 24 * 60 + hour * 60 + min;
+
+            if (schedule_total_min > current_total_min && schedule_total_min < next_total_min)
+            {
+              next_total_min = schedule_total_min;
+              next_day = check_day;
+              next_hour = hour;
+              next_min = min;
+              next_duration = duration;
+            }
+          }
+
+          if (end == std::string::npos)
+            break;
+          start = end + 1;
+          end = schedule.find(',', start);
+        }
+      }
+    }
+
+    if (next_day >= 0)
+    {
+      writer->puts("");
+      if (next_duration > 0)
+      {
+        writer->printf("Next scheduled: %s at %02d:%02d (%d min)\n",
+                     day_full[next_day], next_hour, next_min, next_duration);
+      }
+      else
+      {
+        writer->printf("Next scheduled: %s at %02d:%02d\n",
+                     day_full[next_day], next_hour, next_min);
+      }
+    }
+  }
+}
+
+void OvmsVehicleFactory::vehicle_climate_schedule_clear(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv)
+{
+  const char* day = argv[0];
+
+  if (strcasecmp(day, "all") == 0)
+  {
+    const char* day_names[] = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"};
+    for (int i = 0; i < 7; i++)
+    {
+      std::string config_key = std::string("climate.schedule.") + day_names[i];
+      MyConfig.DeleteInstance("vehicle", config_key.c_str());
+    }
+    writer->puts("All climate control schedules cleared");
+    ESP_LOGI(TAG, "All climate control schedules cleared");
+    return;
+  }
+
+  const char* valid_days[] = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"};
+  bool day_valid = false;
+  for (int i = 0; i < 7; i++)
+  {
+    if (strcasecmp(day, valid_days[i]) == 0)
+    {
+      day_valid = true;
+      break;
+    }
+  }
+
+  if (!day_valid)
+  {
+    writer->puts("ERROR: Invalid day. Use: mon, tue, wed, thu, fri, sat, sun, or 'all'");
+    return;
+  }
+
+  std::string config_key = std::string("climate.schedule.") + day;
+  MyConfig.DeleteInstance("vehicle", config_key.c_str());
+
+  writer->printf("Climate control schedule cleared for %s\n", day);
+  ESP_LOGI(TAG, "Climate control schedule cleared for %s", day);
+}
+
+void OvmsVehicleFactory::vehicle_climate_schedule_copy(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv)
+{
+  const char* source_day = argv[0];
+  const char* target_spec = argv[1];
+  
+  const char* valid_days[] = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"};
+  
+  // Validate source day
+  bool source_valid = false;
+  for (int i = 0; i < 7; i++)
+  {
+    if (strcasecmp(source_day, valid_days[i]) == 0)
+    {
+      source_valid = true;
+      break;
+    }
+  }
+  
+  if (!source_valid)
+  {
+    writer->puts("ERROR: Invalid source day. Use: mon, tue, wed, thu, fri, sat, sun");
+    return;
+  }
+  
+  // Get source schedule
+  std::string source_config_key = std::string("climate.schedule.") + source_day;
+  std::string source_schedule = MyConfig.GetParamValue("vehicle", source_config_key.c_str());
+  
+  if (source_schedule.empty())
+  {
+    writer->printf("ERROR: No schedule configured for %s\n", source_day);
+    return;
+  }
+  
+  // Parse target specification
+  std::vector<std::string> target_days;
+  std::string target_str(target_spec);
+  
+  // Check for range pattern (e.g., "tue-fri" or "mon-sun")
+  size_t dash_pos = target_str.find('-');
+  if (dash_pos != std::string::npos && dash_pos > 0 && dash_pos < target_str.length() - 1)
+  {
+    std::string start_day = target_str.substr(0, dash_pos);
+    std::string end_day = target_str.substr(dash_pos + 1);
+    
+    // Find start and end indices
+    int start_idx = -1;
+    int end_idx = -1;
+    for (int i = 0; i < 7; i++)
+    {
+      if (strcasecmp(start_day.c_str(), valid_days[i]) == 0)
+        start_idx = i;
+      if (strcasecmp(end_day.c_str(), valid_days[i]) == 0)
+        end_idx = i;
+    }
+    
+    if (start_idx < 0 || end_idx < 0)
+    {
+      writer->printf("ERROR: Invalid day range '%s'\n", target_spec);
+      return;
+    }
+    
+    // Add all days in range
+    if (start_idx <= end_idx)
+    {
+      for (int i = start_idx; i <= end_idx; i++)
+        target_days.push_back(valid_days[i]);
+    }
+    else
+    {
+      // Wrap around (e.g., fri-mon = fri, sat, sun, mon)
+      for (int i = start_idx; i < 7; i++)
+        target_days.push_back(valid_days[i]);
+      for (int i = 0; i <= end_idx; i++)
+        target_days.push_back(valid_days[i]);
+    }
+  }
+  else
+  {
+    // Parse comma-separated list
+    size_t start = 0;
+    size_t comma_pos = target_str.find(',');
+    
+    while (start != std::string::npos)
+    {
+      std::string day = (comma_pos == std::string::npos) ?
+                        target_str.substr(start) :
+                        target_str.substr(start, comma_pos - start);
+      
+      // Trim whitespace
+      size_t first = day.find_first_not_of(" \t");
+      size_t last = day.find_last_not_of(" \t");
+      if (first != std::string::npos && last != std::string::npos)
+        day = day.substr(first, last - first + 1);
+      
+      // Validate day
+      bool day_valid = false;
+      for (int i = 0; i < 7; i++)
+      {
+        if (strcasecmp(day.c_str(), valid_days[i]) == 0)
+        {
+          target_days.push_back(valid_days[i]);
+          day_valid = true;
+          break;
+        }
+      }
+      
+      if (!day_valid)
+      {
+        writer->printf("ERROR: Invalid target day '%s'\n", day.c_str());
+        return;
+      }
+      
+      if (comma_pos == std::string::npos)
+        break;
+      start = comma_pos + 1;
+      comma_pos = target_str.find(',', start);
+    }
+  }
+  
+  if (target_days.empty())
+  {
+    writer->puts("ERROR: No valid target days specified");
+    return;
+  }
+  
+  // Copy schedule to all target days
+  int copied_count = 0;
+  for (const auto& day : target_days)
+  {
+    // Skip source day
+    if (strcasecmp(day.c_str(), source_day) == 0)
+      continue;
+    
+    std::string config_key = std::string("climate.schedule.") + day;
+    MyConfig.SetParamValue("vehicle", config_key.c_str(), source_schedule);
+    copied_count++;
+  }
+  
+  if (copied_count > 0)
+  {
+    writer->printf("Schedule '%s' copied from %s to %d day(s):\n",
+                   source_schedule.c_str(), source_day, copied_count);
+    for (const auto& day : target_days)
+    {
+      if (strcasecmp(day.c_str(), source_day) != 0)
+        writer->printf("  %s\n", day.c_str());
+    }
+    ESP_LOGI(TAG, "Climate schedule copied from %s to %d target days", source_day, copied_count);
+  }
+  else
+  {
+    writer->puts("No schedules were copied (source day was in target list)");
+  }
+}
+
+void OvmsVehicleFactory::vehicle_climate_schedule_enable(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv)
+{
+  MyConfig.SetParamValueBool("vehicle", "climate.precondition", true);
+  writer->puts("Scheduled precondition enabled");
+  ESP_LOGI(TAG, "Scheduled precondition enabled");
+}
+
+void OvmsVehicleFactory::vehicle_climate_schedule_disable(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv)
+{
+  MyConfig.SetParamValueBool("vehicle", "climate.precondition", false);
+  writer->puts("Scheduled precondition disabled");
+  ESP_LOGI(TAG, "Scheduled precondition disabled");
+}
+
+void OvmsVehicleFactory::vehicle_climate_schedule_status(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv)
+{
+  bool enabled = MyConfig.GetParamValueBool("vehicle", "climate.precondition", false);
+  
+  writer->printf("Scheduled precondition: %s\n", enabled ? "ENABLED" : "DISABLED");
+  
+  if (!enabled)
+  {
+    writer->puts("\nSchedule is disabled. No automatic precondition will be triggered.");
+    writer->puts("Use 'climatecontrol schedule enable' to activate.");
+    return;
+  }
+  
+  // Show configured schedules
+  vehicle_climate_schedule_list(verbosity, writer, cmd, argc, argv);
+}
+
+// filepath: p:\OVMS\home\ZorG\OVMS-Firmware-EDGE\vehicle\OVMS.V3\components\vehicle\vehicle.cpp
+
+/**
+ * CheckPreconditionSchedule: Check and trigger scheduled precondition
+ * Called by vehicles that support precondition scheduling (typically via ticker.60 event)
+ * 
+ * This base implementation reads from the global "vehicle" config namespace.
+ * Vehicles can override this to add custom checks or behavior.
+ * 
+ * Schedule format in config: [vehicle] climate.schedule.<day> = HH:MM[/duration][,HH:MM[/duration],...]
+ * Examples:
+ *   climate.schedule.mon = 07:30
+ *   climate.schedule.mon = 07:30/10
+ *   climate.schedule.fri = 07:00/5,17:30/15
+ */
+void OvmsVehicle::CheckPreconditionSchedule()
+{
+  // Check if scheduled precondition is enabled
+  if (!MyConfig.GetParamValueBool("vehicle", "climate.precondition", false))
+  {
+    ESP_LOGW(TAG, "Precondition Schedule: Scheduled precondition is disabled");
+    return; // Feature disabled
+  }
+  
+  // Get current time
+  time_t rawtime;
+  struct tm* timeinfo;
+  time(&rawtime);
+  timeinfo = localtime(&rawtime);
+
+  if (timeinfo == NULL)
+  {
+    ESP_LOGW(TAG, "Precondition Schedule: Failed to get current time");
+    return;
+  }
+
+  int current_day = timeinfo->tm_wday;    // 0 = Sunday, 6 = Saturday
+  int current_hour = timeinfo->tm_hour;
+  int current_min = timeinfo->tm_min;
+
+  // Check if we already triggered at this exact time today
+  if (m_precondition_last_triggered_day == current_day &&
+      m_precondition_last_triggered_hour == current_hour &&
+      m_precondition_last_triggered_min == current_min)
+  {
+    return; // Already triggered at this time
+  }
+
+  // Day name mapping
+  const char* day_names[] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
+
+  // Get schedule for current day from config structure
+  std::string config_key = std::string("climate.schedule.") + day_names[current_day];
+  std::string schedule = MyConfig.GetParamValue("vehicle", config_key.c_str());
+
+  if (schedule.empty())
+    return;
+
+  // Parse schedule entries: time[/duration],time[/duration],...
+  size_t start = 0;
+  size_t end = schedule.find(',');
+
+  while (start != std::string::npos)
+  {
+    std::string entry = (end == std::string::npos) ?
+                        schedule.substr(start) :
+                        schedule.substr(start, end - start);
+
+    // Split by '/' for time/duration
+    size_t slash_pos = entry.find('/');
+    std::string time_part = (slash_pos != std::string::npos) ?
+                            entry.substr(0, slash_pos) : entry;
+    
+    // Parse time
+    size_t colon_pos = time_part.find(':');
+    if (colon_pos != std::string::npos && colon_pos > 0)
+    {
+      int hour = atoi(time_part.substr(0, colon_pos).c_str());
+      int min = atoi(time_part.substr(colon_pos + 1).c_str());
+
+      // Check if current time matches
+      if (hour == current_hour && min == current_min)
+      {
+        // Parse duration if present (default: 5 minutes)
+        int duration = 5;
+        if (slash_pos != std::string::npos)
+        {
+          duration = atoi(entry.substr(slash_pos + 1).c_str());
+          if (duration < 5 || duration > 30)
+          {
+            duration = 10; // Fallback to default
+          }
+        }
+
+        ESP_LOGI(TAG, "Scheduled precondition triggered for %s at %02d:%02d (duration: %d min)",
+                 day_names[current_day], current_hour, current_min, duration);
+
+        // Check prerequisites
+        if (StandardMetrics.ms_v_env_hvac->AsBool(false))
+        {
+          ESP_LOGI(TAG, "Climate control already active, skipping");
+          return;
+        }
+
+        vehicle_command_t result = CommandClimateControl(true);
+
+        if (result == Success)
+        {
+          m_climate_restart = true;
+          m_climate_restart_ticker = duration - 1; // Subtract 1 minute for ticker countdown
+          m_precondition_last_triggered_day = current_day;
+          m_precondition_last_triggered_hour = current_hour;
+          m_precondition_last_triggered_min = current_min;
+          ESP_LOGI(TAG, "Precondition activated successfully");
+          MyNotify.NotifyString("info", "climatecontrol.schedule",
+                                "Scheduled precondition started");
+        }
+        else
+        {
+          ESP_LOGE(TAG, "Failed to activate precondition (result=%d)", result);
+          MyNotify.NotifyString("error", "climatecontrol.schedule",
+                                "Scheduled precondition failed to start");
+        }
+        
+        return; // Only trigger once per minute
+      }
+    }
+
+    // Move to next entry
+    if (end == std::string::npos)
+      break;
+    start = end + 1;
+    end = schedule.find(',', start);
+  }
+}
+
 OvmsVehicle::OvmsVehicle()
   {
 
@@ -334,6 +934,13 @@ OvmsVehicle::OvmsVehicle()
   m_last_drivetime = 0;
   m_last_gentime = 0;
   m_last_parktime = 0;
+
+  // Initialize precondition schedule tracking
+  m_precondition_last_triggered_day = -1;
+  m_precondition_last_triggered_hour = -1;
+  m_precondition_last_triggered_min = -1;
+  m_climate_restart = false;
+  m_climate_restart_ticker = 0;
 
   m_drive_startsoc = StdMetrics.ms_v_bat_soc->AsFloat();
   m_drive_startrange = StdMetrics.ms_v_bat_range_est->AsFloat();
@@ -802,7 +1409,7 @@ void OvmsVehicle::VehicleTicker1(std::string event, void* data)
       }
     }
 
-  if ((m_ticker % 60) == 0)
+  if ((m_ticker % 60) == 0) // every 60 seconds
     {
     // check 12V voltage:
     float volt = StandardMetrics.ms_v_bat_12v_voltage->AsFloat();
@@ -856,7 +1463,29 @@ void OvmsVehicle::VehicleTicker1(std::string event, void* data)
           }
         }
       }
-    }
+    // Check if global scheduled precondition are enabled
+    if(MyConfig.GetParamValueBool("vehicle", "climate.precondition", false)) 
+      CheckPreconditionSchedule();
+
+    if (m_climate_restart && StdMetrics.ms_v_env_on->AsBool(false))
+      {
+      // Vehicle turned on - cancel scheduled climate restart
+      m_climate_restart = false;
+      m_climate_restart_ticker = 0;
+      ESP_LOGI(TAG,"Cancelling scheduled climate restart due to vehicle on");
+      }
+
+    if (m_climate_restart_ticker > 0 && --m_climate_restart_ticker == 0)
+      { 
+      m_climate_restart = false;
+      m_climate_restart_ticker = 0;
+      if (StdMetrics.ms_v_env_hvac->AsBool(false) && !StdMetrics.ms_v_env_on->AsBool(false))
+        {          
+        CommandClimateControl(false);
+        ESP_LOGI(TAG,"Stopping climate control as per schedule");
+        }
+      }
+    } // end every 60 seconds
 
   if (m_12v_shutdown_ticker > 0 && --m_12v_shutdown_ticker == 0)
     {
@@ -864,7 +1493,7 @@ void OvmsVehicle::VehicleTicker1(std::string event, void* data)
     MyBoot.DeepSleep(wakeup_interval);
     }
 
-  if ((m_ticker % 10)==0)
+  if ((m_ticker % 10)==0) // every 10 seconds
     {
     // Check MINSOC
     int soc = (int) ceil(StandardMetrics.ms_v_bat_soc->AsFloat());
@@ -885,8 +1514,17 @@ void OvmsVehicle::VehicleTicker1(std::string event, void* data)
         m_minsoc_triggered = soc - 1;
       else
         m_minsoc_triggered = 0;
+      }  
+    // Handle scheduled climate restarts
+    if (m_climate_restart && 
+        m_climate_restart_ticker > 0 &&
+        !StdMetrics.ms_v_env_on->AsBool(false) && 
+        !StdMetrics.ms_v_env_hvac->AsBool(false) )
+      {
+      CommandClimateControl(true);
+      ESP_LOGI(TAG,"Restarting climate control as per schedule");
       }
-    }
+    } // end every 10 seconds
 
   // BMS ticker:
   BmsTicker();
@@ -1103,6 +1741,10 @@ std::vector<std::string> OvmsVehicle::GetTpmsLayout()
   {
   return { "FL", "FR", "RL", "RR" };
   }
+std::vector<std::string> OvmsVehicle::GetTpmsLayoutNames()
+  {
+  return { "Front Left", "Front Right", "Rear Left", "Rear Right" };
+  }
 
 void OvmsVehicle::NotifyTpmsAlerts()
   {
@@ -1245,14 +1887,14 @@ OvmsVehicle::vehicle_command_t OvmsVehicle::CommandCooldown(bool cooldownon)
   return NotImplemented;
   }
 
-OvmsVehicle::vehicle_command_t OvmsVehicle::CommandClimateControl(bool climatecontrolon)
+OvmsVehicle::vehicle_command_t OvmsVehicle::CommandClimateControl(bool enable)
   {
 #ifdef CONFIG_OVMS_SC_JAVASCRIPT_DUKTAPE
   if (MyDuktape.DukTapeAvailable())
     {
     StringWriter dukcmd;
     dukcmd.printf("(!OvmsVehicle.ClimateControl.prototype)?-1:"
-      "OvmsVehicle.ClimateControl(%s)", climatecontrolon ? "true" : "false");
+      "OvmsVehicle.ClimateControl(%s)", enable ? "true" : "false");
     int res = MyDuktape.DuktapeEvalIntResult(dukcmd.c_str());
     if (res >= 0) return res ? Success : Fail;
     }
@@ -1694,6 +2336,14 @@ void OvmsVehicle::VehicleConfigChanged(std::string event, void* data)
     m_brakelight_basepwr = MyConfig.GetParamValueFloat("vehicle", "brakelight.basepwr", 0);
     m_brakelight_ignftbrk = MyConfig.GetParamValueBool("vehicle", "brakelight.ignftbrk", false);
     m_brakelight_start = 0;
+
+    // TPMS sensor mapping:
+    std::vector<std::string> wheels = GetTpmsLayout();
+    m_tpms_index.resize(wheels.size());
+    for (int i = 0; i < wheels.size(); i++)
+      {
+      m_tpms_index[i] = MyConfig.GetParamValueInt("vehicle", std::string("tpms.")+str_tolower(wheels[i]), i);
+      }
     }
 
   // read vehicle specific config:
@@ -1771,6 +2421,7 @@ void OvmsVehicle::MetricModified(OvmsMetric* metric)
       }
     else
       {
+      StandardMetrics.ms_v_charge_timestamp->SetValue(StdMetrics.ms_m_timeutc->AsInt());
       MyEvents.SignalEvent("vehicle.charge.stop",NULL);
       NotifiedVehicleChargeStop();
       }
@@ -1814,6 +2465,48 @@ void OvmsVehicle::MetricModified(OvmsMetric* metric)
       NotifiedVehicleChargeTimermodeOff();
       }
     }
+
+  else if (metric == StandardMetrics.ms_v_gen_inprogress)
+    {
+    if (StandardMetrics.ms_v_gen_inprogress->AsBool())
+      {
+      MyEvents.SignalEvent("vehicle.gen.start",NULL);
+      NotifiedVehicleGenStart();
+      }
+    else
+      {
+      StandardMetrics.ms_v_gen_timestamp->SetValue(StdMetrics.ms_m_timeutc->AsInt());
+      MyEvents.SignalEvent("vehicle.gen.stop",NULL);
+      NotifiedVehicleGenStop();
+      }
+    }
+  else if (metric == StandardMetrics.ms_v_gen_pilot)
+    {
+    if (StandardMetrics.ms_v_gen_pilot->AsBool())
+      {
+      MyEvents.SignalEvent("vehicle.gen.pilot.on",NULL);
+      NotifiedVehicleGenPilotOn();
+      }
+    else
+      {
+      MyEvents.SignalEvent("vehicle.gen.pilot.off",NULL);
+      NotifiedVehicleGenPilotOff();
+      }
+    }
+  else if (metric == StandardMetrics.ms_v_gen_timermode)
+    {
+    if (StandardMetrics.ms_v_gen_timermode->AsBool())
+      {
+      MyEvents.SignalEvent("vehicle.gen.timermode.on",NULL);
+      NotifiedVehicleGenTimermodeOn();
+      }
+    else
+      {
+      MyEvents.SignalEvent("vehicle.gen.timermode.off",NULL);
+      NotifiedVehicleGenTimermodeOff();
+      }
+    }
+
   else if (metric == StandardMetrics.ms_v_env_aux12v)
     {
     if (StandardMetrics.ms_v_env_aux12v->AsBool())
@@ -2217,7 +2910,7 @@ void OvmsVehicle::NotifyGridLog()
 
   std::ostringstream buf;
   buf
-    << "*-LOG-Grid,1," << storetime_days * 86400        // V1, increment on additions
+    << "*-LOG-Grid,2," << storetime_days * 86400        // V2, increment on additions
 
     << std::noboolalpha
     << "," << (StdMetrics.ms_v_pos_gpslock->AsBool() ? 1 : 0)
@@ -2282,6 +2975,10 @@ void OvmsVehicle::NotifyGridLog()
     << "," << StdMetrics.ms_v_bat_energy_recd_total->AsFloat()
     << "," << StdMetrics.ms_v_bat_coulomb_used_total->AsFloat()
     << "," << StdMetrics.ms_v_bat_coulomb_recd_total->AsFloat()
+
+    // V2 additions:
+    << std::setprecision(1)
+    << "," << StdMetrics.ms_v_pos_odometer->AsFloat()
     ;
 
   MyNotify.NotifyString("data", "log.grid", buf.str().c_str());
@@ -2526,6 +3223,18 @@ void OvmsVehicle::PollSetState(uint8_t state, canbus* bus)
   }
 
 #ifdef CONFIG_OVMS_COMP_POLLER
+int OvmsVehicle::PollSingleRequest(canbus*  bus, uint32_t txid, uint32_t rxid,
+                  uint8_t polltype, uint16_t pid, const std::string &payload, std::string& response,
+                  int timeout_ms, uint8_t protocol)
+  {
+  if (!m_ready)
+    return POLLSINGLE_TXFAILURE;
+  auto poller = MyPollers.GetPoller(bus, true);
+  if (!poller)
+    return POLLSINGLE_TXFAILURE;
+  return poller->PollSingleRequest(txid, rxid, polltype, pid, payload, response, timeout_ms, protocol);
+  }
+
 int OvmsVehicle::PollSingleRequest(canbus* bus, uint32_t txid, uint32_t rxid,
                 std::string request, std::string& response,
                 int timeout_ms, uint8_t protocol)
