@@ -94,6 +94,12 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
             break;
         }
 
+        case PID_AMBIENT_TEMPERATURE_EV: {
+            float temperature = CalculateAmbientTemperatureEV(m_rxbuf);
+            SetAmbientTemperature(temperature);
+            break;
+        }
+
         case PID_BATTERY_VOLTAGE_AND_CURRENT: {
             float batVoltage = CalculateBatteryVoltage(m_rxbuf);
             float batCurrent = CalculateBatteryCurrent(m_rxbuf);
@@ -146,27 +152,33 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
             break;
         }
 
-        case PID_CHARGING_LID: {
-            bool chargingDoorStatus = CalculateChargingDoorStatus(m_rxbuf);
-            SetChargingDoorStatus(chargingDoorStatus);
-            break;
-        }
-
         case PID_BATTERY_SOC: {
             float SOC = CalculateBatterySOC(m_rxbuf);
             SetBatterySOC(SOC);
             break;
         }
 
-        case PID_PISW_STATUS: {
-            bool PISWStatus = CalculatePISWStatus(m_rxbuf);
-            SetPISWStatus(PISWStatus);
+        case PID_CHARGING_LID: {
+            bool chargingDoorStatus = CalculateChargingDoorStatus(m_rxbuf);
+            SetChargingDoorStatus(chargingDoorStatus);
             break;
         }
 
-        case PID_CHARGING: {
-            bool chargingStatus = CalculateChargingStatus(m_rxbuf);
-            SetChargingStatus(chargingStatus);
+        case PID_CHARGING_CONTROL_STATUS: {
+            int chargeMode = CalculateChargeMode(m_rxbuf);
+            SetChargeMode(chargeMode);
+            break;
+        }
+
+        case PID_CONTROL_SYSTEM_MODE: {
+            int controlMode = CalculateControlMode(m_rxbuf);
+            SetControlMode(controlMode);
+            break;
+        }
+
+        case PID_PISW_STATUS: {
+            bool PISWStatus = CalculatePISWStatus(m_rxbuf);
+            SetPISWStatus(PISWStatus);
             break;
         }
 
@@ -185,6 +197,12 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
                 float chargerInputPower = CalculateChargerInputPower(m_rxbuf);
                 SetChargerInputPower(chargerInputPower);
             }
+            break;
+        }
+
+        case PID_CHARGING_VOLTAGE_TYPE: {
+            int chargeType = CalculateChargeType(m_rxbuf);
+            SetChargeType(chargeType);
             break;
         }
 

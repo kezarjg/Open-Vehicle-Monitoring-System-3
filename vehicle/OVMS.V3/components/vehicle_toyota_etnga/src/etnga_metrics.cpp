@@ -14,13 +14,15 @@
 
 void OvmsVehicleToyotaETNGA::InitializeMetrics()
 {
-    m_s_pollstate = MyMetrics.InitInt("xte.s.pollstate", SM_STALE_NONE);  // This variable stores the pollstate
+//    m_s_pollstate = MyMetrics.InitInt("xte.s.pollstate", SM_STALE_NONE);  // This variable stores the pollstate
+    m_s_controlstate = MyMetrics.InitInt("xte.s.controlstate", SM_STALE_MIN);  // This variable stores the control state variable
     m_v_bat_heater_status = MyMetrics.InitBool("xte.v.b.heater", SM_STALE_MID);  // This variable stores the status of the battery coolant heater relay
     m_v_bat_soc_bms = MyMetrics.InitFloat("xte.v.b.soc.bms", SM_STALE_MID, 0.0f, Percentage, true);  // This variable stores the SOC as reported by the BMS
     m_v_bat_speed_water_pump = MyMetrics.InitFloat("xte.v.b.speed.waterpump", SM_STALE_MID, 0.0f, Other);  // This variable stores the RPM of the battery water pump
     m_v_bat_temp_coolant = MyMetrics.InitFloat("xte.v.b.temp.coolant", SM_STALE_MID, 0.0f, Celcius);  // This variable stores the temperature of the battery coolant
     m_v_bat_temp_heater = MyMetrics.InitFloat("xte.v.b.temp.heater", SM_STALE_MID, 0.0f, Celcius);  // This variable stores the temperature of the battery coolant
     m_v_pos_trip_start = MyMetrics.InitFloat("xte.v.p.trip.start", SM_STALE_NONE, 0.0f, Kilometers, false);  // This variable stores the odometer reading at the beginning of a trip
+    m_v_env_awaketime = MyMetrics.InitInt("xte.v.e.awaketime", SM_STALE_NONE);  // Time awake state was entered for awake timeout (monotonic seconds)
 
     // Set initial values for metrics
     SetAwake(false);
@@ -32,18 +34,18 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     StandardMetrics.ms_v_door_chargeport->SetAutoStale(10);
 }
 
-void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale state transition variables
+void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale variables
 {
+    // Check to make sure the 'Control Mode' signal has been updated recently
+    if (m_s_controlstate->IsStale() && m_s_controlstate->AsInt() != 0) {
+        ESP_LOGD(TAG, "Control Mode is stale. Manually setting to off");
+        SetControlMode(0);
+    }
+
     // Check to make sure the 'awake' signal has been updated recently
     if (StandardMetrics.ms_v_env_awake->IsStale() && StandardMetrics.ms_v_env_awake->AsBool()) {
         ESP_LOGD(TAG, "Awake is stale. Manually setting to off");
         SetAwake(false);
-    }
-
-    // Check to make sure the 'ready' signal has been updated recently
-    if (StandardMetrics.ms_v_env_on->IsStale() && StandardMetrics.ms_v_env_on->AsBool()) {
-        ESP_LOGD(TAG, "Ready is stale. Manually setting to off");
-        SetReadyStatus(false);
     }
 
     // Check to make sure the 'charging door' signal has been updated recently
@@ -58,12 +60,6 @@ void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale state transition
         SetPISWStatus(false);
     }
 
-    // Check to make sure the 'charging inprogress' signal has been updated recently
-    if (StandardMetrics.ms_v_charge_inprogress->IsStale() && StandardMetrics.ms_v_charge_inprogress->AsBool()) {
-        ESP_LOGD(TAG, "Charging Inprogress is stale. Manually setting to off");
-        SetChargingStatus(false);
-    }
-
     // Check to make sure the 'power' has been updated recently
     if (StandardMetrics.ms_v_bat_power->IsStale() && StandardMetrics.ms_v_bat_power->AsFloat() != 0) {
         ESP_LOGD(TAG, "Power is stale. Manually setting to zero");
@@ -76,6 +72,11 @@ void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale state transition
 float OvmsVehicleToyotaETNGA::CalculateAmbientTemperature(const std::string& data)
 {
     return static_cast<float>(GetRxBInt16(data, 0)) / 100.0f;
+}
+
+float OvmsVehicleToyotaETNGA::CalculateAmbientTemperatureEV(const std::string& data)
+{
+    return static_cast<float>(GetRxBInt8(data, 0)) - 40.0f;
 }
 
 float OvmsVehicleToyotaETNGA::CalculateBatteryChargingPower(const std::string& data)
@@ -136,10 +137,21 @@ bool OvmsVehicleToyotaETNGA::CalculateChargingDoorStatus(const std::string& data
     return GetRxBBit(data, 1, 1);
 }
 
-bool OvmsVehicleToyotaETNGA::CalculateChargingStatus(const std::string& data)
+int OvmsVehicleToyotaETNGA::CalculateChargeMode(const std::string& data)
+{
+    return GetRxBInt8(data, 0);
+}
+
+int OvmsVehicleToyotaETNGA::CalculateControlMode(const std::string& data)
 {
     // 0x00 = None
+    // 0x01 = Driving
     // 0x03 = Charging / Discharging Mode
+    return GetRxBInt8(data, 0);
+}
+
+int OvmsVehicleToyotaETNGA::CalculateChargeType(const std::string& data)
+{
     return GetRxBInt8(data, 0);
 }
 
@@ -200,7 +212,7 @@ void OvmsVehicleToyotaETNGA::SetAmbientTemperature(float temperature)
     }
     else
     {
-        ESP_LOGV(TAG, "Ambient Temperature: %f", temperature);
+        LogMetricChange(StandardMetrics.ms_v_env_temp, temperature, "Ambient Temperature", "°C");
         StandardMetrics.ms_v_env_temp->SetValue(temperature);
     }
 }
@@ -236,37 +248,44 @@ void OvmsVehicleToyotaETNGA::SetBatteryChargingPower(float power)
 
 void OvmsVehicleToyotaETNGA::SetBatteryCurrent(float current)
 {
-    ESP_LOGV(TAG, "Current: %f", current);
+    LogMetricChange(StandardMetrics.ms_v_bat_current, current, "Battery Current", "A");
     StandardMetrics.ms_v_bat_current->SetValue(current);
 }
 
 void OvmsVehicleToyotaETNGA::SetBatteryPower(float power)
 {
-    ESP_LOGV(TAG, "Battery Power: %f", power);
+    LogMetricChange(StandardMetrics.ms_v_bat_power, power, "Battery Power", "kW");
     StandardMetrics.ms_v_bat_power->SetValue(power);
 
     float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
+    int now = esp_log_timestamp();
 
-    if (!lastBatteryEnergyLogTime == 0)
+    if (lastBatteryEnergyLogTime != 0)
     {
-        hoursSinceLastUpdate = static_cast<float>((esp_log_timestamp() - lastBatteryEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
+        hoursSinceLastUpdate = static_cast<float>((now - lastBatteryEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
     }
 
     const float energy = power * hoursSinceLastUpdate;
 
-    ESP_LOGV(TAG, "Battery Energy: %f kWh", energy);
+    ESP_LOGD(TAG, "Battery Energy: %f kWh", energy);
 
-    if (power > 0)
+    // Only log energy use/recovery while driving
+    if (m_s_pollstate == PollState::DRIVING)
     {
-        StandardMetrics.ms_v_bat_energy_used->SetValue(StandardMetrics.ms_v_bat_energy_used->AsFloat() + energy);
-    }
-    else if (power < 0)
-    {
-        StandardMetrics.ms_v_bat_energy_recd->SetValue(StandardMetrics.ms_v_bat_energy_recd->AsFloat() - energy);
+        if (power > 0)
+        {
+            StandardMetrics.ms_v_bat_energy_used->SetValue(
+                StandardMetrics.ms_v_bat_energy_used->AsFloat() + energy);
+        }
+        else if (power < 0)
+        {
+            StandardMetrics.ms_v_bat_energy_recd->SetValue(
+                StandardMetrics.ms_v_bat_energy_recd->AsFloat() - energy);
+        }
     }
 
     // Update the update time for the next energy period
-    lastBatteryEnergyLogTime = esp_log_timestamp();
+    lastBatteryEnergyLogTime = now;
 }
 
 void OvmsVehicleToyotaETNGA::SetBatterySOC(float soc)
@@ -278,7 +297,7 @@ void OvmsVehicleToyotaETNGA::SetBatterySOC(float soc)
     }
     else
     {
-        ESP_LOGV(TAG, "SOC: %f", soc);
+        LogMetricChange(StandardMetrics.ms_v_bat_soc, soc, "SOC", "%");
         StandardMetrics.ms_v_bat_soc->SetValue(soc);
     }
 }
@@ -292,7 +311,7 @@ void OvmsVehicleToyotaETNGA::SetBatterySOCBMS(float soc)
     }
     else
     {
-        ESP_LOGV(TAG, "SOC BMS: %f", soc);
+        LogMetricChange(m_v_bat_soc_bms, soc, "BMS SOC", "%");
         m_v_bat_soc_bms->SetValue(soc);
     }
 }
@@ -333,16 +352,22 @@ void OvmsVehicleToyotaETNGA::SetBatteryTemperatureStatistics(const std::vector<f
 
 void OvmsVehicleToyotaETNGA::SetBatteryVoltage(float voltage)
 {
-    ESP_LOGV(TAG, "Voltage: %f", voltage);
+    LogMetricChange(StandardMetrics.ms_v_bat_voltage, voltage, "Voltage", "V");
     StandardMetrics.ms_v_bat_voltage->SetValue(voltage);
 }
 
 void OvmsVehicleToyotaETNGA::SetChargeMode(int chargeMode)
 {
-    std::string chargeModeValue = (chargeMode == 0x00) ? "Standard" : "Performance";
-
-    ESP_LOGV(TAG, "Charge Mode: %s", chargeModeValue.c_str());
+    const std::string chargeModeValue = (chargeMode == 0x00) ? "Standard" : "Performance";
+    LogMetricChange(StandardMetrics.ms_v_charge_mode, chargeModeValue, "Charge Mode");
     StandardMetrics.ms_v_charge_mode->SetValue(chargeModeValue);
+}
+
+void OvmsVehicleToyotaETNGA::SetChargingStatus(bool status)
+{
+    const std::string valueLabel = status ? "Charging" : "Not Charging";
+    LogMetricChange(StandardMetrics.ms_v_charge_inprogress, status, "Charging Status", valueLabel);
+    StandardMetrics.ms_v_charge_inprogress->SetValue(status);
 }
 
 void OvmsVehicleToyotaETNGA::SetCabinTemperature(float temperature)
@@ -354,7 +379,7 @@ void OvmsVehicleToyotaETNGA::SetCabinTemperature(float temperature)
     }
     else
     {
-        ESP_LOGV(TAG, "Cabin Temperature: %f", temperature);
+        LogMetricChange(StandardMetrics.ms_v_env_cabintemp, temperature, "Cabin Temperature", "°C");
         StandardMetrics.ms_v_env_cabintemp->SetValue(temperature);
     }
 }
@@ -379,14 +404,8 @@ void OvmsVehicleToyotaETNGA::SetChargeType(int chargeType)
             break;
     }
     
-    ESP_LOGD(TAG, "Charge Type: %s", chargeTypeValue.c_str());
+    LogMetricChange(StandardMetrics.ms_v_charge_type, chargeTypeValue, "Charge Type");
     StandardMetrics.ms_v_charge_type->SetValue(chargeTypeValue);
-}
-
-void OvmsVehicleToyotaETNGA::SetChargeState(std::string chargeState)
-{
-    ESP_LOGI(TAG, "Charge State: %s", chargeState.c_str());
-    StandardMetrics.ms_v_charge_state->SetValue(chargeState.c_str());
 }
 
 void OvmsVehicleToyotaETNGA::SetChargerInputPower(float power)
@@ -395,10 +414,11 @@ void OvmsVehicleToyotaETNGA::SetChargerInputPower(float power)
     StandardMetrics.ms_v_charge_power->SetValue(power);
 
     float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
+    int now = esp_log_timestamp();
 
-    if (!lastGridEnergyLogTime == 0)
+    if (lastGridEnergyLogTime != 0)
         {
-        hoursSinceLastUpdate = static_cast<float>((esp_log_timestamp() - lastGridEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
+        hoursSinceLastUpdate = static_cast<float>((now - lastGridEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
         }
 
     const float energy = power * hoursSinceLastUpdate;
@@ -408,30 +428,52 @@ void OvmsVehicleToyotaETNGA::SetChargerInputPower(float power)
     StandardMetrics.ms_v_charge_kwh_grid->SetValue(StandardMetrics.ms_v_charge_kwh_grid->AsFloat() + energy);
 
     // Update the update time for the next energy period
-    lastGridEnergyLogTime = esp_log_timestamp();
+    lastGridEnergyLogTime = now;
 }
 
 void OvmsVehicleToyotaETNGA::SetChargingDoorStatus(bool status)
 {
-    ESP_LOGV(TAG, "Charging Door Status: %s", status ? "Open" : "Closed");
+    int newValue = status ? 1 : 0;
+    const std::string valueLabel = status ? "Open" : "Closed";    
+    
+    LogMetricChange(StandardMetrics.ms_v_door_chargeport, newValue, "Charging Door Status", valueLabel);
+
     StandardMetrics.ms_v_door_chargeport->SetValue(status);
 }
 
-void OvmsVehicleToyotaETNGA::SetChargingStatus(bool status)
+void OvmsVehicleToyotaETNGA::SetControlMode(int controlMode)
 {
-    ESP_LOGV(TAG, "Charging Status: %s", status ? "Charging" : "Not Charging");
-    StandardMetrics.ms_v_charge_inprogress->SetValue(status);
+    std::string controlModeLabel;
+
+    switch (controlMode)
+    {
+        case 0x00:
+            controlModeLabel = "None";
+            break;
+        case 0x01:
+            controlModeLabel = "Driving";
+            break;
+        case 0x03:
+            controlModeLabel = "Charging";
+            break;
+        default:
+            controlModeLabel = "unknown";
+            break;
+    }
+
+    LogMetricChange(m_s_controlstate, controlMode, "Control Mode", controlModeLabel);
+    m_s_controlstate->SetValue(controlMode);
 }
 
 void OvmsVehicleToyotaETNGA::SetHVACSetpoint(float temperature)
 {
-    ESP_LOGV(TAG, "HVAC Setpoint: %f", temperature);
+    LogMetricChange(StandardMetrics.ms_v_env_cabinsetpoint, temperature, "HVAC Setpoint", "°C");
     StandardMetrics.ms_v_env_cabinsetpoint->SetValue(temperature);
 }
 
 void OvmsVehicleToyotaETNGA::SetOdometer(float odometer)
 {
-    ESP_LOGV(TAG, "Odometer: %f", odometer);
+    LogMetricChange(StandardMetrics.ms_v_pos_odometer, odometer, "Odometer", "km");
     StandardMetrics.ms_v_pos_odometer->SetValue(odometer);  // Set the odometer metric
 
     if (m_v_pos_trip_start->IsStale())
@@ -448,24 +490,26 @@ void OvmsVehicleToyotaETNGA::SetOdometer(float odometer)
 
 void OvmsVehicleToyotaETNGA::SetPISWStatus(bool status)
 {
-    ESP_LOGV(TAG, "Pilot Status: %s", status ? "Connected" : "Not Connected");
+    const std::string valueLabel = status ? "Connected" : "Not Connected";
+    LogMetricChange(StandardMetrics.ms_v_charge_pilot, status, "Pilot Status", valueLabel);
     StandardMetrics.ms_v_charge_pilot->SetValue(status);
 }
 
 void OvmsVehicleToyotaETNGA::SetPollState(int state)
 {
-    const char* CurrentPollStateText = ConvertPollStateToString(m_s_pollstate->AsInt());
+    const char* CurrentPollStateText = ConvertPollStateToString(m_s_pollstate);
     const char* NextPollStateText = ConvertPollStateToString(state);
     
     ESP_LOGI(TAG, "Transitioning from the %s to the %s state", CurrentPollStateText, NextPollStateText);
 
     PollSetState(state);
-    m_s_pollstate->SetValue(state);
+    m_s_pollstate = static_cast<PollState>(state);
 }
 
 void OvmsVehicleToyotaETNGA::SetReadyStatus(bool status)
 {
-    ESP_LOGV(TAG, "Ready Status: %s", status ? "Ready" : "Not Ready");
+    const std::string valueLabel = status ? "Ready" : "Not Ready";
+    LogMetricChange(StandardMetrics.ms_v_env_on, status, "Ready Status", valueLabel);
     StandardMetrics.ms_v_env_on->SetValue(status);
 }
 
@@ -497,18 +541,66 @@ void OvmsVehicleToyotaETNGA::SetShiftPosition(int position)
             break;
     }
 
-    ESP_LOGV(TAG, "Gear: %s", shiftPositionText);
+    LogMetricChange(StandardMetrics.ms_v_env_gear, gear, "Gear", shiftPositionText);
     StandardMetrics.ms_v_env_gear->SetValue(gear);
 }
 
 void OvmsVehicleToyotaETNGA::SetVehicleSpeed(float speed)
 {
-    ESP_LOGV(TAG, "Speed: %f", speed);
+    LogMetricChange(StandardMetrics.ms_v_pos_speed, speed, "Speed", "kph");
     StandardMetrics.ms_v_pos_speed->SetValue(speed);
 }
 
 void OvmsVehicleToyotaETNGA::SetVehicleVIN(std::string vin)
 {
-    ESP_LOGV(TAG, "VIN: %s", vin.c_str());
+    ESP_LOGD(TAG, "VIN: %s", vin.c_str());
     StandardMetrics.ms_v_vin->SetValue(std::move(vin));
+}
+
+void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel)
+{
+    if (metric->AsBool() != newValue)
+    {
+        ESP_LOGD(TAG, "%s changed: %s (%d)", label.c_str(), valueLabel.c_str(), newValue ? 1 : 0);
+    }
+    else
+    {
+        ESP_LOGV(TAG, "%s unchanged: %s (%d)", label.c_str(), valueLabel.c_str(), newValue ? 1 : 0);
+    }
+}
+
+void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label, const std::string& units = "")
+{
+    if (metric->AsFloat() != newValue)
+    {
+        ESP_LOGD(TAG, "%s changed: %.2f%s", label.c_str(), newValue, units.empty() ? "" : (" " + units).c_str());
+    }
+    else
+    {
+        ESP_LOGV(TAG, "%s unchanged: %.2f%s", label.c_str(), newValue, units.empty() ? "" : (" " + units).c_str());
+    }
+}
+
+void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricInt* metric, int newValue, const std::string& label, const std::string& valueLabel)
+{
+    if (metric->AsInt() != newValue)
+    {
+        ESP_LOGD(TAG, "%s changed: %s (%d)", label.c_str(), valueLabel.c_str(), newValue);
+    }
+    else
+    {
+        ESP_LOGV(TAG, "%s unchanged: %s (%d)", label.c_str(), valueLabel.c_str(), newValue);
+    }
+}
+
+void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricString* metric, const std::string& newValue, const std::string& label)
+{
+    if (metric->AsString() != newValue)
+    {
+        ESP_LOGD(TAG, "%s changed: %s", label.c_str(), newValue.c_str());
+    }
+    else
+    {
+        ESP_LOGV(TAG, "%s unchanged: %s", label.c_str(), newValue.c_str());
+    }
 }

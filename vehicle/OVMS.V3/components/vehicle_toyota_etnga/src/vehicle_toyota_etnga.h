@@ -14,6 +14,22 @@
 #include <string>
 #include "vehicle.h"
 
+// Control states
+enum ControlState {
+    CS_NONE = 0,
+    CS_DRIVING = 1,
+    CS_CHARGING = 3
+};
+
+// Poll states
+enum PollState
+{
+    SLEEP,
+    AWAKE,
+    DRIVING,
+    CHARGING
+};
+
 class OvmsVehicleToyotaETNGA : public OvmsVehicle
 {
 public:
@@ -30,12 +46,18 @@ public:
 protected:
     std::string m_rxbuf;
 
-    OvmsMetricInt* m_s_pollstate;
+    bool m_allow_wake = true;  // Used to implement a cooldown timer if the vehicle is put into sleep
+    int m_sleep_entry_time;  // Used to track the time that cooldown timer started
+
+    PollState m_s_pollstate;
+//    ControlState m_s_controlstate;
+    OvmsMetricInt* m_s_controlstate;
     OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
     OvmsMetricFloat* m_v_bat_speed_water_pump;
     OvmsMetricFloat* m_v_bat_temp_coolant;
     OvmsMetricFloat* m_v_bat_temp_heater;
+    OvmsMetricInt* m_v_env_awaketime;
     OvmsMetricFloat* m_v_pos_trip_start;
     
     void NotifyVehicleOn();
@@ -43,6 +65,7 @@ protected:
 
 private:
     static constexpr const char* TAG = "v-toyota-etnga";
+    static constexpr const char* CHARGING_TAG = "v-toyota-etnga-charging";
     uint32_t lastBatteryEnergyLogTime;
     uint32_t lastChargerEnergyLogTime;
     uint32_t lastGridEnergyLogTime;
@@ -59,6 +82,7 @@ private:
 
     // Data calculation functions
     float CalculateAmbientTemperature(const std::string& data);
+    float CalculateAmbientTemperatureEV(const std::string& data);
     float CalculateBatteryChargingPower(const std::string& data);
     float CalculateBatteryCurrent(const std::string& data);
     float CalculateBatteryPower(float voltage, float current);
@@ -67,9 +91,11 @@ private:
     std::vector<float> CalculateBatteryTemperatures(const std::string& data);
     float CalculateBatteryVoltage(const std::string& data);
     float CalculateCabinTemperature(const std::string& data);
+    int CalculateChargeMode(const std::string& data);
+    int CalculateChargeType(const std::string& data);
     float CalculateChargerInputPower(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
-    bool CalculateChargingStatus(const std::string& data);
+    int CalculateControlMode(const std::string& data);
     float CalculateHVACSetpoint(const std::string& data);
     float CalculateOdometer(const std::string& data);
     bool CalculatePISWStatus(const std::string& data);
@@ -93,8 +119,9 @@ private:
     void SetChargeType(int chargeType);
     void SetChargeState(std::string chargeState);
     void SetChargerInputPower(float power);
-    void SetChargingDoorStatus(bool status);
     void SetChargingStatus(bool status);
+    void SetChargingDoorStatus(bool status);
+    void SetControlMode(int controlMode);
     void SetHVACSetpoint(float temperature);
     void SetOdometer(float odometer);
     void SetPISWStatus(bool status);
@@ -104,14 +131,19 @@ private:
     void SetVehicleSpeed(float speed);
     void SetVehicleVIN(std::string vin);
 
+    void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
+    void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);
+    void LogMetricChange(OvmsMetricInt* metric, int newValue, const std::string& label, const std::string& valueLabel);
+    void LogMetricChange(OvmsMetricString* metric, const std::string& newValue, const std::string& label);
+    
     // State transition functions
     void HandleSleepState();
     void HandleAwakeState();
-    void HandleReadyState();
+    void HandleDrivingState();
     void HandleChargingState();
     void TransitionToSleepState();
     void TransitionToAwakeState();
-    void TransitionToReadyState();
+    void TransitionToDrivingState();
     void TransitionToChargingState();
 
     void RequestVIN();
@@ -119,15 +151,6 @@ private:
     void RequestChargeType();
     void DiagnosticSession();
     
-};
-
-// Poll states
-enum PollState
-{
-    SLEEP,
-    AWAKE,
-    READY,
-    CHARGING
 };
 
 // CAN bus addresses
@@ -150,6 +173,7 @@ enum CANPID
     PID_ACTIVE_DIAGNOSTIC_SESSION = 0xF186,
     PID_AC_INPUT_CURRENT = 0x1654,
     PID_AMBIENT_TEMPERATURE = 0x1002,
+    PID_AMBIENT_TEMPERATURE_EV = 0x1F46,
     PID_BATTERY_CAPACITY = 0x1D3E, 
     PID_BATTERY_CHARGING_POWER = 0x10D4,
     PID_BATTERY_COOLANT_TEMPERATURE = 0x1848,
@@ -162,7 +186,8 @@ enum CANPID
     PID_BATTERY_VOLTAGE_AND_CURRENT = 0x1F9A,
     PID_CABIN_TEMPERATURE = 0x1001,
     PID_CHARGER_INPUT_POWER = 0x161D,
-    PID_CHARGING = 0x10D1,
+    PID_CONTROL_SYSTEM_MODE = 0x10D1,
+    PID_CHARGING_CONTROL_INFORMATION = 0x1689,
     PID_CHARGING_CONTROL_STATUS = 0x1668,
     PID_CHARGING_LID = 0x1625,
     PID_CHARGING_VOLTAGE_TYPE = 0x161C,
@@ -238,8 +263,8 @@ inline const char* ConvertPollStateToString(int state) {
         case (PollState::AWAKE):
             pollStateText = "AWAKE";
             break;
-        case (PollState::READY):
-            pollStateText = "READY";
+        case (PollState::DRIVING):
+            pollStateText = "DRIVING";
             break;
         case (PollState::CHARGING):
             pollStateText = "CHARGING";

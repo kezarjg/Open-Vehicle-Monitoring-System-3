@@ -14,11 +14,22 @@
 // Poll state descriptions:
 //    SLEEP (0)             : Vehicle is sleeping; no activity on the CAN bus. We are listening only.
 //    AWAKE (1)             : Vehicle is alive; vehicle has been switched on by driver
-//    READY (2)             : Vehicle is "Ready" to drive or being driven
+//    DRIVING (2)           : Vehicle is "Ready" to drive or being driven
 //    CHARGING (3)          : Vehicle is charging
 
 void OvmsVehicleToyotaETNGA::HandleSleepState()
 {
+    int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
+    
+    if (!m_allow_wake)
+    {
+        if ((monotonic - m_sleep_entry_time) > 10)
+        {
+            ESP_LOGI(TAG, "Cooling off period ended, allowing wake");
+            m_allow_wake = true;
+        }
+    }
+
     if (StandardMetrics.ms_v_env_awake->AsBool()) {
         // There is life.
         TransitionToAwakeState();
@@ -38,88 +49,76 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
 
 void OvmsVehicleToyotaETNGA::HandleAwakeState()
 {
-    std::string chargeState = StandardMetrics.ms_v_charge_state->AsString();
+    int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
     
     if (!StandardMetrics.ms_v_env_awake->AsBool()) {
         // No CAN communication for 120s - stop polling
         TransitionToSleepState();
-    } else if (StandardMetrics.ms_v_env_on->AsBool()) {
+    }
+    else if (m_s_controlstate->AsInt() == ControlState::CS_DRIVING) {
         // If the vehicle is switched on
-        TransitionToReadyState();
-    } else if (StandardMetrics.ms_v_door_chargeport->AsBool() && !(chargeState == "done")) {
-        // If the charge door is open and we've not already completed a charge
+        TransitionToDrivingState();
+    }
+    else if (m_s_controlstate->AsInt() == CS_CHARGING) {
+        // If the vehicle starts charging
         TransitionToChargingState();
+    }
+    else if (monotonic - m_v_env_awaketime->AsInt() > 300) {
+        // If the vehicle has been awake for 5 minutes without a clear state
+        ESP_LOGD(TAG, "Vehicle awake for over 300s with no activity — forcing sleep state");
+        m_sleep_entry_time = monotonic;
+        m_allow_wake = false;
+        TransitionToSleepState();
     }
 }
 
-void OvmsVehicleToyotaETNGA::HandleReadyState()
+void OvmsVehicleToyotaETNGA::HandleDrivingState()
 {
-    if (!StandardMetrics.ms_v_env_on->AsBool()) {
+    if (m_s_controlstate->AsInt() != ControlState::CS_DRIVING) {
         TransitionToAwakeState();
+        SetReadyStatus(false);
+        SetVehicleSpeed(0);
+        SetShiftPosition(0);
+        StandardMetrics.ms_v_env_temp->Clear();
+        StandardMetrics.ms_v_env_cabintemp->Clear();
     }
 }
 
 void OvmsVehicleToyotaETNGA::HandleChargingState()
 {
-    std::string chargeState = StandardMetrics.ms_v_charge_state->AsString();
-
-    if (chargeState == "door_open") {
-        if (StandardMetrics.ms_v_charge_pilot->AsBool()) {
-            // A charging cable was connected, update charge state to 'connected'
-            SetChargeState("connected");
-        } else if (!StandardMetrics.ms_v_door_chargeport->AsBool()) {
-            // Charge port door was closed or timeout, go back to 'Awake' state
-            TransitionToAwakeState();
-        }
-    } else if (chargeState == "connected") {
-        if (StandardMetrics.ms_v_charge_inprogress->AsBool()) {
-            // Charging session in progress, update charge state to 'charging'
-            SetChargeState("charging");
-
-            // Get the one-time metrics for charging
-            RequestChargeMode();
-            RequestChargeType();    // TODO: Somestimes this reports 'CCS' incorrectly
-
-        } else if (!StandardMetrics.ms_v_charge_pilot->AsBool()) {
-            // A charging cable was disconnected, update charge state to 'door_open'
-            SetChargeState("door_open");
-        }
-    } else if (chargeState == "charging") {
-        if (!StandardMetrics.ms_v_charge_inprogress->AsBool()) {
-            // Charging session no longer in progress, update charge state to 'connected'
-            SetChargeState("connected");
-        }
-    } else {
-        // Not sure how we got here, but go back to the start
-        ESP_LOGW(TAG, "Unexpected charge state: %s", chargeState.c_str());
-        SetChargeState("door_open");
+    if (m_s_controlstate->AsInt() != ControlState::CS_CHARGING) {
+        TransitionToAwakeState();
+        StandardMetrics.ms_v_env_temp->Clear();
+        SetChargingStatus(false);
     }
-
-    // TODO: Need to find a 'Charging Done' PID
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToSleepState()
 {
     // Perform actions needed for transitioning to the SLEEP state
     SetPollState(PollState::SLEEP); // Update the state
+    SetAwake(false);
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
 {
     // Perform actions needed for transitioning to the ACTIVE state
     SetPollState(PollState::AWAKE);
+    m_v_env_awaketime->SetValue(StandardMetrics.ms_m_monotonic->AsInt());   // Store the time we entered to use as a timeout
 }
 
-void OvmsVehicleToyotaETNGA::TransitionToReadyState()
+void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
 {
     // Perform actions needed for transitioning to the READY state
-    SetPollState(PollState::READY); // Update the state
+    SetPollState(PollState::DRIVING); // Update the state
     m_v_pos_trip_start->SetStale(true);  // Set the start trip metric as stale so it resets next odometer reading
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargingState()
 {
     // Perform actions needed for transitioning to the CHARGING state
-    SetChargeState("door_open");
+
+    // Get the one-time metrics for charging
     SetPollState(PollState::CHARGING); // Update the state
+    SetChargingStatus(true);
 }
