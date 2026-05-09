@@ -57,3 +57,8 @@ Some PIDs are on demand only
 * PID_VIN
 * PID_CHARGING_CONTROL_STATUS       - Determines if vehicle is charging
 * PID_CHARGING_VOLTAGE_TYPE         - Determines type1, type2, or ccs
+
+.. toctree::
+   :maxdepth: 1
+
+   state_machine

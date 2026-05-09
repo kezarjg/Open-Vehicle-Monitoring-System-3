@@ -259,26 +259,34 @@ void OvmsVehicleToyotaETNGA::IncomingHPCMHybridPtCtr(uint16_t pid)
 
 void OvmsVehicleToyotaETNGA::RequestVIN()
 {
-    std::string response;
-    int res = PollSingleRequest(
-        m_can2,
-        HYBRID_CONTROL_SYSTEM_TX,
-        HYBRID_CONTROL_SYSTEM_RX,
-        VEHICLE_POLL_TYPE_READDATA,
-        PID_VIN,
-        response,
-        1000,
-        ISOTP_STD
-    );
+    if (!StandardMetrics.ms_v_vin->AsString().empty())
+        return;
 
-    if (res == POLLSINGLE_OK)
-    {
-        SetVehicleVIN(response);
-    }
-    else
-    {
-        ESP_LOGW(TAG, "RequestVIN: Failed with error code %d", res);
-    }
+    using std::placeholders::_1;
+    using std::placeholders::_2;
+    using std::placeholders::_3;
+    using std::placeholders::_4;
+    using std::placeholders::_5;
+    using std::placeholders::_6;
+
+    auto entry = std::shared_ptr<OvmsPoller::OnceOffPoll>(
+        new OvmsPoller::OnceOffPoll(
+            std::bind(&OvmsVehicleToyotaETNGA::IncomingVINSuccess, this, _1, _2, _3, _4, _5, _6),
+            std::bind(&OvmsVehicleToyotaETNGA::IncomingVINFail,    this, _1, _2, _3, _4, _5),
+            HYBRID_CONTROL_SYSTEM_TX, HYBRID_CONTROL_SYSTEM_RX,
+            VEHICLE_POLL_TYPE_READDATA, PID_VIN,
+            ISOTP_STD, 0, /*retry_fail=*/3));
+    PollRequest(m_can2, "!xte.vin", entry);
+}
+
+void OvmsVehicleToyotaETNGA::IncomingVINSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, CAN_frame_format_t format, const std::string &data)
+{
+    SetVehicleVIN(data);
+}
+
+void OvmsVehicleToyotaETNGA::IncomingVINFail(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, int errorcode)
+{
+    ESP_LOGW(TAG, "RequestVIN: Failed with error code %d", errorcode);
 }
 
 void OvmsVehicleToyotaETNGA::DiagnosticSession()

@@ -37,7 +37,6 @@ public:
     ~OvmsVehicleToyotaETNGA();
 
     void Ticker1(uint32_t ticker);
-    void Ticker60(uint32_t ticker);
 
     void IncomingPollReply(const OvmsPoller::poll_job_t &job, uint8_t* data, uint8_t length) override;
 
@@ -147,6 +146,8 @@ private:
     void TransitionToChargingState();
 
     void RequestVIN();
+    void IncomingVINSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, CAN_frame_format_t format, const std::string &data);
+    void IncomingVINFail(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, int errorcode);
     void RequestChargeMode();
     void RequestChargeType();
     void DiagnosticSession();

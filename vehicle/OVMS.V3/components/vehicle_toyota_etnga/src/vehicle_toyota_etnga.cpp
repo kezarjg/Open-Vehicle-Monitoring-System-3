@@ -152,11 +152,3 @@ void OvmsVehicleToyotaETNGA::Ticker1(uint32_t ticker)
     }
 }
 
-void OvmsVehicleToyotaETNGA::Ticker60(uint32_t ticker)
-{
-    // Request VIN if it's not yet known and the vehicle is active
-    if (StandardMetrics.ms_v_vin->AsString().empty() &&
-        (m_s_pollstate == PollState::DRIVING || m_s_pollstate == PollState::CHARGING)) {
-        RequestVIN();
-    }
-}

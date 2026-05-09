@@ -112,6 +112,7 @@ void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
     // Perform actions needed for transitioning to the READY state
     SetPollState(PollState::DRIVING); // Update the state
     m_v_pos_trip_start->SetStale(true);  // Set the start trip metric as stale so it resets next odometer reading
+    RequestVIN();
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargingState()
@@ -121,4 +122,5 @@ void OvmsVehicleToyotaETNGA::TransitionToChargingState()
     // Get the one-time metrics for charging
     SetPollState(PollState::CHARGING); // Update the state
     SetChargingStatus(true);
+    RequestVIN();
 }
