@@ -22,6 +22,7 @@ RUN apt-get update && \
     curl \
     dos2unix \
     flex \
+    gcc \
     git \
     gperf \
     lcov \
@@ -53,13 +54,24 @@ RUN mkdir -p /opt/esp && \
     git submodule update --init --recursive && \
     chown -R $USERNAME:$USERNAME /opt/esp /opt/esp-idf
 
-# Set IDF_PATH globally for all users
-RUN echo 'export IDF_PATH=/opt/esp-idf' > /etc/profile.d/export_idf_path.sh && \
+# Set IDF_PATH globally for all users and pull in the IDF tool dirs
+# (esptool, espcoredump, partition_table, tools/) per upstream add_path.sh
+RUN printf '%s\n' \
+        'export IDF_PATH=/opt/esp-idf' \
+        '. $IDF_PATH/add_path.sh > /dev/null 2>&1' \
+        > /etc/profile.d/export_idf_path.sh && \
     chmod +x /etc/profile.d/export_idf_path.sh
 
 # Set locale to en_US.UTF-8
 RUN locale-gen en_US.UTF-8 && \
     update-locale LANG=en_US.UTF-8
+
+# Install Node.js (for Claude Code) and Claude Code CLI globally
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    npm install -g @anthropic-ai/claude-code && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Switch to non-root user
 USER $USERNAME
@@ -70,8 +82,9 @@ WORKDIR /home/$USERNAME
 # Set path variable
 ENV PATH="/home/$USERNAME/.local/bin:/opt/esp/xtensa-esp32-elf/bin:${PATH}"
 
-# Configure git safe directory
-RUN git config --global --add safe.directory /opt/esp-idf
+# Configure git safe directories
+RUN git config --global --add safe.directory /opt/esp-idf && \
+    git config --global --add safe.directory /workspaces/Open-Vehicle-Monitoring-System-3
 
 # Install Python dependencies
 RUN pip3 install --break-system-packages -r /opt/esp-idf/requirements.txt
