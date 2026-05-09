@@ -66,3 +66,7 @@ docs/build/
 .vscode/
 vehicle/OVMS.V3/components/ovms_webserver/assets/charts.js.gz
 *.gz
+
+# Local secrets sourced by helper scripts (never commit)
+scripts/.env
+.env

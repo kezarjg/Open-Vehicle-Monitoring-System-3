@@ -33,9 +33,11 @@ RUN apt-get update && \
     locales \
     make \
     ninja-build \
+    openssh-client \
     python3 \
     python3-pip \
     python3-setuptools \
+    sshpass \
     unzip \
     wget \
     xz-utils \
@@ -73,6 +75,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Install GitHub CLI (gh) from the official apt repository
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
+    chmod 644 /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gh && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # Switch to non-root user
 USER $USERNAME
 
@@ -88,4 +101,13 @@ RUN git config --global --add safe.directory /opt/esp-idf && \
 
 # Install Python dependencies
 RUN pip3 install --break-system-packages -r /opt/esp-idf/requirements.txt
+
+# Install Sphinx toolchain for building the docs in docs/
+# (mirrors docs/source/requirements.txt; sphinx_rtd_theme pulls in Sphinx itself)
+RUN pip3 install --break-system-packages \
+        sphinx_rtd_theme \
+        sphinx_mdinclude \
+        docutils \
+        mistune \
+        requests
 
