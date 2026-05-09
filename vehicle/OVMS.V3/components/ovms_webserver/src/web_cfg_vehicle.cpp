@@ -2,9 +2,6 @@
 ;    Project:       Open Vehicle Monitor System
 ;    Date:          November 2025
 ;
-;    Changes:
-;    1.0  Initial release - Climate schedule configuration
-;
 ; Permission is hereby granted, free of charge, to any person obtaining a copy
 ; of this software and associated documentation files (the "Software"), to deal
 ; in the Software without restriction, including without limitation the rights
@@ -24,15 +21,8 @@
 ; THE SOFTWARE.
 */
 
-#include "ovms_log.h"
-#include <string.h>
-#include <stdio.h>
-#include <sstream> 
 #include "ovms_webserver.h"
-#include "ovms_config.h"
-#include "ovms_metrics.h"
 #include "metrics_standard.h"
-#include "vehicle.h"
 
 #define _attr(text) (c.encode_html(text).c_str())
 #define _html(text) (c.encode_html(text).c_str())
@@ -92,7 +82,7 @@ void OvmsWebServer::HandleCfgVehicle(PageEntry_t& p, PageContext_t& c)
     if (vehicleid.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-") != std::string::npos)
       error += "<li data-input=\"vehicleid\">Vehicle ID may only contain ASCII letters, digits and '-'</li>";
 
-    if (error == "" && StdMetrics.ms_v_type->AsString() != vehicletype) {
+    if (error == "" && vehicletype != MyVehicleFactory.ActiveVehicleType()) {
       MyVehicleFactory.SetVehicle(vehicletype.c_str());
       vehicle = MyVehicleFactory.ActiveVehicle();
       if (!vehicle) {
@@ -106,6 +96,7 @@ void OvmsWebServer::HandleCfgVehicle(PageEntry_t& p, PageContext_t& c)
 
     if (error == "") {
       // success:
+      auto lock = MyConfig.Lock();
       MyConfig.SetParamValue("vehicle", "id", vehicleid);
       MyConfig.SetParamValue("auto", "vehicle.type", vehicletype);
       MyConfig.SetParamValue("vehicle", "name", vehiclename);
@@ -165,6 +156,7 @@ void OvmsWebServer::HandleCfgVehicle(PageEntry_t& p, PageContext_t& c)
 
   if (read_config) {
     // read configuration:
+    auto lock = MyConfig.Lock();
     vehicleid = MyConfig.GetParamValue("vehicle", "id");
     vehicletype = MyConfig.GetParamValue("auto", "vehicle.type");
     vehiclename = MyConfig.GetParamValue("vehicle", "name");
@@ -214,8 +206,12 @@ void OvmsWebServer::HandleCfgVehicle(PageEntry_t& p, PageContext_t& c)
 
   c.input_select_start("Vehicle type", "vehicletype");
   c.input_select_option("&mdash;", "", vehicletype.empty());
+  // sort vehicle options by name:
+  std::map<const char*, const char*, CmpStrCaseOp> vsort;
   for (OvmsVehicleFactory::map_vehicle_t::iterator k=MyVehicleFactory.m_vmap.begin(); k!=MyVehicleFactory.m_vmap.end(); ++k)
-    c.input_select_option(k->second.name, k->first, (vehicletype == k->first));
+    vsort[k->second.name] = k->first;
+  for (auto &entry : vsort)
+    c.input_select_option(entry.first, entry.second, (vehicletype == entry.second));
   c.input_select_end();
   c.input_text("Vehicle ID", "vehicleid", vehicleid.c_str(), "Use ASCII letters, digits and '-'",
     "<p>Note: this is also the <strong>vehicle account ID</strong> for server connections.</p>");

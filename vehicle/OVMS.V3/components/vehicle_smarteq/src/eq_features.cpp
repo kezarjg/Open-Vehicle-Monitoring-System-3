@@ -41,98 +41,128 @@ void OvmsVehicleSmartEQ::setTPMSValue() {
   
   std::vector<string> tpms_layout = OvmsVehicle::GetTpmsLayout();
   int count = (int)tpms_layout.size();
-  std::vector<float> tpms_pressure(count);
-  std::vector<float> tpms_temp(count);
-  std::vector<short> tpms_alert(count);
+  std::vector<float> tpms_pressure(count, 0.0f);
+  std::vector<float> tpms_temp(count, 0.0f);
+  std::vector<short> tpms_alert(count, 0);
 
   float _threshold_front = m_front_pressure;
   float _threshold_rear = m_rear_pressure;
   float _threshold_warn = m_pressure_warning;
   float _threshold_alert = m_pressure_alert;
 
+  // Pressure validation limits
+  static const float PRESSURE_MIN = 10.0f;   // Below this = sensor not working
+  static const float PRESSURE_MAX = 500.0f;  // Above this = invalid reading
+  static const float TEMP_MIN = -40.0f;
+  static const float TEMP_MAX = 90.0f;
+
   for (int i=0; i < count; i++) 
     {
     int indexcar = m_tpms_index[i];
-
     float _pressure = m_tpms_pressure[indexcar];
     float _temp = m_tpms_temperature[indexcar];
-    short _lowbatt = m_tpms_lowbatt[indexcar];
-    short _missing_tx = m_tpms_missing_tx[indexcar];
+    bool _lowbatt = m_tpms_lowbatt[indexcar];
+    bool _missing_tx = m_tpms_missing_tx[indexcar];
     
     short _alert = 0;
-    bool _flag = true;
+    bool _flag = false;
 
-    // Validate pressure value
-    if (_pressure < 20.0f)
-      tpms_pressure[i] = _pressure;
-    if (m_tpms_temp_enable) 
-      tpms_temp[i] = _temp;
-    if (_pressure < 10.0f || !m_tpms_alert_enable)
+    // Validate pressure value and check if sensor is active
+    bool pressure_valid = (_pressure >= PRESSURE_MIN && _pressure < PRESSURE_MAX);
+    bool alerts_enabled = m_tpms_alert_enable;
+    
+    if (pressure_valid)
       {
-      _lowbatt = 0;
-      _missing_tx = 0;
+      tpms_pressure[i] = _pressure;
+      _flag = true;
+      }
+    
+    // Validate and set temperature
+    if (m_tpms_temp_enable && _temp >= TEMP_MIN && _temp < TEMP_MAX) 
+      {
+      tpms_temp[i] = _temp;
+      }
+    
+    // Handle alert conditions only if sensor is working and alerts are enabled
+    if (!pressure_valid || !alerts_enabled) 
+      {
+      // Sensor not working or alerts disabled - clear all alerts
+      _lowbatt = false;
+      _missing_tx = false;
       tpms_alert[i] = 0;
       _flag = false;
+      
+      // Clear stored alert states
+      mt_tpms_low_batt->SetElemValue(i, 0);
+      mt_tpms_missing_tx->SetElemValue(i, 0);
       }
     else
       {
-      mt_tpms_low_batt->SetElemValue(indexcar, _lowbatt);
-      mt_tpms_missing_tx->SetElemValue(indexcar, _missing_tx);
+      // Sensor working and alerts enabled - update alert states
+      mt_tpms_low_batt->SetElemValue(i, _lowbatt);
+      mt_tpms_missing_tx->SetElemValue(i, _missing_tx);
       }
-    if (m_tpms_alert_enable && _flag)
+    
+    // Calculate pressure deviation alerts
+    if (alerts_enabled && _flag)
       {
       // Get reference pressure based on front/rear position
-      float reference_pressure = (indexcar < (count / 2)) ? _threshold_front : _threshold_rear;
+      float reference_pressure = (i < (count / 2)) ? _threshold_front : _threshold_rear;
+      
       // Calculate deviation from reference pressure      
       float deviation = _pressure - reference_pressure;
       float abs_deviation = std::abs(deviation);
-      if (_lowbatt > 0) 
+      
+      // Priority: low battery > missing transmission > pressure deviation
+      if (_lowbatt) 
         {
         _alert = 1;
-        MyNotify.NotifyStringf("alert", "tpms.lowbatt", "TPMS low battery on wheel %s", tpms_layout[i].c_str());
+        MyNotify.NotifyStringf("alert", "tpms.lowbatt", 
+                               "TPMS low battery on wheel %s", 
+                               tpms_layout[i].c_str());
         }
-      else if (_missing_tx > 0) 
+      else if (_missing_tx) 
         {
         _alert = 2;
-        MyNotify.NotifyStringf("alert", "tpms.missing_tx", "TPMS missing transmission on wheel %s", tpms_layout[i].c_str());
+        MyNotify.NotifyStringf("alert", "tpms.missing_tx", 
+                               "TPMS missing transmission on wheel %s", 
+                               tpms_layout[i].c_str());
         }
       else if (abs_deviation > _threshold_alert) 
         {
         _alert = 2;
-        MyNotify.NotifyStringf("alert", "tpms.alert", "TPMS pressure alert on wheel %s", tpms_layout[i].c_str());
+        MyNotify.NotifyStringf("alert", "tpms.alert", 
+                               "TPMS pressure alert on wheel %s: %.1f kPa (ref: %.1f kPa)", 
+                               tpms_layout[i].c_str(), _pressure, reference_pressure);
         }
-      else if 
-        (abs_deviation > _threshold_warn) 
+      else if (abs_deviation > _threshold_warn) 
         {
         _alert = 1;
-        MyNotify.NotifyStringf("alert", "tpms.warning", "TPMS pressure warning on wheel %s", tpms_layout[i].c_str());
-        }        
+        MyNotify.NotifyStringf("alert", "tpms.warning", 
+                               "TPMS pressure warning on wheel %s: %.1f kPa (ref: %.1f kPa)", 
+                               tpms_layout[i].c_str(), _pressure, reference_pressure);
+        }
+      
       tpms_alert[i] = _alert;
       }
+    else
+      {
+      tpms_alert[i] = 0;
+      }
     } // end for loop
+    
   // Set the metrics  
   StdMetrics.ms_v_tpms_pressure->SetValue(tpms_pressure);
-  mt_tpms_pressure->SetValue(tpms_pressure);
+  
   if (m_tpms_temp_enable)
     {
     StdMetrics.ms_v_tpms_temp->SetValue(tpms_temp);
-    mt_tpms_temp->SetValue(tpms_temp);    
     }
+    
   if (m_tpms_alert_enable)
     {
     StdMetrics.ms_v_tpms_alert->SetValue(tpms_alert);
-    mt_tpms_alert->SetValue(tpms_alert);    
     }
-}
-
-// Set TPMS value at boot, cached values are not available
-// and we need to set dummy values to avoid alert messages
-void OvmsVehicleSmartEQ::setTPMSValueBoot() {
-  for (int i = 0; i < 4; i++) {
-    StdMetrics.ms_v_tpms_pressure->SetElemValue(i, 0.0f);
-    StdMetrics.ms_v_tpms_temp->SetElemValue(i, 0.0f);
-    StdMetrics.ms_v_tpms_alert->SetElemValue(i, 0);
-  }
 }
 
 void OvmsVehicleSmartEQ::DisablePlugin(const char* plugin) {
@@ -171,7 +201,6 @@ void OvmsVehicleSmartEQ::ResetChargingValues() {
   m_charge_finished = false;
   m_notifySOClimit = false;
   StdMetrics.ms_v_charge_kwh->SetValue(0); // charged Energy
-  //StdMetrics.ms_v_charge_kwh_grid->SetValue(0);
 }
 
 void OvmsVehicleSmartEQ::ResetTripCounters() {
@@ -181,6 +210,8 @@ void OvmsVehicleSmartEQ::ResetTripCounters() {
   }
   StdMetrics.ms_v_bat_energy_recd->SetValue(0);
   StdMetrics.ms_v_bat_energy_used->SetValue(0);
+  StdMetrics.ms_v_bat_coulomb_recd->SetValue(0);
+  StdMetrics.ms_v_bat_coulomb_used->SetValue(0);
   mt_pos_odometer_start->SetValue(StdMetrics.ms_v_pos_odometer->AsFloat());
   StdMetrics.ms_v_pos_trip->SetValue(0);
   StdMetrics.ms_v_charge_kwh_grid->SetValue(0);
@@ -193,10 +224,13 @@ void OvmsVehicleSmartEQ::ResetTotalCounters() {
   }
   StdMetrics.ms_v_bat_energy_recd_total->SetValue(0);
   StdMetrics.ms_v_bat_energy_used_total->SetValue(0);
+  StdMetrics.ms_v_bat_coulomb_recd_total->SetValue(0);
+  StdMetrics.ms_v_bat_coulomb_used_total->SetValue(0);
   mt_pos_odometer_trip_total->SetValue(0);
   mt_pos_odometer_start_total->SetValue(StdMetrics.ms_v_pos_odometer->AsFloat());
   StdMetrics.ms_v_charge_kwh_grid_total->SetValue(0);
-  MyConfig.SetParamValueBool("xsq", "resettotal", false);
+  if (m_resettotal)
+    MyConfig.SetParamValueBool("xsq", "resettotal", false);
 }
 
 // check the 12V alert periodically and charge the 12V battery if needed
@@ -345,6 +379,7 @@ void OvmsVehicleSmartEQ::ReCalcADCfactor(float can12V, OvmsWriter* writer) {
       mt_adc_factor_history->SetElemValues(0, n, hist);
     mt_adc_factor->SetValue(adc_factor_new);
     MyConfig.SetParamValueFloat("system.adc", "factor12v", adc_factor_new);
+    MyConfig.SetParamValueBool("xsq", "calc.adcfactor", false);
     if (writer) writer->printf("New ADC factor stored: %.3f (prev %.3f, history size %u)\n", adc_factor_new, adc_factor_prev, (unsigned)n);
   #else
     ESP_LOGD(TAG, "ADC support not enabled");
@@ -353,34 +388,38 @@ void OvmsVehicleSmartEQ::ReCalcADCfactor(float can12V, OvmsWriter* writer) {
 }
 
 void OvmsVehicleSmartEQ::DoorLockState() {
-  bool warning_unlocked = (StdMetrics.ms_v_env_parktime->AsInt() > m_park_timeout_secs &&
-                          !StdMetrics.ms_v_env_on->AsBool() &&
-                          !StdMetrics.ms_v_env_locked->AsBool() &&
+  bool warning_unlocked = (StdMetrics.ms_v_env_parktime->AsInt(0) > m_park_timeout_secs &&
+                          !IsOnEQ() &&
+                          !StdMetrics.ms_v_env_locked->AsBool(false) &&
+                          !m_cmd_locked &&
                           !m_warning_unlocked);
   
   if (warning_unlocked) {
       m_warning_unlocked = true;
       ESP_LOGI(TAG, "Warning: Vehicle is unlocked and parked for more than 10 minutes");
       MyNotify.NotifyString("alert", "vehicle.unlocked", "The vehicle is unlocked and parked for more than 10 minutes.");
-  } else if (StdMetrics.ms_v_env_parktime->AsInt() > m_park_timeout_secs +10 && !warning_unlocked){
+  } else if (StdMetrics.ms_v_env_parktime->AsInt(0) > m_park_timeout_secs +10 && !warning_unlocked){
       m_warning_unlocked = true; // prevent warning if the vehicle is parked locked for more than 10 minutes
   }
 }
 
+bool OvmsVehicleSmartEQ::DoorOpen() {
+  return (StdMetrics.ms_v_door_fl->AsBool(false) ||
+          StdMetrics.ms_v_door_fr->AsBool(false) ||
+          StdMetrics.ms_v_door_rl->AsBool(false) ||
+          StdMetrics.ms_v_door_rr->AsBool(false) ||
+          StdMetrics.ms_v_door_trunk->AsBool(false) ||
+          StdMetrics.ms_v_door_hood->AsBool(false));
+}
+
 void OvmsVehicleSmartEQ::DoorOpenState() {
-  bool open_doors = (StdMetrics.ms_v_door_fl->AsBool() ||
-                     StdMetrics.ms_v_door_fr->AsBool() ||
-                     StdMetrics.ms_v_door_rl->AsBool() ||
-                     StdMetrics.ms_v_door_rr->AsBool() ||
-                     StdMetrics.ms_v_door_trunk->AsBool() ||
-                     StdMetrics.ms_v_door_hood->AsBool()) &&
-                     !m_warning_dooropen;
+  bool open_doors = !m_warning_dooropen && DoorOpen();
 
   if (open_doors) {
       m_warning_dooropen = true;
       ESP_LOGI(TAG, "Warning: Vehicle has open doors");
       MyNotify.NotifyString("alert", "vehicle.open_doors", "The vehicle has open doors.");
-  } else if (StdMetrics.ms_v_env_parktime->AsInt() > m_park_timeout_secs +10 && !open_doors){
+  } else if (StdMetrics.ms_v_env_parktime->AsInt() > m_park_timeout_secs +10 && !DoorOpen()){
       m_warning_dooropen = true; // prevent warning if the vehicle is parked locked for more than 10 minutes
   }
 }
@@ -414,14 +453,158 @@ void OvmsVehicleSmartEQ::ModemRestart() {
   #endif
 }
 
-void OvmsVehicleSmartEQ::ModemEventRestart(std::string event, void* data) {
-  if (!m_modem_check) {
-    // ESP_LOGE(TAG, "Modem auto restart is disabled");
-    return;
-  }
+void OvmsVehicleSmartEQ::smartOn()
+{
+  // Reset trip values
+  if (!m_resettrip)
+    ResetTripCounters();
+  // Reset kWh/100km values
+  if (m_resettotal)
+    ResetTotalCounters();
+  // Reset warning flags
+  m_warning_unlocked = false;
+  m_warning_dooropen = false;
+  // Reset 12V and climate control tickers
+  m_12v_ticker = 0;
+  m_climate_restart = false;
+  m_climate_restart_ticker = 0;
+  // reset idle ticker when vehicle turned on to prevent trigger every 60 sec.
+  m_idle_ticker = 15 * 60;
+  // canwrite enable write access, only when car is on
+  if(IsCANwrite()) 
+    {
+    smartCANmode(true);
+    }
+  ESP_LOGD(TAG, "smartOn()");
+}
 
-  ModemRestart();
-  ESP_LOGI(TAG, "Modem event '%s' triggered a modem restart", event.c_str());
+void OvmsVehicleSmartEQ::smartOff()
+{
+  // Reset gear
+  StdMetrics.ms_v_env_gear->SetValue(0);
+}
+
+void OvmsVehicleSmartEQ::smartAwake()
+{
+  // enable active polling when car wakes up (canwrite only)
+  mt_bus_awake->SetValue(true);
+  if(m_enable_write) 
+    {
+    smartCANmode(true);
+    }
+  else if (m_enable_write_caron && m_can_active)
+    {
+    smartCANmode(false);
+    }
+}
+
+void OvmsVehicleSmartEQ::smartSleep()
+{
+  // disable active polling when car goes to sleep
+  if((m_enable_write_caron && m_can_active) || m_enable_write_sleep)
+    smartCANmode(false);
+  ESP_LOGD(TAG, "smartSleep()");
+}
+
+void OvmsVehicleSmartEQ::smartChargeStart()
+{
+  if (m_charge_finished) ResetChargingValues();
+  if (m_resettrip) ResetTripCounters();
+  // Set charging metrics
+  StdMetrics.ms_v_charge_pilot->SetValue(true);
+  StdMetrics.ms_v_charge_mode->SetValue("standard");
+  StdMetrics.ms_v_charge_type->SetValue("type2");
+  StdMetrics.ms_v_charge_state->SetValue("charging");
+  StdMetrics.ms_v_charge_substate->SetValue("onrequest");
+  StdMetrics.ms_v_charge_timestamp->SetValue(StdMetrics.ms_m_timeutc->AsInt());
+  mt_bus_awake->SetValue(true);
+  // trigger ADC factor recalculation when HV charging started
+  if(m_enable_calcADCfactor && !m_ADCfactor_recalc) 
+    {
+    m_ADCfactor_recalc_timer = 2;   // wait at least 2 min. before recalculation
+    m_ADCfactor_recalc = true;      // recalculate ADC factor when HV charging
+    }
+  // canwrite enable write access, only when car is on
+  if(IsCANwrite()) 
+    {
+    m_poll_on_charge = true;
+    smartCANmode(true);
+    }
+  ESP_LOGD(TAG, "smartChargeStart()");
+}
+
+void OvmsVehicleSmartEQ::smartChargeStop()
+{
+  StdMetrics.ms_v_charge_pilot->SetValue(false);
+  StdMetrics.ms_v_charge_mode->SetValue("standard");
+  StdMetrics.ms_v_charge_type->SetValue("type2");
+  StdMetrics.ms_v_charge_duration_full->SetValue(0);
+  StdMetrics.ms_v_charge_duration_soc->SetValue(0);
+  StdMetrics.ms_v_charge_duration_range->SetValue(0);
+  StdMetrics.ms_v_charge_power->SetValue(0);
+  StdMetrics.ms_v_charge_current->SetValue(0);
+  StdMetrics.ms_v_charge_timestamp->SetValue(StdMetrics.ms_m_timeutc->AsInt());
+
+  if (StdMetrics.ms_v_bat_soc->AsInt() < 95) {
+    // Assume the charge was interrupted
+    ESP_LOGI(TAG,"charge session was interrupted");
+    StdMetrics.ms_v_charge_state->SetValue("stopped");
+    StdMetrics.ms_v_charge_substate->SetValue("interrupted");
+  } else {
+    // Assume the charge completed normally
+    ESP_LOGI(TAG,"charge session completed");
+    StdMetrics.ms_v_charge_state->SetValue("done");
+    StdMetrics.ms_v_charge_substate->SetValue("onrequest");
+  }
+  // stop recalculation when HV charging stopped
+  m_ADCfactor_recalc_timer = 2;
+  m_ADCfactor_recalc = false;
+  ESP_LOGD(TAG, "smartChargeStop()");
+}
+
+void OvmsVehicleSmartEQ::smartChargePrepare()
+{
+  ESP_LOGD(TAG, "smartChargePrepare()");
+}
+
+void OvmsVehicleSmartEQ::smartChargeFinish()
+{
+  m_charge_finished = true;
+  m_poll_on_charge = false;
+  StdMetrics.ms_v_charge_power->SetValue(0);
+  ESP_LOGD(TAG, "smartChargeFinish()");
+}
+
+void OvmsVehicleSmartEQ::smartCANmode(bool activate)
+{
+  if(!IsCANwrite())
+    {
+    m_can1->Stop();
+    vTaskDelay(200 / portTICK_PERIOD_MS);
+    m_can1->Start(CAN_MODE_LISTEN, CAN_SPEED_500KBPS);
+    PollSetPidList(m_can1, NULL);
+    m_can_active = false;
+    m_poll_on_charge = false;
+    ESP_LOGD(TAG, "smartCANmode(): CAN bus switched to listen mode");
+    return;
+    }
+  
+  // switch CAN bus to active/listen mode
+  m_can1->Stop();
+  vTaskDelay(200 / portTICK_PERIOD_MS);
+  CAN_mode_t mode = activate ? CAN_MODE_ACTIVE : CAN_MODE_LISTEN;
+  RegisterCanBus(1, mode, CAN_SPEED_500KBPS);
+  m_can_active = activate;
+  m_poll_on_charge = m_poll_state == POLLSTATE_CHARGING ? true : false;
+  if (activate)
+    {
+    ESP_LOGD(TAG, "smartCANmode(): CAN bus switched to active mode for write access");
+    }
+  if (!activate)
+    {
+    ESP_LOGD(TAG, "smartCANmode(): CAN bus switched to listen mode");
+    }
+  HandleOBDpolling();
 }
 
 /**
