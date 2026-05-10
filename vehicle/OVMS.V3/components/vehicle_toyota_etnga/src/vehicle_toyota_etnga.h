@@ -82,6 +82,7 @@ private:
     // Data calculation functions
     float CalculateAmbientTemperature(const std::string& data);
     float CalculateAmbientTemperatureEV(const std::string& data);
+    std::vector<float> CalculateBatteryCellVoltages(const std::string& data);
     float CalculateBatteryChargingPower(const std::string& data);
     float CalculateBatteryCurrent(const std::string& data);
     float CalculateBatteryPower(float voltage, float current);
@@ -110,6 +111,8 @@ private:
     void SetBatteryPower(float power);
     void SetBatterySOC(float soc);
     void SetBatterySOCBMS(float soc);
+    void SetBatteryCellVoltages(const std::vector<float>& voltages);
+    void SetBatteryCellVoltageStatistics(const std::vector<float>& voltages);
     void SetBatteryTemperatures(const std::vector<float>& temperatures);
     void SetBatteryTemperatureStatistics(const std::vector<float>& temperatures);
     void SetBatteryVoltage(float voltage);
@@ -175,7 +178,8 @@ enum CANPID
     PID_AC_INPUT_CURRENT = 0x1654,
     PID_AMBIENT_TEMPERATURE = 0x1002,
     PID_AMBIENT_TEMPERATURE_EV = 0x1F46,
-    PID_BATTERY_CAPACITY = 0x1D3E, 
+    PID_BATTERY_CAPACITY = 0x1D3E,
+    PID_BATTERY_CELL_VOLTAGES = 0x182E,
     PID_BATTERY_CHARGING_POWER = 0x10D4,
     PID_BATTERY_COOLANT_TEMPERATURE = 0x1848,
     PID_BATTERY_HEATER_STATUS = 0x2806,

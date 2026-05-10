@@ -104,6 +104,20 @@ float OvmsVehicleToyotaETNGA::CalculateBatterySOCBMS(const std::string& data)
     return GetRxBByte(data, 0) * 100.0f / 255.0f;
 }
 
+std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryCellVoltages(const std::string& data)
+{
+    // 0x182E payload: 96 cells × uint16 BE; each LSB = 5/65535 V (~76 µV).
+    std::vector<float> voltages;
+    voltages.reserve(96);
+
+    for (size_t i = 0; i < 192; i += 2) {
+        uint16_t raw = GetRxBUint16(data, i);
+        voltages.push_back(static_cast<float>(raw) * 5.0f / 65535.0f);
+    }
+
+    return voltages;
+}
+
 std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryTemperatures(const std::string& data)
 {
     std::vector<float> temperatures;
@@ -314,6 +328,44 @@ void OvmsVehicleToyotaETNGA::SetBatterySOCBMS(float soc)
         LogMetricChange(m_v_bat_soc_bms, soc, "BMS SOC", "%");
         m_v_bat_soc_bms->SetValue(soc);
     }
+}
+
+void OvmsVehicleToyotaETNGA::SetBatteryCellVoltages(const std::vector<float>& voltages)
+{
+    // If the subclass declared a BMS voltage arrangement, route per-cell through the
+    // BMS API so it can maintain per-cell history, deviation flags, and pack stats.
+    // Otherwise fall back to a direct vector set.
+    if (BmsGetCellArangementVoltage() > 0) {
+        for (size_t i = 0; i < voltages.size(); ++i) {
+            BmsSetCellVoltage(static_cast<int>(i), voltages[i]);
+        }
+    } else {
+        StandardMetrics.ms_v_bat_cell_voltage->SetValue(voltages);
+    }
+}
+
+void OvmsVehicleToyotaETNGA::SetBatteryCellVoltageStatistics(const std::vector<float>& voltages)
+{
+    if (BmsGetCellArangementVoltage() > 0) {
+        // BmsSetCellVoltage already populated pack vmin/vmax/vavg/vstddev.
+        return;
+    }
+
+    // No BMS arrangement: compute and publish pack stats manually.
+    float minVoltage = *std::min_element(voltages.begin(), voltages.end());
+    float maxVoltage = *std::max_element(voltages.begin(), voltages.end());
+    float sum = std::accumulate(voltages.begin(), voltages.end(), 0.0f);
+    float averageVoltage = sum / voltages.size();
+    float variance = 0.0f;
+    for (float v : voltages) {
+        variance += pow(v - averageVoltage, 2);
+    }
+    float standardDeviation = sqrt(variance / voltages.size());
+
+    StandardMetrics.ms_v_bat_pack_vmin->SetValue(minVoltage);
+    StandardMetrics.ms_v_bat_pack_vmax->SetValue(maxVoltage);
+    StandardMetrics.ms_v_bat_pack_vavg->SetValue(averageVoltage);
+    StandardMetrics.ms_v_bat_pack_vstddev->SetValue(standardDeviation);
 }
 
 void OvmsVehicleToyotaETNGA::SetBatteryTemperatures(const std::vector<float>& temperatures)

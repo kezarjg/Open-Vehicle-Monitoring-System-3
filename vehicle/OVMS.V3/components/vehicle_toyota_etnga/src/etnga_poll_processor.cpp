@@ -235,6 +235,13 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
             break;
         }
 
+        case PID_BATTERY_CELL_VOLTAGES: {
+            std::vector<float> voltages = CalculateBatteryCellVoltages(m_rxbuf);
+            SetBatteryCellVoltages(voltages);
+            SetBatteryCellVoltageStatistics(voltages);
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:
