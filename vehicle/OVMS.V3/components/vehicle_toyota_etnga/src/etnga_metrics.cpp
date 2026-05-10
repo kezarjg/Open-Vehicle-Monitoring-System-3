@@ -318,35 +318,43 @@ void OvmsVehicleToyotaETNGA::SetBatterySOCBMS(float soc)
 
 void OvmsVehicleToyotaETNGA::SetBatteryTemperatures(const std::vector<float>& temperatures)
 {
-    StandardMetrics.ms_v_bat_cell_temp->SetValue(temperatures);
+    // If the subclass declared a BMS temperature arrangement, route per-sensor through
+    // the BMS API so it can maintain per-cell history, deviation flags, and pack stats.
+    // Otherwise fall back to a direct vector set (legacy / un-arranged subclasses).
+    if (BmsGetCellArangementTemperature() > 0) {
+        for (size_t i = 0; i < temperatures.size(); ++i) {
+            BmsSetCellTemperature(static_cast<int>(i), temperatures[i]);
+        }
+    } else {
+        StandardMetrics.ms_v_bat_cell_temp->SetValue(temperatures);
+    }
 }
 
 void OvmsVehicleToyotaETNGA::SetBatteryTemperatureStatistics(const std::vector<float>& temperatures)
 {
-    // Calculate the minimum temperature
-    float minTemperature = *std::min_element(temperatures.begin(), temperatures.end());
-
-    // Calculate the maximum temperature
-    float maxTemperature = *std::max_element(temperatures.begin(), temperatures.end());
-
-    // Calculate the average temperature
+    // Average is needed for ms_v_bat_temp regardless of code path.
     float sum = std::accumulate(temperatures.begin(), temperatures.end(), 0.0f);
     float averageTemperature = sum / temperatures.size();
 
-    // Calculate the standard deviation
-    float variance = 0.0f;
-    for (float temperature : temperatures) {
-        variance += pow(temperature - averageTemperature, 2);
+    if (BmsGetCellArangementTemperature() == 0) {
+        // No BMS arrangement: compute pack stats manually and publish them.
+        float minTemperature = *std::min_element(temperatures.begin(), temperatures.end());
+        float maxTemperature = *std::max_element(temperatures.begin(), temperatures.end());
+        float variance = 0.0f;
+        for (float temperature : temperatures) {
+            variance += pow(temperature - averageTemperature, 2);
+        }
+        float standardDeviation = sqrt(variance / temperatures.size());
+
+        StandardMetrics.ms_v_bat_pack_tmin->SetValue(minTemperature);
+        StandardMetrics.ms_v_bat_pack_tmax->SetValue(maxTemperature);
+        StandardMetrics.ms_v_bat_pack_tavg->SetValue(averageTemperature);
+        StandardMetrics.ms_v_bat_pack_tstddev->SetValue(standardDeviation);
     }
-    float standardDeviation = sqrt(variance / temperatures.size());
+    // When arrangement IS set, BmsSetCellTemperature already populated tmin/tmax/tavg/tstddev.
 
-    // Store the results
-    StandardMetrics.ms_v_bat_pack_tmin->SetValue(minTemperature);
-    StandardMetrics.ms_v_bat_pack_tmax->SetValue(maxTemperature);
-    StandardMetrics.ms_v_bat_pack_tavg->SetValue(averageTemperature);
-    StandardMetrics.ms_v_bat_pack_tstddev->SetValue(standardDeviation);
-
-    // There is no single battery temperature value, so I'm using the average Temperature
+    // ms_v_bat_temp (the single representative pack temperature) isn't auto-set by either
+    // path, so publish the average here.
     StandardMetrics.ms_v_bat_temp->SetValue(averageTemperature);
 }
 

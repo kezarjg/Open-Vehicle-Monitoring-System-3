@@ -15,6 +15,10 @@
 OvmsVehicleSubaruSolterra::OvmsVehicleSubaruSolterra()
 {
   ESP_LOGI(TAG, "Subaru Solterra vehicle module");  // Log an informational message
+
+  // Battery pack: 96S CATL (Toyota EM "Type B"), 24 temperature sensors.
+  // 0x182E (cell voltages) is not yet polled, so voltage arrangement is deferred.
+  BmsSetCellArrangementTemperature(24, 1);
 }
 
 // Destructor for the OvmsVehicleSubaruSolterra class
