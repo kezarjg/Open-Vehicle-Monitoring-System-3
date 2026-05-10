@@ -336,6 +336,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryCellVoltages(const std::vector<float>& vo
     // BMS API so it can maintain per-cell history, deviation flags, and pack stats.
     // Otherwise fall back to a direct vector set.
     if (BmsGetCellArangementVoltage() > 0) {
+        BmsRestartCellVoltages();
         for (size_t i = 0; i < voltages.size(); ++i) {
             BmsSetCellVoltage(static_cast<int>(i), voltages[i]);
         }
@@ -374,6 +375,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryTemperatures(const std::vector<float>& te
     // the BMS API so it can maintain per-cell history, deviation flags, and pack stats.
     // Otherwise fall back to a direct vector set (legacy / un-arranged subclasses).
     if (BmsGetCellArangementTemperature() > 0) {
+        BmsRestartCellTemperatures();
         for (size_t i = 0; i < temperatures.size(); ++i) {
             BmsSetCellTemperature(static_cast<int>(i), temperatures[i]);
         }
