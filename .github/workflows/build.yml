@@ -72,4 +72,8 @@ jobs:
         run: |
           export PATH="$TOOLCHAIN_DIR/bin:$PATH"
           cp support/sdkconfig.default.hw31 sdkconfig
+          # The committed preset predates some Kconfig options (new vehicles etc.).
+          # `make defconfig` fills any missing/new options with their defaults
+          # non-interactively, avoiding the interactive prompt that aborts in CI.
+          make defconfig
           make -j"$(nproc)"
