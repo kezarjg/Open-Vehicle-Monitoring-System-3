@@ -103,3 +103,19 @@ jobs:
           # 4. Normalise the edited config (no new prompts now) and build.
           make defconfig
           make -j"$(nproc)"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ovms3-firmware
+          # ovms3.bin is the app image (flash via `ota flash vfs`, as
+          # scripts/ovms-deploy.sh does). The other three are also needed for a
+          # fresh serial flash (`make flash`). if-no-files-found: error so a
+          # silently-missing binary fails the job instead of producing an empty zip.
+          path: |
+            vehicle/OVMS.V3/build/ovms3.bin
+            vehicle/OVMS.V3/build/bootloader/bootloader.bin
+            vehicle/OVMS.V3/build/partitions.bin
+            vehicle/OVMS.V3/build/ota_data_initial.bin
+          if-no-files-found: error
+          retention-days: 30
