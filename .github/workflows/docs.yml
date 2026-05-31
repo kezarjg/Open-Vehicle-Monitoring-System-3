@@ -47,9 +47,11 @@ jobs:
 
       - name: Build HTML docs
         working-directory: docs
-        # `make html` -> sphinx-build of source/ into build/html, exactly as
-        # documented in docs/README.md. Non-zero exit on Sphinx errors fails CI.
-        run: make html
+        # `make html` -> sphinx-build of source/ into build/html (per docs/README.md).
+        # -W promotes Sphinx warnings (broken refs, malformed RST, missing files)
+        # to errors; --keep-going reports every warning before failing rather than
+        # stopping at the first.
+        run: make html SPHINXOPTS="-W --keep-going"
 
       - name: Upload rendered docs
         uses: actions/upload-artifact@v4
