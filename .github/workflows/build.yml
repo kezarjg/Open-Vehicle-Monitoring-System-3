@@ -10,7 +10,26 @@ name: Firmware build
 on:
   push:
     branches: [master]
+    # Skip the firmware build for changes that can't affect it (docs, web
+    # plugins, marketing assets). A mixed change still builds, because
+    # paths-ignore only skips when *every* changed file matches.
+    # (Kept in sync with the pull_request list below — Actions YAML doesn't
+    # reliably support anchors, so the list is duplicated deliberately.)
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'plugins/**'
+      - 'flyer/**'
+      - 'logo/**'
+      - '.readthedocs.yaml'
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'plugins/**'
+      - 'flyer/**'
+      - 'logo/**'
+      - '.readthedocs.yaml'
   workflow_dispatch:
 
 # Cancel an in-progress run when a newer commit is pushed to the same ref.
@@ -22,8 +41,17 @@ env:
   # Pinned to match .travis.yml / .devcontainer to keep CI reproducible.
   TOOLCHAIN_URL: https://dl.espressif.com/dl/xtensa-esp32-elf-linux64-1.22.0-97-gc752ad5-5.2.0.tar.gz
   IDF_REPO: https://github.com/openvehicles/esp-idf.git
+  # Pinned commit of the (frozen 3.3.x) esp-idf fork, so the clone can be cached.
+  # Bump this SHA to pull in upstream esp-idf changes; it also keys the cache.
+  IDF_REF: 9063c8662ca5d67b5490c1503bd4377b380feed3
   IDF_PATH: ${{ github.workspace }}/esp/esp-idf
   TOOLCHAIN_DIR: ${{ github.workspace }}/esp/xtensa-esp32-elf
+  # ccache caches compiled objects across runs; the heavy framework libs
+  # (wolfssl, wolfssh, mongoose, ...) rarely change, so warm builds are far
+  # faster than the ~2min cold compile.
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 500M
+  CCACHE_COMPILERCHECK: content
 
 jobs:
   build:
@@ -61,14 +89,37 @@ jobs:
           mkdir -p esp
           wget -qO- "$TOOLCHAIN_URL" | tar xz -C esp
 
-      - name: Clone ESP-IDF (openvehicles fork)
+      - name: Cache ESP-IDF
+        id: cache-idf
+        uses: actions/cache@v4
+        with:
+          path: esp/esp-idf
+          key: esp-idf-${{ env.IDF_REF }}
+
+      - name: Clone ESP-IDF (openvehicles fork, pinned)
+        if: steps.cache-idf.outputs.cache-hit != 'true'
         run: |
-          git clone --recurse-submodules --depth 1 "$IDF_REPO" "$IDF_PATH"
+          # Shallow-fetch only the pinned commit and its submodules.
+          git init "$IDF_PATH"
+          git -C "$IDF_PATH" remote add origin "$IDF_REPO"
+          git -C "$IDF_PATH" fetch --depth 1 origin "$IDF_REF"
+          git -C "$IDF_PATH" checkout --detach FETCH_HEAD
+          git -C "$IDF_PATH" submodule update --init --recursive --depth 1
 
       - name: Install ESP-IDF Python requirements
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r "$IDF_PATH/requirements.txt"
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          # Per-commit key with a rolling fallback, so each run starts from the
+          # most recent cache and saves its own updated copy.
+          key: ccache-${{ github.sha }}
+          restore-keys: |
+            ccache-
 
       - name: Build firmware (base + vehicle modules under development)
         working-directory: vehicle/OVMS.V3
@@ -80,7 +131,18 @@ jobs:
             CONFIG_OVMS_VEHICLE_SUBARU_SOLTERRA
             CONFIG_OVMS_VEHICLE_TOYOTA_BZ4X
         run: |
-          export PATH="$TOOLCHAIN_DIR/bin:$PATH"
+          # Route the cross-compilers through ccache via a PATH shim: invoked as
+          # e.g. xtensa-esp32-elf-gcc, ccache finds the real compiler next on PATH.
+          # ESP-IDF 3.3 make has no native ccache switch, so this masquerade is
+          # how we hook it in.
+          SHIM="$RUNNER_TEMP/ccache-shim"
+          mkdir -p "$SHIM"
+          for c in xtensa-esp32-elf-gcc xtensa-esp32-elf-g++ xtensa-esp32-elf-c++ xtensa-esp32-elf-cc; do
+            ln -sf "$(command -v ccache)" "$SHIM/$c"
+          done
+          export PATH="$SHIM:$TOOLCHAIN_DIR/bin:$PATH"
+          ccache --zero-stats
+
           cp support/sdkconfig.default.hw31 sdkconfig
 
           # 1. Realise a complete config non-interactively. The committed preset
@@ -103,6 +165,8 @@ jobs:
           # 4. Normalise the edited config (no new prompts now) and build.
           make defconfig
           make -j"$(nproc)"
+
+          ccache --show-stats
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
