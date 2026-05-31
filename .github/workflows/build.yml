@@ -1,8 +1,11 @@
 name: Firmware build
 
-# Compile-checks the OVMS.V3 firmware on every push and pull request, mirroring
-# the legacy .travis.yml build (ESP-IDF 3.3.x make build, hw3.1 sdkconfig preset).
-# This only verifies the firmware compiles; there is no on-device test stage.
+# Compile-checks the OVMS.V3 firmware on every push and pull request, using the
+# legacy ESP-IDF 3.3.x make build with the hw3.1 sdkconfig preset. To keep CI
+# fast and failures attributable to our own code, only the base (NONE) stub plus
+# the vehicle modules under development are compiled (see ENABLE_VEHICLES below),
+# not the full vehicle set. This only verifies compilation; there is no on-device
+# test stage.
 
 on:
   push:
@@ -67,13 +70,36 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r "$IDF_PATH/requirements.txt"
 
-      - name: Build firmware (hw3.1 preset)
+      - name: Build firmware (base + vehicle modules under development)
         working-directory: vehicle/OVMS.V3
+        env:
+          # Vehicle module toggles to compile, on top of the base NONE stub.
+          # The Toyota e-TNGA base class has no toggle of its own — it compiles
+          # automatically whenever Solterra or bZ4X is enabled.
+          ENABLE_VEHICLES: >-
+            CONFIG_OVMS_VEHICLE_SUBARU_SOLTERRA
+            CONFIG_OVMS_VEHICLE_TOYOTA_BZ4X
         run: |
           export PATH="$TOOLCHAIN_DIR/bin:$PATH"
           cp support/sdkconfig.default.hw31 sdkconfig
-          # The committed preset predates some Kconfig options (new vehicles etc.).
-          # `make defconfig` fills any missing/new options with their defaults
-          # non-interactively, avoiding the interactive prompt that aborts in CI.
+
+          # 1. Realise a complete config non-interactively. The committed preset
+          #    predates some Kconfig options; `defconfig` fills them with their
+          #    defaults instead of prompting (which aborts under CI's redirected
+          #    stdin). After this, every vehicle toggle is materialised in sdkconfig.
+          make defconfig
+
+          # 2. Turn every specific-vehicle toggle off (keep only the base NONE
+          #    stub) so CI builds just our modules — faster, and failures are
+          #    attributable to our own code. Vehicle toggles are booleans (=y);
+          #    the int framework params (=<number>) don't match and are untouched.
+          sed -ri '/^CONFIG_OVMS_VEHICLE_NONE=y$/!s/^(CONFIG_OVMS_VEHICLE_[A-Z0-9_]+)=y$/# \1 is not set/' sdkconfig
+
+          # 3. Enable the modules under development (e-TNGA follows transitively).
+          for sym in $ENABLE_VEHICLES; do
+            printf '%s=y\n' "$sym" >> sdkconfig
+          done
+
+          # 4. Normalise the edited config (no new prompts now) and build.
           make defconfig
           make -j"$(nproc)"
