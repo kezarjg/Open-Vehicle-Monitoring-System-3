@@ -1,0 +1,75 @@
+name: Firmware build
+
+# Compile-checks the OVMS.V3 firmware on every push and pull request, mirroring
+# the legacy .travis.yml build (ESP-IDF 3.3.x make build, hw3.1 sdkconfig preset).
+# This only verifies the firmware compiles; there is no on-device test stage.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel an in-progress run when a newer commit is pushed to the same ref.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned to match .travis.yml / .devcontainer to keep CI reproducible.
+  TOOLCHAIN_URL: https://dl.espressif.com/dl/xtensa-esp32-elf-linux64-1.22.0-97-gc752ad5-5.2.0.tar.gz
+  IDF_REPO: https://github.com/openvehicles/esp-idf.git
+  IDF_PATH: ${{ github.workspace }}/esp/esp-idf
+  TOOLCHAIN_DIR: ${{ github.workspace }}/esp/xtensa-esp32-elf
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          # mongoose, zlib, libzip, wolfssh, wolfssl are git submodules and are
+          # required for a full firmware build.
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bison ccache dos2unix flex gperf libncurses-dev wget
+
+      # ESP-IDF 3.3.x ships pinned, older Python deps; 3.8 installs them cleanly.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+
+      - name: Cache xtensa toolchain
+        id: cache-toolchain
+        uses: actions/cache@v4
+        with:
+          path: esp/xtensa-esp32-elf
+          key: xtensa-esp32-elf-1.22.0-97-gc752ad5-5.2.0
+
+      - name: Download xtensa toolchain
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p esp
+          wget -qO- "$TOOLCHAIN_URL" | tar xz -C esp
+
+      - name: Clone ESP-IDF (openvehicles fork)
+        run: |
+          git clone --recurse-submodules --depth 1 "$IDF_REPO" "$IDF_PATH"
+
+      - name: Install ESP-IDF Python requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r "$IDF_PATH/requirements.txt"
+
+      - name: Build firmware (hw3.1 preset)
+        working-directory: vehicle/OVMS.V3
+        run: |
+          export PATH="$TOOLCHAIN_DIR/bin:$PATH"
+          cp support/sdkconfig.default.hw31 sdkconfig
+          make -j"$(nproc)"
