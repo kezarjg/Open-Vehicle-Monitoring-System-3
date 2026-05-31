@@ -1,0 +1,60 @@
+name: Docs build
+
+# Builds the Sphinx documentation the same way upstream's Read the Docs build
+# does (see .readthedocs.yaml): Ubuntu 22.04, Python 3.11, the dependencies in
+# docs/source/requirements.txt, and a Sphinx HTML build of docs/source. Runs
+# only when docs change — the firmware workflow ignores docs/, so the two are
+# complementary. The rendered HTML is uploaded as an artifact for PR preview.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        # No submodules: the docs build doesn't need the firmware submodules.
+
+      # Match the Python version Read the Docs uses (.readthedocs.yaml).
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: docs/source/requirements.txt
+
+      - name: Install Sphinx dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Sphinx itself is pulled in transitively by sphinx_rtd_theme /
+          # sphinx_mdinclude, matching the RTD reproducible-build setup.
+          python -m pip install -r docs/source/requirements.txt
+
+      - name: Build HTML docs
+        working-directory: docs
+        # `make html` -> sphinx-build of source/ into build/html, exactly as
+        # documented in docs/README.md. Non-zero exit on Sphinx errors fails CI.
+        run: make html
+
+      - name: Upload rendered docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ovms-docs-html
+          path: docs/build/html
+          if-no-files-found: error
+          retention-days: 30
