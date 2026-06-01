@@ -2,7 +2,15 @@
 Toyota e-TNGA platform
 ======================
 
-Support for Toyota e-TNGA platform. This module is used by Toyota bZ4X and Subaru Solterra.
+Support for the Toyota e-TNGA platform. This is a shared base module, not a directly selectable vehicle:
+it provides the CAN polling, charging state machine, and the common support baseline for the vehicles built
+on it:
+
+* :doc:`Toyota bZ4X </components/vehicle_toyota_bz4x/docs/index>`
+* :doc:`Subaru Solterra </components/vehicle_subaru_solterra/docs/index>`
+
+Those pages list only what is specific to each vehicle; the Support Overview below is the shared baseline
+they inherit.
 
 ----------------
 Support Overview
