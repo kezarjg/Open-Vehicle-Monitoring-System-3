@@ -48,7 +48,6 @@ protected:
     bool m_allow_wake = true;  // Used to implement a cooldown timer if the vehicle is put into sleep
     int m_sleep_entry_time;  // Used to track the time that cooldown timer started
 
-    PollState m_s_pollstate;
 //    ControlState m_s_controlstate;
     OvmsMetricInt* m_s_controlstate;
     OvmsMetricBool* m_v_bat_heater_status;

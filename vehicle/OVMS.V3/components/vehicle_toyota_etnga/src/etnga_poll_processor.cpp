@@ -326,7 +326,7 @@ void OvmsVehicleToyotaETNGA::RequestChargeMode()
     int chargeMode;
     int maxRetries = 5;
     int retryCount = 0;
-    int res;
+    int res = POLLSINGLE_TIMEOUT;  // non-OK sentinel so the retry loop runs at least once
 
     while (retryCount < maxRetries && res != POLLSINGLE_OK)
     {
@@ -367,7 +367,7 @@ void OvmsVehicleToyotaETNGA::RequestChargeType()
     int chargeType;
     int maxRetries = 5;
     int retryCount = 0;
-    int res;
+    int res = POLLSINGLE_TIMEOUT;  // non-OK sentinel so the retry loop runs at least once
 
     while (retryCount < maxRetries && res != POLLSINGLE_OK)
     {

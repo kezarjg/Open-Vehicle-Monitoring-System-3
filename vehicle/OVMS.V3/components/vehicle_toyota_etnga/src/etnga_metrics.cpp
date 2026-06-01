@@ -14,7 +14,6 @@
 
 void OvmsVehicleToyotaETNGA::InitializeMetrics()
 {
-//    m_s_pollstate = MyMetrics.InitInt("xte.s.pollstate", SM_STALE_NONE);  // This variable stores the pollstate
     m_s_controlstate = MyMetrics.InitInt("xte.s.controlstate", SM_STALE_MIN);  // This variable stores the control state variable
     m_v_bat_heater_status = MyMetrics.InitBool("xte.v.b.heater", SM_STALE_MID);  // This variable stores the status of the battery coolant heater relay
     m_v_bat_soc_bms = MyMetrics.InitFloat("xte.v.b.soc.bms", SM_STALE_MID, 0.0f, Percentage, true);  // This variable stores the SOC as reported by the BMS
@@ -242,7 +241,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryChargingPower(float power)
 
     float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
 
-    if (!lastChargerEnergyLogTime == 0)
+    if (lastChargerEnergyLogTime != 0)
     {
         hoursSinceLastUpdate = static_cast<float>((esp_log_timestamp() - lastChargerEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
     }
@@ -284,7 +283,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryPower(float power)
     ESP_LOGD(TAG, "Battery Energy: %f kWh", energy);
 
     // Only log energy use/recovery while driving
-    if (m_s_pollstate == PollState::DRIVING)
+    if (static_cast<PollState>(m_poll_state) == PollState::DRIVING)
     {
         if (power > 0)
         {
@@ -563,13 +562,12 @@ void OvmsVehicleToyotaETNGA::SetPISWStatus(bool status)
 
 void OvmsVehicleToyotaETNGA::SetPollState(int state)
 {
-    const char* CurrentPollStateText = ConvertPollStateToString(m_s_pollstate);
+    const char* CurrentPollStateText = ConvertPollStateToString(m_poll_state);
     const char* NextPollStateText = ConvertPollStateToString(state);
-    
+
     ESP_LOGI(TAG, "Transitioning from the %s to the %s state", CurrentPollStateText, NextPollStateText);
 
     PollSetState(state);
-    m_s_pollstate = static_cast<PollState>(state);
 }
 
 void OvmsVehicleToyotaETNGA::SetReadyStatus(bool status)
