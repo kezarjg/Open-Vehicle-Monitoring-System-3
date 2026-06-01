@@ -11,10 +11,16 @@ on:
     branches: [master]
     paths:
       - 'docs/**'
+      # Vehicle component docs live under vehicle/**/docs, symlinked into docs/source.
+      - 'vehicle/**/docs/**'
+      - '**/*.rst'
       - '.github/workflows/docs.yml'
   pull_request:
     paths:
       - 'docs/**'
+      # Vehicle component docs live under vehicle/**/docs, symlinked into docs/source.
+      - 'vehicle/**/docs/**'
+      - '**/*.rst'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 

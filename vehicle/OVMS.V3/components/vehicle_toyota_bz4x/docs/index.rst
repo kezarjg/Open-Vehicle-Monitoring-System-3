@@ -1,39 +1,28 @@
-==============
+===========
 Toyota bZ4X
-==============
+===========
 
-Vehicle Type: **Toyota bZ4X**
+The Toyota bZ4X is built on the :doc:`Toyota e-TNGA platform </components/vehicle_toyota_etnga/docs/index>`.
+The e-TNGA module provides the CAN polling, charging state machine, and the common support baseline shared by
+all e-TNGA vehicles. This page documents only what is specific to the bZ4X; see the e-TNGA module for
+everything else.
 
-This vehicle type supports the 2023 & 2024 Toyota bZ4X.
-
-Short type code = TOYBZ4X
-Long vehicle name = Toyota bZ4X
-unique log tag = v-toyotabz4x
-unique namespace prefix = xbz
+Supported model years: 2023 and 2024.
 
 ----------------
-Support Overview
+Vehicle identity
 ----------------
 
-=========================== ==============
-Function                    Support Status
-=========================== ==============
-Hardware                    OVMS v3 (or later)
-Vehicle Cable               OBD-II to DB9 Data Cable for OVMS (1441200 right, or 1139300 left)
-GSM Antenna                 1000500 Open Vehicles OVMS GSM Antenna (or any compatible antenna)
-GPS Antenna                 1020200 Universal GPS Antenna (SMA Connector) (or any compatible antenna)
-SOC Display                 Yes
-Range Display               No
-GPS Location                Yes
-Speed Display               Yes
-Temperature Display         Yes
-BMS v+t Display             No
-TPMS Display                No
-Charge Status Display       Yes
-Charge Interruption Alerts  No
-Charge Control              No
-Cabin Pre-heat/cool Control No
-Lock/Unlock Vehicle         No
-Valet Mode Control          No
-Others                      VIN
-=========================== ==============
+:Short type code: TOYBZ4X
+:Vehicle name: Toyota bZ4X
+:Log tag: ``v-toyotabz4x``
+:Config namespace prefix: ``xbz``
+
+------------------------
+Vehicle-specific support
+------------------------
+
+The bZ4X currently adds no behavioural overrides on top of the e-TNGA platform, so its supported functions
+match the e-TNGA baseline. In particular it does not declare a BMS pack arrangement, so per-cell BMS
+voltage/temperature monitoring is not enabled — unlike the
+:doc:`Subaru Solterra </components/vehicle_subaru_solterra/docs/index>`.

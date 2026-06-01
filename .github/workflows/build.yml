@@ -18,6 +18,10 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
+      - '**/*.rst'
+      # Vehicle component docs live under vehicle/**/docs and are symlinked into
+      # docs/source; they're doc sources, not firmware inputs.
+      - 'vehicle/**/docs/**'
       - 'plugins/**'
       - 'flyer/**'
       - 'logo/**'
@@ -26,6 +30,10 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
+      - '**/*.rst'
+      # Vehicle component docs live under vehicle/**/docs and are symlinked into
+      # docs/source; they're doc sources, not firmware inputs.
+      - 'vehicle/**/docs/**'
       - 'plugins/**'
       - 'flyer/**'
       - 'logo/**'
