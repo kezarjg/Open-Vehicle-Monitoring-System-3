@@ -37,6 +37,11 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+# Note on cache warmth: GitHub scopes caches by branch/ref. Caches saved by a
+# pull_request run live in that PR's scope; a push to master saves to master's
+# scope, which every PR and master run can then read. So the first run after a
+# given cache is created is cold; subsequent same-scope runs are warm.
+
 env:
   # Pinned to match .travis.yml / .devcontainer to keep CI reproducible.
   TOOLCHAIN_URL: https://dl.espressif.com/dl/xtensa-esp32-elf-linux64-1.22.0-97-gc752ad5-5.2.0.tar.gz
