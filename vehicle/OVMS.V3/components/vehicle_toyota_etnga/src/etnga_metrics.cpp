@@ -450,16 +450,20 @@ void OvmsVehicleToyotaETNGA::SetChargeType(int chargeType)
 {
     std::string chargeTypeValue;
 
+    // 0x161C "Charger Power Supply Voltage Type" enum (confirmed 2026-05-10):
+    // 0 = None/unconnected, 1 = 100V Series, 2 = 200V Series. raw 0 must clear the
+    // metric (no charge connected), NOT report "ccs" — that was the prior bug.
+    // DCFC value is still TBD pending a real DC charge.
     switch (chargeType)
     {
         case 0x00:
-            chargeTypeValue = "ccs";
+            chargeTypeValue = "";  // None / unconnected
             break;
         case 0x01:
-            chargeTypeValue = "type1";
+            chargeTypeValue = "type1";  // 100V Series
             break;
         case 0x02:
-            chargeTypeValue = "type2";
+            chargeTypeValue = "type2";  // 200V Series
             break;
         default:
             chargeTypeValue = "unknown";
@@ -597,6 +601,11 @@ void OvmsVehicleToyotaETNGA::SetShiftPosition(int position)
             shiftPositionText = "Drive";
             gear = 1;
             break;
+        // No case 8 ("B"): the Solterra/bZ4X has no B range — Toyota's RM Electronic
+        // Shift Lever data list states "This vehicle does not have the B (S) range",
+        // and gear-byte0 has only ever been 0/2/4/6 across all captures. Regen is via
+        // paddles (Solterra) / boost button (bZ4X), not a selector position. Any
+        // unexpected value correctly falls through to Unknown below.
         default:
             shiftPositionText = "Unknown";
             gear = -999;
