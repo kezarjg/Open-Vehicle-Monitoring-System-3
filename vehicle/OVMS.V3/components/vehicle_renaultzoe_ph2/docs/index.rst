@@ -164,9 +164,9 @@ Activate headlights for ~30 seconds:
 - **Command**: ``xrz2 lighting``
 - **Coming Home Feature**: Automatically activates when locking if configured (see Web Configuration)
 
-------------------------
+-------------------------
 Scheduled Preconditioning
-------------------------
+-------------------------
 
 Set up automatic climate control using the global OVMS scheduler.
 
@@ -264,9 +264,9 @@ If experiencing issues:
 - Look for "DCDC:" messages in logs
 - Check for preconditioning detection messages if DC/DC stops unexpectedly
 
--------------------
+--------------------
 Advanced Diagnostics
--------------------
+--------------------
 
 The Zoe PH2 integration includes DDT (Diagnostic Tool) commands for ECU configuration.
 
@@ -479,9 +479,9 @@ Beyond standard OVMS metrics, the Zoe PH2 integration provides:
 
 Persistent helper metrics such as ``xrz2.b.chg.start``, ``xrz2.b.used.start``, ``xrz2.b.recd.start`` and ``xrz2.v.pos.odometer.start`` are used internally for session and trip calculations, but can also be inspected for debugging.
 
--------------
+--------------
 Shell Commands
--------------
+--------------
 
 **Poller Control**
 
@@ -525,8 +525,8 @@ The Renault Zoe Phase 2 uses a CAN security gateway, making the OBD port normall
 
 This is why V-CAN connection is required for remote control features.
 
-------------------
+-------------------
 Community & Support
-------------------
+-------------------
 
 Forum: https://www.goingelectric.de/forum/viewtopic.php?p=2327071
