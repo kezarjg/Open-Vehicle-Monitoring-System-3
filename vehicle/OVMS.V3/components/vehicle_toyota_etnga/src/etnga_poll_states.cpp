@@ -53,25 +53,49 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
 void OvmsVehicleToyotaETNGA::HandleAwakeState()
 {
     int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
-    
+
     if (!StandardMetrics.ms_v_env_awake->AsBool()) {
-        // No CAN communication for 120s - stop polling
+        // No CAN communication - bus is dead, go to sleep
         TransitionToSleepState();
+        return;
     }
     else if (m_s_controlstate->AsInt() == ControlState::CS_DRIVING) {
-        // If the vehicle is switched on
+        // HV system is up — vehicle is READY/driving
         TransitionToDrivingState();
+        return;
     }
-    else if (m_s_controlstate->AsInt() == CS_CHARGING) {
-        // If the vehicle starts charging
+
+    // PISW-based arm logic (mirrors sim S.AWAKE branch)
+    int pisw = m_v_charge_pisw_raw->AsInt();
+    bool lid_open = StandardMetrics.ms_v_door_chargeport->AsBool();
+
+    // pisw is fresh here mainly after a HANDSHAKE->AWAKE bounce (pisw not polled in
+    // plain AWAKE); cold cable-detect relies on the lid-open arm logic below.
+    if (pisw >= 0x02) {
+        // Cable is seated — enter charge handshake immediately
         TransitionToChargeHandshakeState();
+        return;
     }
-    else if (monotonic - m_v_env_awaketime->AsInt() > 300) {
-        // If the vehicle has been awake for 5 minutes without a clear state
-        ESP_LOGD(TAG, "Vehicle awake for over 300s with no activity — forcing sleep state");
+    if (!m_armed_for_charge) {
+        if (lid_open) {
+            // Charge door just opened: arm and start the 15-min cable watch
+            m_armed_for_charge = true;
+            m_cable_watch_start = monotonic;
+        } else if (monotonic - m_v_env_awaketime->AsInt() > 300) {
+            // Door watch expired (5 min in AWAKE, charge door never opened) → sleep
+            ESP_LOGD(TAG, "Vehicle awake for over 300s with no activity — forcing sleep state");
+            m_sleep_entry_time = monotonic;
+            m_allow_wake = false;
+            TransitionToSleepState();
+            return;
+        }
+    } else if (monotonic - m_cable_watch_start > 900) {
+        // Cable watch expired (15 min armed, no cable plug-in) → sleep
+        ESP_LOGD(TAG, "Armed 15min, no cable plug-in — giving up");
         m_sleep_entry_time = monotonic;
         m_allow_wake = false;
         TransitionToSleepState();
+        return;
     }
 }
 
@@ -89,49 +113,156 @@ void OvmsVehicleToyotaETNGA::HandleDrivingState()
 
 void OvmsVehicleToyotaETNGA::HandleChargeHandshakeState()
 {
-    if (m_s_controlstate->AsInt() != ControlState::CS_CHARGING) {
+    int pisw = m_v_charge_pisw_raw->AsInt();
+    int ac_op = m_v_charge_ac_op->AsInt();
+    int hlc = m_v_charge_hlc->AsInt();
+    int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
+
+    if (pisw == 0x00) {
+        // Premature unplug — re-arm logic handled in TransitionToAwakeState
         TransitionToAwakeState();
-        StandardMetrics.ms_v_env_temp->Clear();
-        SetChargingStatus(false);
+        return;
+    }
+    if (hlc >= 0x0A && hlc <= 0x12) {
+        // DC HLC sequence active
+        TransitionToChargeDcState();
+        return;
+    }
+    // HANDSHAKE: only ac_op==0x02 (Running), NOT 0x01 (Startup) — avoids premature
+    // AC entry during negotiation. (CHARGE_WAIT deliberately accepts 0x01 too.)
+    if (ac_op == 0x02) {
+        TransitionToChargeAcState();
+        return;
+    }
+    if (monotonic - m_charge_state_entry >= 60 && ac_op == 0x00 && pisw >= 0x02) {
+        // Scheduled-wait heuristic: AC Op stuck at Stop for 60s with cable present
+        TransitionToChargeWaitState();
+        return;
     }
 }
 
-void OvmsVehicleToyotaETNGA::HandleChargeWaitState() {}
-void OvmsVehicleToyotaETNGA::HandleChargeAcState() {}
-void OvmsVehicleToyotaETNGA::HandleChargeDcState() {}
+void OvmsVehicleToyotaETNGA::HandleChargeWaitState()
+{
+    int pisw = m_v_charge_pisw_raw->AsInt();
+    int ac_op = m_v_charge_ac_op->AsInt();
+    int hlc = m_v_charge_hlc->AsInt();
+
+    if (pisw == 0x00) {
+        // Cable removed — session ended
+        TransitionToAwakeState();
+        return;
+    }
+    if (ac_op == 0x01 || ac_op == 0x02) {
+        // EVSE engaged (Startup or Running)
+        TransitionToChargeAcState();
+        return;
+    }
+    if (hlc >= 0x0A && hlc <= 0x12) {
+        // DC engaged
+        TransitionToChargeDcState();
+        return;
+    }
+    if (!StandardMetrics.ms_v_env_awake->AsBool()) {
+        // Bus went dead during scheduled wait (OBC slept or gateway isolated OBD)
+        m_sleep_entry_time = StandardMetrics.ms_m_monotonic->AsInt();
+        m_allow_wake = false;
+        TransitionToSleepState();
+        return;
+    }
+}
+
+void OvmsVehicleToyotaETNGA::HandleChargeAcState()
+{
+    int pisw = m_v_charge_pisw_raw->AsInt();
+    int ac_op = m_v_charge_ac_op->AsInt();
+
+    if (ac_op == 0x00) {
+        // AC Op = Stop: phase ended
+        TransitionToChargeWaitState();
+        return;
+    }
+    if (pisw == 0x00) {
+        // Cable pulled mid-charge
+        TransitionToChargeWaitState();
+        return;
+    }
+}
+
+void OvmsVehicleToyotaETNGA::HandleChargeDcState()
+{
+    int pisw = m_v_charge_pisw_raw->AsInt();
+    int hlc = m_v_charge_hlc->AsInt();
+
+    if (hlc == 0xFF) {
+        // HLC = Unconnected (255): DC phase ended
+        TransitionToChargeWaitState();
+        return;
+    }
+    if (pisw == 0x00) {
+        // Cable pulled mid-DC
+        TransitionToChargeWaitState();
+        return;
+    }
+}
 
 void OvmsVehicleToyotaETNGA::TransitionToSleepState()
 {
-    // Perform actions needed for transitioning to the SLEEP state
-    SetPollState(PollState::SLEEP); // Update the state
+    m_armed_for_charge = false;
+    SetPollState(PollState::SLEEP);
     SetAwake(false);
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
 {
-    // Perform actions needed for transitioning to the ACTIVE state
+    int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
+    // If bouncing back from CHARGE_HANDSHAKE (premature unplug / DCFC retry dance),
+    // re-arm and restart the cable watch so the next plug-in gets a fresh 15-min window.
+    // Check m_poll_state BEFORE calling SetPollState (sim: armed_for_charge=True on HANDSHAKE→AWAKE).
+    if (m_poll_state == PollState::CHARGE_HANDSHAKE) {
+        m_armed_for_charge = true;
+        m_cable_watch_start = monotonic;
+        ESP_LOGD(TAG, "Re-armed after HANDSHAKE→AWAKE bounce (DCFC retry)");
+    }
+    // For all other transitions into AWAKE (SLEEP→AWAKE, DRIVING→AWAKE),
+    // arm state is reset by TransitionToSleepState / TransitionToDrivingState.
     SetPollState(PollState::AWAKE);
-    m_v_env_awaketime->SetValue(StandardMetrics.ms_m_monotonic->AsInt());   // Store the time we entered to use as a timeout
+    m_v_env_awaketime->SetValue(monotonic);
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
 {
-    // Perform actions needed for transitioning to the READY state
-    SetPollState(PollState::DRIVING); // Update the state
-    m_v_pos_trip_start->SetStale(true);  // Set the start trip metric as stale so it resets next odometer reading
+    m_armed_for_charge = false;
+    SetPollState(PollState::DRIVING);
+    m_v_pos_trip_start->SetStale(true);
     RequestVIN();
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
 {
-    // Perform actions needed for transitioning to the CHARGE_HANDSHAKE state
-
-    // Get the one-time metrics for charging
-    SetPollState(PollState::CHARGE_HANDSHAKE); // Update the state
-    SetChargingStatus(true);
+    m_armed_for_charge = false;  // arm state consumed on entering handshake
+    m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
+    SetPollState(PollState::CHARGE_HANDSHAKE);
+    SetChargingStatus(false);    // not yet delivering energy (AC/DC states set true)
     RequestVIN();
 }
 
-void OvmsVehicleToyotaETNGA::TransitionToChargeWaitState() { SetPollState(PollState::CHARGE_WAIT); }
-void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()   { SetPollState(PollState::CHARGE_AC); }
-void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()   { SetPollState(PollState::CHARGE_DC); }
+void OvmsVehicleToyotaETNGA::TransitionToChargeWaitState()
+{
+    m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
+    SetPollState(PollState::CHARGE_WAIT);
+    SetChargingStatus(false);
+}
+
+void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
+{
+    m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
+    SetPollState(PollState::CHARGE_AC);
+    SetChargingStatus(true);
+}
+
+void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
+{
+    m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
+    SetPollState(PollState::CHARGE_DC);
+    SetChargingStatus(true);
+}

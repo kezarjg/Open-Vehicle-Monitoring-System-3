@@ -49,7 +49,11 @@ protected:
     std::string m_rxbuf;
 
     bool m_allow_wake = true;  // Used to implement a cooldown timer if the vehicle is put into sleep
-    int m_sleep_entry_time;  // Used to track the time that cooldown timer started
+    int m_sleep_entry_time = 0;  // Used to track the time that cooldown timer started
+
+    bool m_armed_for_charge = false;   // charge lid seen open since entering AWAKE
+    int  m_cable_watch_start = 0;      // monotonic s when armed (15-min cable watch)
+    int  m_charge_state_entry = 0;     // monotonic s of last charge-state entry (handshake 60s timer)
 
 //    ControlState m_s_controlstate;
     OvmsMetricInt* m_s_controlstate;
