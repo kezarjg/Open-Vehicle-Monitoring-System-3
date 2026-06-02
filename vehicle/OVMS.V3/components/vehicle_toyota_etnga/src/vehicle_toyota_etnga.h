@@ -22,12 +22,15 @@ enum ControlState {
 };
 
 // Poll states
-enum PollState
+enum PollState : int
 {
-    SLEEP,
-    AWAKE,
-    DRIVING,
-    CHARGING
+    SLEEP            = 0,
+    AWAKE            = 1,
+    DRIVING          = 2,
+    CHARGE_HANDSHAKE = 3,  // was CHARGING; cable-negotiation fast-poll window
+    CHARGE_WAIT      = 4,  // plugged in, not (yet/any longer) charging — sparse
+    CHARGE_AC        = 5,
+    CHARGE_DC        = 6,
 };
 
 class OvmsVehicleToyotaETNGA : public OvmsVehicle
@@ -141,11 +144,17 @@ private:
     void HandleSleepState();
     void HandleAwakeState();
     void HandleDrivingState();
-    void HandleChargingState();
+    void HandleChargeHandshakeState();
+    void HandleChargeWaitState();
+    void HandleChargeAcState();
+    void HandleChargeDcState();
     void TransitionToSleepState();
     void TransitionToAwakeState();
     void TransitionToDrivingState();
-    void TransitionToChargingState();
+    void TransitionToChargeHandshakeState();
+    void TransitionToChargeWaitState();
+    void TransitionToChargeAcState();
+    void TransitionToChargeDcState();
 
     void RequestVIN();
     void IncomingVINSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, CAN_frame_format_t format, const std::string &data);
@@ -270,8 +279,17 @@ inline const char* ConvertPollStateToString(int state) {
         case (PollState::DRIVING):
             pollStateText = "DRIVING";
             break;
-        case (PollState::CHARGING):
-            pollStateText = "CHARGING";
+        case (PollState::CHARGE_HANDSHAKE):
+            pollStateText = "CHARGE_HANDSHAKE";
+            break;
+        case (PollState::CHARGE_WAIT):
+            pollStateText = "CHARGE_WAIT";
+            break;
+        case (PollState::CHARGE_AC):
+            pollStateText = "CHARGE_AC";
+            break;
+        case (PollState::CHARGE_DC):
+            pollStateText = "CHARGE_DC";
             break;
         default:
             pollStateText = "UNKNOWN";

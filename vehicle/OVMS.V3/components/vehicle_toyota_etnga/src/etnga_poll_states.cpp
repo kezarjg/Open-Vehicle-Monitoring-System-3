@@ -15,8 +15,10 @@
 //    SLEEP (0)             : Vehicle is sleeping; no activity on the CAN bus. We are listening only.
 //    AWAKE (1)             : Vehicle is alive; vehicle has been switched on by driver
 //    DRIVING (2)           : Vehicle is "Ready" to drive or being driven
-//    CHARGING (3)          : Vehicle is charging
-//    (v3 in progress: CHARGING is being replaced by CHARGE_HANDSHAKE/WAIT/AC/DC)
+//    CHARGE_HANDSHAKE (3)  : Cable-negotiation fast-poll window (was CHARGING)
+//    CHARGE_WAIT (4)       : Plugged in, not (yet/any longer) charging — sparse poll
+//    CHARGE_AC (5)         : AC charging in progress
+//    CHARGE_DC (6)         : DC fast charging in progress
 
 void OvmsVehicleToyotaETNGA::HandleSleepState()
 {
@@ -62,7 +64,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
     }
     else if (m_s_controlstate->AsInt() == CS_CHARGING) {
         // If the vehicle starts charging
-        TransitionToChargingState();
+        TransitionToChargeHandshakeState();
     }
     else if (monotonic - m_v_env_awaketime->AsInt() > 300) {
         // If the vehicle has been awake for 5 minutes without a clear state
@@ -85,7 +87,7 @@ void OvmsVehicleToyotaETNGA::HandleDrivingState()
     }
 }
 
-void OvmsVehicleToyotaETNGA::HandleChargingState()
+void OvmsVehicleToyotaETNGA::HandleChargeHandshakeState()
 {
     if (m_s_controlstate->AsInt() != ControlState::CS_CHARGING) {
         TransitionToAwakeState();
@@ -93,6 +95,10 @@ void OvmsVehicleToyotaETNGA::HandleChargingState()
         SetChargingStatus(false);
     }
 }
+
+void OvmsVehicleToyotaETNGA::HandleChargeWaitState() {}
+void OvmsVehicleToyotaETNGA::HandleChargeAcState() {}
+void OvmsVehicleToyotaETNGA::HandleChargeDcState() {}
 
 void OvmsVehicleToyotaETNGA::TransitionToSleepState()
 {
@@ -116,12 +122,16 @@ void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
     RequestVIN();
 }
 
-void OvmsVehicleToyotaETNGA::TransitionToChargingState()
+void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
 {
-    // Perform actions needed for transitioning to the CHARGING state
+    // Perform actions needed for transitioning to the CHARGE_HANDSHAKE state
 
     // Get the one-time metrics for charging
-    SetPollState(PollState::CHARGING); // Update the state
+    SetPollState(PollState::CHARGE_HANDSHAKE); // Update the state
     SetChargingStatus(true);
     RequestVIN();
 }
+
+void OvmsVehicleToyotaETNGA::TransitionToChargeWaitState() { SetPollState(PollState::CHARGE_WAIT); }
+void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()   { SetPollState(PollState::CHARGE_AC); }
+void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()   { SetPollState(PollState::CHARGE_DC); }
