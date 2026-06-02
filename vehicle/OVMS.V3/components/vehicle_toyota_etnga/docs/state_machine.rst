@@ -21,7 +21,8 @@ Two parallel states
    * - ``PollState`` (``m_s_pollstate``)
      - Driver-owned; selects which OBD-II PIDs are polled
      - Internal transitions in ``etnga_poll_states.cpp``
-     - ``SLEEP``, ``AWAKE``, ``DRIVING``, ``CHARGING``
+     - ``SLEEP``, ``AWAKE``, ``DRIVING``, ``CHARGE_HANDSHAKE``,
+       ``CHARGE_WAIT``, ``CHARGE_AC``, ``CHARGE_DC``
    * - ``ControlState`` (``xte.s.controlstate``)
      - Vehicle-reported
      - PID ``0x10D1`` on the Plug-In Control ECU
@@ -29,8 +30,20 @@ Two parallel states
 
 ``PollState`` selects which PIDs are polled — see the ``{S, A, D, C}``
 columns in the ``obdii_polls[]`` table in ``vehicle_toyota_etnga.cpp``.
-``ControlState`` is the vehicle's own self-report and is the primary
-trigger for the ``AWAKE → DRIVING`` and ``AWAKE → CHARGING`` edges.
+``ControlState`` is the vehicle's own self-report and is the primary trigger
+for the ``AWAKE → DRIVING`` edge.
+
+Charge entry trigger
+--------------------
+
+The old 4-state model entered a single ``CHARGING`` state on
+``controlstate == CS_CHARGING`` (0x10D1 = 0x03).  The 7-state model no
+longer uses ``CS_CHARGING`` as a charge-entry trigger.  Instead,
+``AWAKE → CHARGE_HANDSHAKE`` fires when the PISW cable-seated signal
+(DID ``0x1669``) reads ``≥ 0x02``.  This is *earlier* in the sequence —
+the plug-in is detected before the HV control mode flips to
+``CS_CHARGING`` — and allows the driver to track the full negotiation
+window.
 
 Tick loop
 =========
@@ -40,68 +53,97 @@ Tick loop
 1. ``ResetStaleMetrics()`` manually clears ``controlstate``,
    ``ms_v_env_awake``, ``ms_v_door_chargeport``, ``ms_v_charge_pilot``,
    and ``ms_v_bat_power`` if they have gone stale but still hold a
-   non-default value. This is the only way ``ms_v_env_awake`` ever drops
+   non-default value.  This is the only way ``ms_v_env_awake`` ever drops
    back to ``false``.
-2. Dispatches to ``HandleSleepState()``, ``HandleAwakeState()``,
-   ``HandleDrivingState()``, or ``HandleChargingState()`` based on the
-   current ``m_poll_state``.
+2. Dispatches to the appropriate handler —
+   ``HandleSleepState()``, ``HandleAwakeState()``,
+   ``HandleDrivingState()``, ``HandleChargeHandshakeState()``,
+   ``HandleChargeWaitState()``, ``HandleChargeAcState()``, or
+   ``HandleChargeDcState()`` — based on the current ``m_poll_state``.
 
-VIN acquisition is not driven from the tick loop. ``RequestVIN()`` is
-called once on entry to ``DRIVING`` and once on entry to ``CHARGING``
-(see the transition table); it short-circuits if ``ms_v_vin`` is already
-populated, and the underlying poll is a ``OnceOffPoll`` with three
-retries.
+VIN acquisition is not driven from the tick loop.  ``RequestVIN()`` is
+called once on entry to ``DRIVING`` and once on entry to
+``CHARGE_HANDSHAKE`` (see the transition table); it short-circuits if
+``ms_v_vin`` is already populated, and the underlying poll is a
+``OnceOffPoll`` with three retries.
 
 Transition diagram
 ==================
 
 ::
 
-                          ┌──────────────────────────────┐
-                          │                              │
-                          ▼                              │
-            ┌─────────────────┐                          │
-     start →│      SLEEP      │                          │
-            └─────────────────┘                          │
-                │     ▲                                  │
-     CAN traffic│     │ env_awake stale (~120 s no CAN)  │
-     OR 12V >   │     │ OR 5-min awake watchdog          │
-     ref+0.2 V  │     │ (arms 10 s cooldown)             │
-     (CAN reset)│     │                                  │
-                ▼     │                                  │
-            ┌─────────────────┐                          │
-            │      AWAKE      │◄────────┐    ◄───────────┤
-            └─────────────────┘         │                │
-                │              │        │                │
-                │ ctrl =       │ ctrl = │ ctrl ≠         │
-                │ DRIVING      │ CHARG. │ DRIVING/CHARG. │
-                ▼              ▼        │                │
-            ┌──────────┐   ┌──────────┐ │                │
-            │ DRIVING  │   │ CHARGING │─┘                │
-            └──────────┘   └──────────┘                  │
-                │              │                         │
-                └──────────────┴── (no direct edge) ─────┘
+                        ┌──────────────────────────────────┐
+                        │                                  │
+                        ▼                                  │
+          ┌─────────────────┐                              │
+   start →│      SLEEP      │◄─────────────────────┐       │
+          └─────────────────┘                      │       │
+              │     ▲                              │       │
+   CAN traffic│     │ env_awake stale (~120 s)      │       │
+   OR 12V >   │     │ OR 5-min / 15-min watchdog    │       │
+   ref+0.2 V  │     │ (arms 10 s cooldown)          │       │
+              ▼     │                              │       │
+          ┌─────────────────┐                      │       │
+          │      AWAKE      │◄──────────────────┐  │       │
+          └─────────────────┘                   │  │       │
+              │              │                  │  │       │
+              │ ctrl =       │ PISW ≥ 0x02       │  │       │
+              │ CS_DRIVING   │ (cable seated)    │  │       │
+              ▼              ▼                  │  │       │
+          ┌──────────┐   ┌──────────────────┐   │  │       │
+          │ DRIVING  │   │ CHARGE_HANDSHAKE │   │  │       │
+          └──────────┘   └──────────────────┘   │  │       │
+              │            │     │    │          │  │       │
+   ctrl ≠     │   PISW=0   │     │    │60s stuck │  │       │
+   CS_DRIVING │   (unplug) │     │    │at ac_op  │  │       │
+              │            │  HLC│    │Stop+cable│  │       │
+              │     ac_op  │  0A-│    │          │  │       │
+              │     =0x02  │  12 │    ▼          │  │       │
+              │            │     │  ┌──────────┐ │  │       │
+              │            │     │  │   WAIT   │─┘──┘       │
+              │            │     │  └──────────┘            │
+              │            │     │    │     │  PISW=0        │
+              │            ▼     ▼    │     │  (cable gone)  │
+              │          ┌──────────┐ │     │                │
+              │          │CHARGE_AC │ │     │                │
+              │          └──────────┘ │     │                │
+              │              │        │     │                │
+              │    ac_op=0   │        │     │                │
+              │    (Stop)    │        │     └───────────────►│
+              │    or PISW=0 │        │     (WAIT→AWAKE =    │
+              │              ▼        │      session end)    │
+              │          ┌──────────┐ │                      │
+              │          │CHARGE_DC │ │                      │
+              │          └──────────┘ │                      │
+              │              │        │                      │
+              │  hlc=0xFF    │        │                      │
+              │  or PISW=0   │        │                      │
+              │              └────────┘                      │
+              │           (AC/DC → WAIT)                     │
+              └──────────────────────────────────────────────┘
+                     (DRIVING → AWAKE)
 
-There is no direct ``DRIVING → SLEEP`` or ``CHARGING → SLEEP`` edge —
-those paths always pass through ``AWAKE``.
+There is no direct ``DRIVING → SLEEP`` or charge-state → ``SLEEP`` edge
+(except ``CHARGE_WAIT`` on bus-dead) — most paths pass through ``AWAKE``.
+There is also no direct edge between ``DRIVING`` and any charge state.
 
 The polling feedback loop
 =========================
 
 The ``SLEEP → AWAKE`` edge is driven by external CAN traffic (any frame
-on CAN2 sets ``ms_v_env_awake``). Once in ``AWAKE``, however, the
-poller is actively transmitting OBD-II requests on the same bus. The
+on CAN2 sets ``ms_v_env_awake``).  Once in ``AWAKE``, however, the
+poller is actively transmitting OBD-II requests on the same bus.  The
 ECUs reply, and those replies are themselves CAN traffic — so the
 driver's own polling refreshes ``ms_v_env_awake`` on every tick and
-prevents the auto-stale that would otherwise bring it back to
-``SLEEP``.
+prevents the auto-stale that would otherwise bring it back to ``SLEEP``.
 
 Practical consequences:
 
 * ``AWAKE`` will not exit on its own via the ``env_awake`` stale path
-  while the poller is running. The 5-minute forced-sleep watchdog in
+  while the poller is running.  The 5-minute forced-sleep watchdog in
   ``HandleAwakeState`` exists precisely to break this loop when the
-  vehicle never reports a clear ``DRIVING`` or ``CHARGING`` state.
+  vehicle never reports a clear ``DRIVING`` state and no cable is
+  inserted.
 * The watchdog must be paired with the cooldown latch — without it, the
   next poll reply after the forced ``TransitionToSleepState`` would
   immediately bounce the driver back to ``AWAKE``.
@@ -118,11 +160,12 @@ Every state transition is logged at ``ESP_LOGI`` level by
 
     Transitioning from the <FROM> to the <TO> state
 
-All four ``TransitionTo*`` helpers route through ``SetPollState``, so
-this single log line covers every edge in the diagram above. Additional
+All seven ``TransitionTo*`` helpers route through ``SetPollState``, so
+this single log line covers every edge in the diagram above.  Additional
 context-specific log lines are emitted by ``HandleSleepState`` (12 V
-wake, CAN reset result, cooldown expiry) and ``HandleAwakeState``
-(forced-sleep watchdog).
+wake, CAN reset result, cooldown expiry), ``HandleAwakeState``
+(forced-sleep watchdog, wake-reconcile), and
+``TransitionToChargeHandshakeState`` (session open).
 
 Transition table
 ================
@@ -131,7 +174,7 @@ All edges live in ``etnga_poll_states.cpp``.
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 30 50
+   :widths: 25 35 40
 
    * - From → To
      - Condition
@@ -151,29 +194,148 @@ All edges live in ``etnga_poll_states.cpp``.
    * - ``AWAKE → DRIVING``
      - ``controlstate == CS_DRIVING``
      - Marks the trip-start metric stale on entry so it resets on the
-       next odometer reading. Also calls ``RequestVIN()`` (no-op if VIN
+       next odometer reading.  Also calls ``RequestVIN()`` (no-op if VIN
        already cached).
-   * - ``AWAKE → CHARGING``
-     - ``controlstate == CS_CHARGING``
-     - Sets ``ms_v_charge_inprogress = true``. Also calls
-       ``RequestVIN()`` (no-op if VIN already cached).
-   * - ``AWAKE → SLEEP`` (forced)
-     - ``monotonic - m_v_env_awaketime > 300``
-     - 5-minute watchdog when awake but no clear ``DRIVING``/``CHARGING``
-       state. Arms the 10-second cooldown latch.
+   * - ``AWAKE → CHARGE_HANDSHAKE``
+     - PISW (DID ``0x1669``) ``≥ 0x02`` (cable seated)
+     - **Changed from old model** (was ``controlstate == CS_CHARGING``).
+       Opens the in-RAM charge session if not already open.  Calls
+       ``RequestVIN()``.  Sets ``ms_v_charge_state = "prepared"``.
+   * - ``AWAKE → SLEEP`` (forced, door watch)
+     - ``monotonic - m_v_env_awaketime > 300`` AND charge door never opened
+     - 5-minute watchdog when awake with no ``CS_DRIVING`` and charge
+       door not opened.  Arms the 10-second cooldown latch.
+   * - ``AWAKE → SLEEP`` (forced, cable watch)
+     - ``monotonic - m_cable_watch_start > 900`` (armed but no cable plug-in)
+     - 15-minute watchdog: charge door was seen open (``m_armed_for_charge``
+       set), but no cable seated within 15 minutes.  Arms the cooldown
+       latch.
    * - ``DRIVING → AWAKE``
      - ``controlstate != CS_DRIVING``
-     - Clears ready, speed, gear, and env temperatures.
-   * - ``CHARGING → AWAKE``
-     - ``controlstate != CS_CHARGING``
-     - Clears env temperature; sets ``ms_v_charge_inprogress = false``.
+     - Clears ready status, speed, gear, and env/cabin temperatures.
+   * - ``CHARGE_HANDSHAKE → AWAKE``
+     - PISW ``== 0x00`` (premature unplug)
+     - Re-arms ``m_armed_for_charge`` and restarts the 15-min cable watch
+       so the next plug-in gets a fresh window.  Resets the charge session
+       and sets ``ms_v_charge_state = ""``.
+   * - ``CHARGE_HANDSHAKE → CHARGE_DC``
+     - HLC (DID ``0x1666``) in range ``0x0A–0x12``
+     - DC fast-charge HLC sequence active.  Sets
+       ``ms_v_charge_state = "charging"``.
+   * - ``CHARGE_HANDSHAKE → CHARGE_AC``
+     - ``ac_op`` (DID ``0x1684``) ``== 0x02`` (Running)
+     - Only ``0x02`` (not ``0x01`` Startup) to avoid premature AC entry
+       during negotiation.  Sets ``ms_v_charge_state = "charging"``.
+   * - ``CHARGE_HANDSHAKE → CHARGE_WAIT``
+     - 60 s elapsed AND ``ac_op == 0x00`` (Stop) AND PISW ``≥ 0x02``
+     - Scheduled-charge heuristic: AC Op stuck at Stop for 60 s with cable
+       present.  Sets ``ms_v_charge_state = "stopped"``.
+   * - ``CHARGE_WAIT → AWAKE``
+     - PISW ``== 0x00`` (cable removed)
+     - Session end — resets the charge session and sets
+       ``ms_v_charge_state = ""``.
+   * - ``CHARGE_WAIT → CHARGE_AC``
+     - ``ac_op == 0x01`` (Startup) or ``0x02`` (Running)
+     - EVSE engaged (WAIT accepts Startup too, unlike HANDSHAKE).  Sets
+       ``ms_v_charge_state = "charging"``.
+   * - ``CHARGE_WAIT → CHARGE_DC``
+     - HLC in range ``0x0A–0x12``
+     - DC engaged from wait.  Sets ``ms_v_charge_state = "charging"``.
+   * - ``CHARGE_WAIT → SLEEP``
+     - ``ms_v_env_awake == false``
+     - Bus went dead during scheduled wait (OBC slept or gateway isolated
+       OBD).  Arms the 10-second cooldown latch.
+   * - ``CHARGE_AC → CHARGE_WAIT``
+     - ``ac_op == 0x00`` (Stop) OR PISW ``== 0x00``
+     - Phase ended cleanly or cable pulled.  Sets
+       ``ms_v_charge_state = "stopped"``.
+   * - ``CHARGE_DC → CHARGE_WAIT``
+     - ``hlc == 0xFF`` (Unconnected) OR PISW ``== 0x00``
+     - DC phase ended or cable pulled.  Sets
+       ``ms_v_charge_state = "stopped"``.
+
+Charge state strings (``ms_v_charge_state``)
+============================================
+
+``SetChargeState()`` in ``etnga_metrics.cpp`` maps ``PollState`` to the
+OVMS standard charge-state string written to ``ms_v_charge_state``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 20 50
+
+   * - PollState
+     - String
+     - When
+   * - ``CHARGE_HANDSHAKE``
+     - ``"prepared"``
+     - Cable seated; negotiation in progress; not yet delivering energy
+   * - ``CHARGE_WAIT``
+     - ``"stopped"``
+     - Plugged in but not charging (scheduled wait, between phases, etc.)
+   * - ``CHARGE_AC``
+     - ``"charging"``
+     - AC energy delivery active (``ms_v_charge_inprogress = true``)
+   * - ``CHARGE_DC``
+     - ``"charging"``
+     - DC fast-charge active (``ms_v_charge_inprogress = true``)
+   * - session end (``AWAKE``)
+     - ``"done"``
+     - Written in ``TransitionToAwakeState()`` when arriving from
+       ``CHARGE_AC`` or ``CHARGE_DC``
+   * - session cancelled (``AWAKE``)
+     - ``""``
+     - Written in ``TransitionToAwakeState()`` when arriving from
+       ``CHARGE_HANDSHAKE`` or ``CHARGE_WAIT`` (no energy delivered or
+       premature unplug)
+
+Charge session (in-RAM)
+=======================
+
+A ``ChargeSessionState`` struct (member ``m_charge_session``) tracks the
+current plug-in event entirely in RAM — there is no flash persistence:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Field
+     - Meaning
+   * - ``in_session``
+     - ``true`` from first ``CHARGE_HANDSHAKE`` entry until session close
+   * - ``start_monotonic``
+     - ``ms_m_monotonic`` value at session open (seconds since boot)
+   * - ``start_soc``
+     - ``ms_v_bat_soc`` integer value at session open
+
+**Session open:** ``TransitionToChargeHandshakeState()`` opens the
+session (sets ``in_session = true``) on first entry.  If the driver
+bounces HANDSHAKE → AWAKE → HANDSHAKE (e.g. DCFC retry dance), the
+open-guard (``if (!m_charge_session.in_session)``) prevents a second
+open.
+
+**Session close:** ``TransitionToAwakeState()`` resets
+``m_charge_session`` to its default (``in_session = false``) whenever it
+arrives from any charge state.
+
+**Wake-reconcile:** ``PollState::SLEEP`` is stop-polling only — the
+ESP32 stays running.  If the driver goes to SLEEP while a session is
+open (cable still in but EVSE off, bus silenced), the session struct
+survives.  On the next ``SLEEP → AWAKE`` transition,
+``HandleAwakeState()`` checks: if ``in_session`` is true *and* the PISW
+metric is fresh (non-stale) *and* PISW reports ``0x00`` (unconnected),
+the cable was removed during the sleep gap — the driver finalises the
+session immediately (sets ``ms_v_charge_state = "done"`` and resets
+``m_charge_session``).  The AWAKE-column PISW poll (DID ``0x1669``) in
+``obdii_polls[]`` is required for this reconcile to fire — removing it
+would silently break the wake-reconcile path.
 
 Cooldown latch
 ==============
 
-To prevent flapping after the 5-minute forced-sleep watchdog,
+To prevent flapping after the forced-sleep watchdogs,
 ``HandleAwakeState`` sets ``m_allow_wake = false`` and records
-``m_sleep_entry_time`` before transitioning to ``SLEEP``. While the
+``m_sleep_entry_time`` before transitioning to ``SLEEP``.  While the
 latch is held:
 
 * ``IncomingFrameCan2`` does **not** call ``SetAwake(true)``, so trailing
@@ -185,33 +347,51 @@ latch is held:
 The 12 V-based wake path is **not** gated by ``m_allow_wake`` — high aux
 voltage will pull the driver out of ``SLEEP`` even mid-cooldown.
 
+``CHARGE_WAIT → SLEEP`` also arms the cooldown latch (same 10-second
+window) to prevent immediate re-wake from bus noise after the OBC sleeps.
+
 Boot
 ====
 
 The constructor calls ``TransitionToSleepState()`` and
-``PollSetThrottling(0)``. The driver always starts in ``SLEEP`` and waits
-for CAN activity or a 12 V bump before doing anything else.
+``PollSetThrottling(0)``.  The driver always starts in ``SLEEP`` and
+waits for CAN activity or a 12 V bump before doing anything else.
+``TransitionToSleepState()`` also clears ``m_armed_for_charge``.
 
 Notes and quirks
 ================
 
 * **Two views of "vehicle on".** ``ms_v_env_awake`` (anything on the bus)
   drives ``SLEEP ↔ AWAKE``; ``controlstate`` (vehicle-reported mode)
-  drives ``AWAKE ↔ DRIVING/CHARGING``. Future wake/sleep tweaks should
-  preserve this split.
+  drives ``AWAKE ↔ DRIVING``; PISW (cable-seated signal) drives
+  ``AWAKE → CHARGE_HANDSHAKE``.  Future wake/sleep tweaks should preserve
+  this split.
+* **Charge entry no longer uses CS_CHARGING.** The old
+  ``controlstate == CS_CHARGING`` trigger is gone; PISW ``≥ 0x02`` fires
+  earlier (plug-in detected before HV mode flips).
 * **``env_awake`` is never explicitly cleared.** It falls to ``false``
   only via auto-stale plus the manual reset in ``ResetStaleMetrics``.
   Anything that changes its auto-stale period changes the ``SLEEP``
   detection latency.
-* **Direct ``DRIVING ↔ CHARGING`` is impossible.** A vehicle that flips
-  control mode from drive to charge spends at least one tick in
+* **Direct ``DRIVING ↔ charge-state`` is impossible.** A vehicle that
+  flips control mode from drive to charge spends at least one tick in
   ``AWAKE`` in between, which clears trip metrics.
+* **AC timeout resistance.** ``HandleChargeAcState`` and
+  ``HandleChargeDcState`` intentionally do not tear down the session on
+  OBC poll timeouts.  Locking the car during charging causes the gateway
+  to isolate OBD from the OBC; on unlock polling resumes normally.  Only
+  an explicit fresh ``PISW = 0x00`` or a clean phase-end signal
+  (``ac_op == 0x00`` / ``hlc == 0xFF``) terminates a charge phase.
 * **The 12 V wake threshold depends on a calibrated reference.**
-  ``HandleSleepState`` compares against ``ms_v_bat_12v_voltage_ref + 0.2``;
-  on an uncalibrated module the CAN-frame path is the reliable wake
-  mechanism.
-* **Driving-state exit clears more than charging-state exit.**
-  ``HandleDrivingState`` clears speed, gear, and temperatures;
-  ``HandleChargingState`` only clears ``charge_inprogress`` and the env
-  temperature. Charging metrics added in the future may need explicit
-  clearing on exit.
+  ``HandleSleepState`` compares against
+  ``ms_v_bat_12v_voltage_ref + 0.2``; on an uncalibrated module the
+  CAN-frame path is the reliable wake mechanism.
+* **Driving-state exit clears more than charge-state exit.**
+  ``HandleDrivingState`` clears speed, gear, and temperatures; charge
+  states clean up via ``SetChargingStatus(false)`` and ``SetChargeState``
+  only.  Charge metrics added in the future may need explicit clearing on
+  exit.
+* **No flash persistence for charge sessions.** ``m_charge_session`` lives
+  only in RAM.  A hard reset or power cycle mid-session will lose the
+  session-open state; the wake-reconcile will not fire because
+  ``in_session`` will be ``false`` after boot.
