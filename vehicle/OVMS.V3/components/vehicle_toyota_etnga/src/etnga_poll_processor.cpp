@@ -217,6 +217,14 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
             break;
         }
 
+        case PID_DC_CHARGER_PRESENT_CURRENT:
+            // curve channel — captured for future report (DC station A); no metric yet
+            break;
+
+        case PID_DC_CHARGER_PRESENT_VOLTAGE:
+            // curve channel — captured for future report (DC station V); no metric yet
+            break;
+
         // Add more cases for other PIDs if needed
 
         default:
