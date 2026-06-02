@@ -132,7 +132,7 @@ private:
     void SetCabinTemperature(float temperature);
     void SetChargeMode(int chargeMode);
     void SetChargeType(int chargeType);
-    void SetChargeState(std::string chargeState);
+    void SetChargeState(PollState state);
     void SetChargerInputPower(float power);
     void SetChargingStatus(bool status);
     void SetChargingDoorStatus(bool status);

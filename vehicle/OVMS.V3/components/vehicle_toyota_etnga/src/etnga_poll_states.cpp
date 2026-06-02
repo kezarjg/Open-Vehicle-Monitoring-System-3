@@ -215,10 +215,11 @@ void OvmsVehicleToyotaETNGA::TransitionToSleepState()
 void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
 {
     int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
+    PollState oldState = static_cast<PollState>(m_poll_state);
     // If bouncing back from CHARGE_HANDSHAKE (premature unplug / DCFC retry dance),
     // re-arm and restart the cable watch so the next plug-in gets a fresh 15-min window.
-    // Check m_poll_state BEFORE calling SetPollState (sim: armed_for_charge=True on HANDSHAKE→AWAKE).
-    if (m_poll_state == PollState::CHARGE_HANDSHAKE) {
+    // Check oldState BEFORE calling SetPollState (sim: armed_for_charge=True on HANDSHAKE→AWAKE).
+    if (oldState == PollState::CHARGE_HANDSHAKE) {
         m_armed_for_charge = true;
         m_cable_watch_start = monotonic;
         ESP_LOGD(TAG, "Re-armed after HANDSHAKE→AWAKE bounce (DCFC retry)");
@@ -227,6 +228,11 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
     // arm state is reset by TransitionToSleepState / TransitionToDrivingState.
     SetPollState(PollState::AWAKE);
     m_v_env_awaketime->SetValue(monotonic);
+    // Set ms_v_charge_state based on the charge session outcome.
+    if (oldState == PollState::CHARGE_AC || oldState == PollState::CHARGE_DC)
+        StandardMetrics.ms_v_charge_state->SetValue("done");
+    else if (oldState == PollState::CHARGE_HANDSHAKE || oldState == PollState::CHARGE_WAIT)
+        StandardMetrics.ms_v_charge_state->SetValue("");
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
@@ -243,6 +249,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
     m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
     SetPollState(PollState::CHARGE_HANDSHAKE);
     SetChargingStatus(false);    // not yet delivering energy (AC/DC states set true)
+    SetChargeState(PollState::CHARGE_HANDSHAKE);
     RequestVIN();
 }
 
@@ -251,6 +258,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeWaitState()
     m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
     SetPollState(PollState::CHARGE_WAIT);
     SetChargingStatus(false);
+    SetChargeState(PollState::CHARGE_WAIT);
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
@@ -258,6 +266,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
     m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
     SetPollState(PollState::CHARGE_AC);
     SetChargingStatus(true);
+    SetChargeState(PollState::CHARGE_AC);
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
@@ -265,4 +274,5 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
     m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
     SetPollState(PollState::CHARGE_DC);
     SetChargingStatus(true);
+    SetChargeState(PollState::CHARGE_DC);
 }

@@ -441,6 +441,20 @@ void OvmsVehicleToyotaETNGA::SetChargingStatus(bool status)
     StandardMetrics.ms_v_charge_inprogress->SetValue(status);
 }
 
+void OvmsVehicleToyotaETNGA::SetChargeState(PollState state)
+{
+    std::string s;
+    switch (state) {
+        case PollState::CHARGE_HANDSHAKE: s = "prepared"; break;
+        case PollState::CHARGE_WAIT:      s = "stopped";  break;
+        case PollState::CHARGE_AC:
+        case PollState::CHARGE_DC:        s = "charging"; break;
+        default:                          s = ""; break;
+    }
+    LogMetricChange(StandardMetrics.ms_v_charge_state, s, "Charge State");
+    StandardMetrics.ms_v_charge_state->SetValue(s);
+}
+
 void OvmsVehicleToyotaETNGA::SetCabinTemperature(float temperature)
 {
     if (temperature == -40.0f)
