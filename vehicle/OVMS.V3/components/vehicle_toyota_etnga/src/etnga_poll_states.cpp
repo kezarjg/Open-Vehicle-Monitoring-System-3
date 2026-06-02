@@ -16,6 +16,7 @@
 //    AWAKE (1)             : Vehicle is alive; vehicle has been switched on by driver
 //    DRIVING (2)           : Vehicle is "Ready" to drive or being driven
 //    CHARGING (3)          : Vehicle is charging
+//    (v3 in progress: CHARGING is being replaced by CHARGE_HANDSHAKE/WAIT/AC/DC)
 
 void OvmsVehicleToyotaETNGA::HandleSleepState()
 {
