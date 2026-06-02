@@ -179,6 +179,17 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
         case PID_PISW_STATUS: {
             bool PISWStatus = CalculatePISWStatus(m_rxbuf);
             SetPISWStatus(PISWStatus);
+            SetPISWRaw(CalculatePISWRaw(m_rxbuf));
+            break;
+        }
+
+        case PID_AC_CHARGING_OP_STATUS: {
+            SetAcOpStatus(CalculateAcOpStatus(m_rxbuf));
+            break;
+        }
+
+        case PID_HLC_STATE: {
+            SetHlcState(CalculateHlcState(m_rxbuf));
             break;
         }
 

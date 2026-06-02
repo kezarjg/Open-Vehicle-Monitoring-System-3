@@ -53,6 +53,9 @@ protected:
 
 //    ControlState m_s_controlstate;
     OvmsMetricInt* m_s_controlstate;
+    OvmsMetricInt* m_v_charge_pisw_raw;   // 0x1669 raw u8 connector state
+    OvmsMetricInt* m_v_charge_ac_op;      // 0x1684 AC op status
+    OvmsMetricInt* m_v_charge_hlc;        // 0x1666 DC HLC state
     OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
     OvmsMetricFloat* m_v_bat_speed_water_pump;
@@ -93,8 +96,11 @@ private:
     std::vector<float> CalculateBatteryTemperatures(const std::string& data);
     float CalculateBatteryVoltage(const std::string& data);
     float CalculateCabinTemperature(const std::string& data);
+    int CalculateAcOpStatus(const std::string& data);
     int CalculateChargeMode(const std::string& data);
     int CalculateChargeType(const std::string& data);
+    int CalculateHlcState(const std::string& data);
+    int CalculatePISWRaw(const std::string& data);
     float CalculateChargerInputPower(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
     int CalculateControlMode(const std::string& data);
@@ -106,6 +112,7 @@ private:
     float CalculateVehicleSpeed(const std::string& data);
 
     // Metric setter functions
+    void SetAcOpStatus(int v);
     void SetAmbientTemperature(float temperature);
     void SetAwake(bool awake);
     void SetBatteryChargingPower(float power);
@@ -126,8 +133,10 @@ private:
     void SetChargingStatus(bool status);
     void SetChargingDoorStatus(bool status);
     void SetControlMode(int controlMode);
+    void SetHlcState(int v);
     void SetHVACSetpoint(float temperature);
     void SetOdometer(float odometer);
+    void SetPISWRaw(int v);
     void SetPISWStatus(bool status);
     void SetPollState(int state);
     void SetReadyStatus(bool status);
@@ -214,7 +223,10 @@ enum CANPID
     
     PID_DC_CHARGER_PRESENT_CURRENT = 0x166C,
 
-    PID_DC_CHARGER_PRESENT_VOLTAGE = 0x166B
+    PID_DC_CHARGER_PRESENT_VOLTAGE = 0x166B,
+
+    PID_AC_CHARGING_OP_STATUS = 0x1684,  // 0=Stop,1=Startup,2=Running,3=Finishing
+    PID_HLC_STATE = 0x1666,              // DC HLC: 0xFF=Unconnected, 0x0A-0x12 active
 
 };
 

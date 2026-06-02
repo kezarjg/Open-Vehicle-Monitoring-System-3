@@ -15,6 +15,9 @@
 void OvmsVehicleToyotaETNGA::InitializeMetrics()
 {
     m_s_controlstate = MyMetrics.InitInt("xte.s.controlstate", SM_STALE_MIN);  // This variable stores the control state variable
+    m_v_charge_pisw_raw = MyMetrics.InitInt("xte.v.c.pisw", SM_STALE_MID);
+    m_v_charge_ac_op    = MyMetrics.InitInt("xte.v.c.acop", SM_STALE_MID);
+    m_v_charge_hlc      = MyMetrics.InitInt("xte.v.c.hlc",  SM_STALE_MID);
     m_v_bat_heater_status = MyMetrics.InitBool("xte.v.b.heater", SM_STALE_MID);  // This variable stores the status of the battery coolant heater relay
     m_v_bat_soc_bms = MyMetrics.InitFloat("xte.v.b.soc.bms", SM_STALE_MID, 0.0f, Percentage, true);  // This variable stores the SOC as reported by the BMS
     m_v_bat_speed_water_pump = MyMetrics.InitFloat("xte.v.b.speed.waterpump", SM_STALE_MID, 0.0f, Other);  // This variable stores the RPM of the battery water pump
@@ -154,6 +157,13 @@ int OvmsVehicleToyotaETNGA::CalculateChargeMode(const std::string& data)
 {
     return GetRxBInt8(data, 0);
 }
+
+int OvmsVehicleToyotaETNGA::CalculateAcOpStatus(const std::string& data) { return GetRxBInt8(data, 0); }
+void OvmsVehicleToyotaETNGA::SetAcOpStatus(int v) { m_v_charge_ac_op->SetValue(v); }
+int OvmsVehicleToyotaETNGA::CalculateHlcState(const std::string& data) { return GetRxBByte(data, 0); }
+void OvmsVehicleToyotaETNGA::SetHlcState(int v) { m_v_charge_hlc->SetValue(v); }
+int OvmsVehicleToyotaETNGA::CalculatePISWRaw(const std::string& data) { return GetRxBInt8(data, 0); }
+void OvmsVehicleToyotaETNGA::SetPISWRaw(int v) { m_v_charge_pisw_raw->SetValue(v); }
 
 int OvmsVehicleToyotaETNGA::CalculateControlMode(const std::string& data)
 {

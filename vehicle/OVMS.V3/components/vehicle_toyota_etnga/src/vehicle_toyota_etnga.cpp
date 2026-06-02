@@ -50,6 +50,8 @@ static const OvmsPoller::poll_pid_t obdii_polls[] = {
 //  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGING_CONTROL_INFORMATION, { 0, 0, 0, 1}, 0, ISOTP_STD }, // { 0, 1, 1, 1}
 
 
+  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_AC_CHARGING_OP_STATUS, { 0, 0, 0, 1, 1, 1, 1}, 0, ISOTP_STD }, // 0x1684 AC op status (charge states)
+  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_HLC_STATE, { 0, 0, 0, 1, 1, 1, 1}, 0, ISOTP_STD }, // 0x1666 DC HLC state (charge states)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_CHARGING_POWER, { 0, 0, 0, 1, 1, 1, 1}, 0, ISOTP_STD }, // 0x10D4 battery-side charging power (1s in charge states); handler gated on charge-in-progress
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGER_INPUT_POWER, { 0, 0, 0, 1, 1, 1, 1}, 0, ISOTP_STD }, // 0x161D grid-side input power (1s in charge states); handler gated on AC charge
 
