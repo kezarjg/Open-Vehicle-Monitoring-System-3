@@ -55,6 +55,13 @@ protected:
     int  m_cable_watch_start = 0;      // monotonic s when armed (15-min cable watch)
     int  m_charge_state_entry = 0;     // monotonic s of last charge-state entry (handshake 60s timer)
 
+    struct ChargeSessionState {
+        bool in_session = false;
+        int  start_monotonic = 0;
+        int  start_soc = -1;
+    };
+    ChargeSessionState m_charge_session;
+
 //    ControlState m_s_controlstate;
     OvmsMetricInt* m_s_controlstate;
     OvmsMetricInt* m_v_charge_pisw_raw;   // 0x1669 raw u8 connector state

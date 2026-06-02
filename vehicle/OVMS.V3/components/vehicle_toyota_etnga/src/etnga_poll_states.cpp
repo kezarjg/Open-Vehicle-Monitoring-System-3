@@ -54,6 +54,26 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
 {
     int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
 
+    // Wake-reconcile: if a charge session was open and the cable is now gone (confirmed
+    // fresh read — not stale/transient), the cable was removed while we slept.
+    // Guard: only act on a non-stale PISW value to avoid the ~30s OBC post-wake transient
+    // where PISW may briefly report 0x00 before the OBC fully wakes.
+    // REGRESSION DEPENDENCY: this requires PID_PISW_STATUS to be polled in the AWAKE
+    // column (obdii_polls[] in vehicle_toyota_etnga.cpp, AWAKE=5s). Without an AWAKE poll
+    // the cached PISW value is stale (gap >120s) or the pre-sleep connected value
+    // (gap <120s), so a fresh 0x00 never arrives and this reconcile can NEVER fire —
+    // leaking in_session and blocking the next session's open-guard. Do not remove the
+    // AWAKE PISW poll without replacing this reconcile trigger.
+    if (m_charge_session.in_session &&
+        !m_v_charge_pisw_raw->IsStale() &&
+        m_v_charge_pisw_raw->AsInt() == 0x00) {
+        // Session ended while we slept (cable removed during the sleep gap).
+        ESP_LOGI(TAG, "Charge session ended during sleep — finalizing");
+        StandardMetrics.ms_v_charge_state->SetValue("done");
+        m_charge_session = ChargeSessionState{};
+        // fall through to normal AWAKE handling
+    }
+
     if (!StandardMetrics.ms_v_env_awake->AsBool()) {
         // No CAN communication - bus is dead, go to sleep
         TransitionToSleepState();
@@ -173,6 +193,11 @@ void OvmsVehicleToyotaETNGA::HandleChargeWaitState()
 
 void OvmsVehicleToyotaETNGA::HandleChargeAcState()
 {
+    // Lock isolation note: locking the car during AC charging causes sustained OBC poll
+    // timeouts (gateway isolates OBD from OBC).  We do NOT tear down the session on
+    // timeouts — only an explicit fresh PISW=Unconnected (0x00) read or a clean phase-end
+    // (ac_op==0x00) terminates the session.  On unlock the OBC answers again and these
+    // handlers resume normally.  Do not add timeout-based session teardown here.
     int pisw = m_v_charge_pisw_raw->AsInt();
     int ac_op = m_v_charge_ac_op->AsInt();
 
@@ -190,6 +215,10 @@ void OvmsVehicleToyotaETNGA::HandleChargeAcState()
 
 void OvmsVehicleToyotaETNGA::HandleChargeDcState()
 {
+    // Lock isolation note: same as HandleChargeAcState — sustained OBC timeouts while
+    // in_session do NOT tear down the session.  Only an explicit fresh PISW=Unconnected
+    // (0x00) read or hlc==0xFF (HLC Unconnected) terminates the DC phase.  On unlock the
+    // OBC answers again and polling resumes.  Do not add timeout-based session teardown here.
     int pisw = m_v_charge_pisw_raw->AsInt();
     int hlc = m_v_charge_hlc->AsInt();
 
@@ -229,10 +258,18 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
     SetPollState(PollState::AWAKE);
     m_v_env_awaketime->SetValue(monotonic);
     // Set ms_v_charge_state based on the charge session outcome.
-    if (oldState == PollState::CHARGE_AC || oldState == PollState::CHARGE_DC)
+    // AC/DC normally exit via CHARGE_WAIT; this branch is a safety net for any future direct AC/DC->AWAKE path.
+    if (oldState == PollState::CHARGE_AC || oldState == PollState::CHARGE_DC) {
         StandardMetrics.ms_v_charge_state->SetValue("done");
-    else if (oldState == PollState::CHARGE_HANDSHAKE || oldState == PollState::CHARGE_WAIT)
+        if (m_charge_session.in_session)
+            ESP_LOGI(TAG, "Charge session closed");
+        m_charge_session = ChargeSessionState{};   // reset (clears in_session)
+    } else if (oldState == PollState::CHARGE_HANDSHAKE || oldState == PollState::CHARGE_WAIT) {
         StandardMetrics.ms_v_charge_state->SetValue("");
+        if (m_charge_session.in_session)
+            ESP_LOGI(TAG, "Charge session closed");
+        m_charge_session = ChargeSessionState{};   // reset (clears in_session)
+    }
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
@@ -250,6 +287,12 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
     SetPollState(PollState::CHARGE_HANDSHAKE);
     SetChargingStatus(false);    // not yet delivering energy (AC/DC states set true)
     SetChargeState(PollState::CHARGE_HANDSHAKE);
+    if (!m_charge_session.in_session) {
+        m_charge_session.in_session = true;
+        m_charge_session.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
+        m_charge_session.start_soc = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
+        ESP_LOGI(TAG, "Charge session opened (SOC %d%%)", m_charge_session.start_soc);
+    }
     RequestVIN();
 }
 
