@@ -59,7 +59,7 @@ static const OvmsPoller::poll_pid_t obdii_polls[] = {
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_CHARGING_POWER,   { 0,  0, 0,  0,  0,  1,  1}, 0, ISOTP_STD }, // 0x10D4 batt power: AC+DC=1s (sim); handler gated on charge-in-progress
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGER_INPUT_POWER,      { 0,  0, 0,  0,  0,  5,  5}, 0, ISOTP_STD }, // 0x161D grid power: AC+DC=5s (sim); handler gated on AC charge
 
-  // DC station telemetry — sim polls both at DC=1s; handlers are no-ops (curve channel, deferred metrics)
+  // DC station telemetry — present V/I (DC=1s) drive standard ms_v_charge_voltage/current; max P/I/V (DC=5s) are the station caps
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_DC_CHARGER_PRESENT_CURRENT,{ 0, 0, 0,  0,  0,  0,  1}, 0, ISOTP_STD }, // 0x166C DC station A: DC=1s (sim DID_STA_A)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_DC_CHARGER_PRESENT_VOLTAGE,{ 0, 0, 0,  0,  0,  0,  1}, 0, ISOTP_STD }, // 0x166B DC station V: DC=1s (sim DID_STA_V)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_DC_CHARGER_MAX_POWER,      { 0,  0, 0,  0,  0,  0,  5}, 0, ISOTP_STD }, // 0x166A station max power: DC=5s (sim DID_STA_MAX_P)
