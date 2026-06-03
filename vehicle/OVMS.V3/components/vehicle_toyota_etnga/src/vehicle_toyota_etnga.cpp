@@ -9,6 +9,7 @@
 */
 
 #include "ovms_log.h"
+#include "ovms_config.h"
 #include "vehicle_toyota_etnga.h"
 
 // Poll state descriptions:
@@ -96,6 +97,7 @@ OvmsVehicleToyotaETNGA::OvmsVehicleToyotaETNGA()
 
     // Init metrics
     InitializeMetrics();
+    MyConfig.RegisterParam("xte", "Toyota eTNGA", true, true);
 
     // Init CAN
     RegisterCanBus(2, CAN_MODE_ACTIVE, CAN_SPEED_500KBPS);

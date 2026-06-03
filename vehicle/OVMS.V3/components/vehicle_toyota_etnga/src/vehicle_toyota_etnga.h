@@ -113,6 +113,7 @@ private:
     void IncomingHybridControlSystem(uint16_t pid);
     void IncomingPlugInControlSystem(uint16_t pid);
     void IncomingTPMS(uint16_t pid);
+    void UpdateTPMSAlert();
     bool TPMSCornerMapValid();
 
     // Data calculation functions
