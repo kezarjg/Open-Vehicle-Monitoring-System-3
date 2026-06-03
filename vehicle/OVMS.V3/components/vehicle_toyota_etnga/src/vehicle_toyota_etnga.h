@@ -118,6 +118,8 @@ private:
     void  SetPermissionPower(float kw);
     float CalculateTargetCurrent(const std::string& data);
     void  SetTargetCurrent(float amps);
+    float CalculateStationVoltage(const std::string& data);
+    float CalculateStationCurrent(const std::string& data);
     float CalculateChargerInputPower(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
     int CalculateControlMode(const std::string& data);

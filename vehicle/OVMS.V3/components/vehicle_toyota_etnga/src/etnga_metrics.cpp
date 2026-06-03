@@ -180,6 +180,15 @@ float OvmsVehicleToyotaETNGA::CalculateTargetCurrent(const std::string& data)
 }
 void OvmsVehicleToyotaETNGA::SetTargetCurrent(float amps) { m_v_charge_tgti->SetValue(amps); }
 
+float OvmsVehicleToyotaETNGA::CalculateStationVoltage(const std::string& data)
+{
+    return static_cast<float>(GetRxBUint16(data, 0));  // 0x166B x1 V
+}
+float OvmsVehicleToyotaETNGA::CalculateStationCurrent(const std::string& data)
+{
+    return static_cast<float>(GetRxBUint16(data, 0));  // 0x166C x1 A
+}
+
 int OvmsVehicleToyotaETNGA::CalculateControlMode(const std::string& data)
 {
     // 0x00 = None
