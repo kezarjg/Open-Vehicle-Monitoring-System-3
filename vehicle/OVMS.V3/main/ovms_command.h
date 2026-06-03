@@ -54,6 +54,7 @@
 class OvmsWriter;
 class OvmsCommand;
 class OvmsCommandMap;
+class OvmsCommandTask;
 class LogBuffers;
 typedef bool (*InsertCallback)(OvmsWriter* writer, void* userData, char);
 
@@ -81,6 +82,16 @@ class OvmsWriter
     virtual void ProcessChar(char c) {}
 
   public:
+    // Lifecycle of a follow-mode (OCS_RunLoop) command task bound to this writer.
+    // At most one such task can be active at a time (console input is captured by
+    // the command's Ctrl-C Terminator while it runs). TerminateCommandTask() must
+    // be called by a console before it frees any transport it owns, so the task
+    // can no longer dereference this writer after it is destroyed.
+    void RegisterCommandTask(OvmsCommandTask* task);
+    void DeregisterCommandTask(OvmsCommandTask* task);
+    void TerminateCommandTask();
+
+  public:
     // Used to notify the writer of a migration of a file within the VFS
     virtual const std::string GetPath() { return std::string(""); }
     virtual void SetPath(const std::string& path) {}
@@ -98,6 +109,7 @@ class OvmsWriter
     InsertCallback m_insert;
     void* m_userData;
     bool m_monitoring;
+    OvmsCommandTask* m_curtask;          // active follow-mode command task, or NULL
   };
 
 template <typename T>
@@ -328,6 +340,7 @@ class OvmsCommandTask : public TaskBase
     static bool Terminator(OvmsWriter* writer, void* userdata, char ch);
     bool IsRunning() { return m_state == OCS_RunLoop; }
     bool IsTerminated() { return m_state == OCS_StopRequested; }
+    void RequestStop() { m_state = OCS_StopRequested; }
 
   protected:
     int verbosity;

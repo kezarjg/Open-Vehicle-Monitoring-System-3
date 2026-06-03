@@ -80,10 +80,41 @@ OvmsWriter::OvmsWriter()
   m_insert = NULL;
   m_userData = NULL;
   m_monitoring = false;
+  m_curtask = NULL;
   }
 
 OvmsWriter::~OvmsWriter()
   {
+  // Backstop: stop any follow-mode command task still bound to this writer.
+  // Interactive consoles that own a transport should call this earlier (before
+  // freeing that transport); here it only guards writers that did not.
+  TerminateCommandTask();
+  }
+
+void OvmsWriter::RegisterCommandTask(OvmsCommandTask* task)
+  {
+  m_curtask = task;
+  }
+
+void OvmsWriter::DeregisterCommandTask(OvmsCommandTask* task)
+  {
+  if (m_curtask == task)
+    m_curtask = NULL;
+  }
+
+void OvmsWriter::TerminateCommandTask()
+  {
+  // Ask the active follow-mode command task (if any) to stop, then wait until
+  // it has fully exited. The task clears its registration (m_curtask) as its
+  // last action that touches this writer, so once we observe it cleared the
+  // task can no longer dereference us. This relies on no concurrent Ctrl-C
+  // termination, which holds during connection-close teardown.
+  OvmsCommandTask* task = m_curtask;
+  if (task == NULL)
+    return;
+  task->RequestStop();
+  while (m_curtask == task)
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
 
 void OvmsWriter::Exit()
@@ -1744,8 +1775,12 @@ bool OvmsCommandTask::Run()
     case OCS_RunLoop:
       // start task:
       writer->RegisterInsertCallback(Terminator, (void*) this);
+      // Register before Instantiate() so the task is never started while
+      // unregistered (it could otherwise finish and deregister before we set it).
+      writer->RegisterCommandTask(this);
       if (!Instantiate())
         {
+        writer->DeregisterCommandTask(this);
         delete this;
         return false;
         }
@@ -1772,6 +1807,9 @@ OvmsCommandTask::~OvmsCommandTask()
   if (m_state == OCS_StopRequested)
     writer->puts("^C");
   writer->DeregisterInsertCallback(Terminator);
+  // Must be the last access to writer: it releases a console blocked in
+  // TerminateCommandTask(), which may then free the writer.
+  writer->DeregisterCommandTask(this);
   if (argv)
     {
     for (int i=0; i < argc; i++)
