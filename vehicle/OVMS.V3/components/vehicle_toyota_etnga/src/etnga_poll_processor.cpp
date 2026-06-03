@@ -179,6 +179,17 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
         case PID_PISW_STATUS: {
             bool PISWStatus = CalculatePISWStatus(m_rxbuf);
             SetPISWStatus(PISWStatus);
+            SetPISWRaw(CalculatePISWRaw(m_rxbuf));
+            break;
+        }
+
+        case PID_AC_CHARGING_OP_STATUS: {
+            SetAcOpStatus(CalculateAcOpStatus(m_rxbuf));
+            break;
+        }
+
+        case PID_HLC_STATE: {
+            SetHlcState(CalculateHlcState(m_rxbuf));
             break;
         }
 
@@ -203,6 +214,71 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
         case PID_CHARGING_VOLTAGE_TYPE: {
             int chargeType = CalculateChargeType(m_rxbuf);
             SetChargeType(chargeType);
+            break;
+        }
+
+        case PID_DC_CHARGER_PRESENT_CURRENT:
+            SetStationCurrent(CalculateStationCurrent(m_rxbuf));
+            break;
+
+        case PID_DC_CHARGER_PRESENT_VOLTAGE:
+            SetStationVoltage(CalculateStationVoltage(m_rxbuf));
+            break;
+
+        case PID_MIN_PERMISSION_POWER: {
+            if (GetRxBUint16(m_rxbuf, 0) != 0x8000)  // 0x8000 = feature inactive; preserve forward-fill
+                SetPermissionPower(CalculatePermissionPower(m_rxbuf));
+            break;
+        }
+
+        case PID_TARGET_CHARGING_CURRENT: {
+            SetTargetCurrent(CalculateTargetCurrent(m_rxbuf));
+            break;
+        }
+
+        case PID_DC_CHARGER_MAX_POWER: {
+            SetStationMaxPower(CalculateStationMaxPower(m_rxbuf));
+            break;
+        }
+        case PID_DC_CHARGER_MAX_CURRENT: {
+            SetStationMaxCurrent(CalculateStationMaxCurrent(m_rxbuf));
+            break;
+        }
+        case PID_DC_CHARGER_MAX_VOLTAGE: {
+            SetStationMaxVoltage(CalculateStationMaxVoltage(m_rxbuf));
+            break;
+        }
+
+        case PID_CHARGER_STATE_CLUSTER: {
+            SetAcTargetPower(CalculateAcTargetPower(m_rxbuf));
+            SetChargerOpStatus(CalculateChargerOpStatus(m_rxbuf));
+            SetAcCurrentLimitRaw(CalculateAcCurrentLimitRaw(m_rxbuf));
+            break;
+        }
+        case PID_CHARGER_OUTPUT_POWER: {
+            SetChargerOutputRaw(CalculateChargerOutputRaw(m_rxbuf));
+            SetChargerOutputTargetRaw(CalculateChargerOutputTargetRaw(m_rxbuf));
+            break;
+        }
+        case PID_AC_USABLE_POWER: {
+            SetAcUsableRaw(CalculateAcUsableRaw(m_rxbuf));
+            break;
+        }
+
+        case PID_MYROOM: {
+            SetMyRoom(CalculateMyRoom(m_rxbuf));
+            break;
+        }
+        case PID_AC_CONSUMPTION: {
+            SetAcConsumption(CalculateAcConsumption(m_rxbuf));
+            break;
+        }
+        case PID_CHARGE_HISTORY: {
+            SetChargeOutcome(CalculateChargeOutcome(m_rxbuf));
+            break;
+        }
+        case PID_CHARGE_STOP_REQ: {
+            SetChargeStopReq(CalculateChargeStopReq(m_rxbuf));
             break;
         }
 

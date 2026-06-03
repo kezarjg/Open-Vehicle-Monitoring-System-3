@@ -22,12 +22,15 @@ enum ControlState {
 };
 
 // Poll states
-enum PollState
+enum PollState : int
 {
-    SLEEP,
-    AWAKE,
-    DRIVING,
-    CHARGING
+    SLEEP            = 0,
+    AWAKE            = 1,
+    DRIVING          = 2,
+    CHARGE_HANDSHAKE = 3,  // was CHARGING; cable-negotiation fast-poll window
+    CHARGE_WAIT      = 4,  // plugged in, not (yet/any longer) charging — sparse
+    CHARGE_AC        = 5,
+    CHARGE_DC        = 6,
 };
 
 class OvmsVehicleToyotaETNGA : public OvmsVehicle
@@ -46,10 +49,39 @@ protected:
     std::string m_rxbuf;
 
     bool m_allow_wake = true;  // Used to implement a cooldown timer if the vehicle is put into sleep
-    int m_sleep_entry_time;  // Used to track the time that cooldown timer started
+    int m_sleep_entry_time = 0;  // Used to track the time that cooldown timer started
+
+    bool m_armed_for_charge = false;   // charge lid seen open since entering AWAKE
+    int  m_cable_watch_start = 0;      // monotonic s when armed (15-min cable watch)
+    int  m_charge_state_entry = 0;     // monotonic s of last charge-state entry (handshake 60s timer)
+
+    struct ChargeSessionState {
+        bool in_session = false;
+        int  start_monotonic = 0;
+        int  start_soc = -1;
+    };
+    ChargeSessionState m_charge_session;
 
 //    ControlState m_s_controlstate;
     OvmsMetricInt* m_s_controlstate;
+    OvmsMetricInt* m_v_charge_pisw_raw;   // 0x1669 raw u8 connector state
+    OvmsMetricInt* m_v_charge_ac_op;      // 0x1684 AC op status
+    OvmsMetricInt* m_v_charge_hlc;        // 0x1666 DC HLC state
+    OvmsMetricFloat* m_v_charge_perm;     // 0x16A1 min permission power (kW, s16 two's-comp, NOT biased-32768) — DC curve
+    OvmsMetricFloat* m_v_charge_tgti;     // 0x166D target charging current (A)
+    OvmsMetricFloat* m_v_charge_sta_max_p;  // 0x166A station max power (kW)
+    OvmsMetricFloat* m_v_charge_sta_max_i;  // 0x1679 station max current (A)
+    OvmsMetricFloat* m_v_charge_sta_max_v;  // 0x1681 station max voltage (V)
+    OvmsMetricFloat* m_v_charge_ac_tgt_p;  // 0x1619 b1-2 AC target power (kW)
+    OvmsMetricInt*   m_v_charge_chgr_op;   // 0x1619 b3 charger op status (enum) — distinct from m_v_charge_ac_op (0x1684)
+    OvmsMetricInt*   m_v_charge_ac_ilim;   // 0x1619 b4-5 current upper limit (raw, scale deferred)
+    OvmsMetricInt*   m_v_charge_out;       // 0x161E b1-2 charger output (raw, scale deferred)
+    OvmsMetricInt*   m_v_charge_out_tgt;   // 0x161E b3-4 target-from-charger (raw, scale deferred)
+    OvmsMetricInt*   m_v_charge_ac_usable; // 0x1665 useable power (raw, scale deferred)
+    OvmsMetricBool*  m_v_charge_myroom;   // 0x1692 byte 2 (idx 1) bit 0 = My Room active
+    OvmsMetricFloat* m_v_charge_acpwr;    // 0x106E A/C consumption power (kW)
+    OvmsMetricInt*   m_v_charge_outcome;  // 0x1688 charging history / outcome enum
+    OvmsMetricInt*   m_v_charge_stopreq;  // 0x1667 charge seq stop request (enum, partial)
     OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
     OvmsMetricFloat* m_v_bat_speed_water_pump;
@@ -90,9 +122,29 @@ private:
     std::vector<float> CalculateBatteryTemperatures(const std::string& data);
     float CalculateBatteryVoltage(const std::string& data);
     float CalculateCabinTemperature(const std::string& data);
+    int CalculateAcOpStatus(const std::string& data);
     int CalculateChargeMode(const std::string& data);
     int CalculateChargeType(const std::string& data);
+    int CalculateHlcState(const std::string& data);
+    int CalculatePISWRaw(const std::string& data);
+    float CalculatePermissionPower(const std::string& data);
+    float CalculateTargetCurrent(const std::string& data);
+    float CalculateStationVoltage(const std::string& data);
+    float CalculateStationCurrent(const std::string& data);
+    float CalculateStationMaxPower(const std::string& data);
+    float CalculateStationMaxCurrent(const std::string& data);
+    float CalculateStationMaxVoltage(const std::string& data);
     float CalculateChargerInputPower(const std::string& data);
+    float CalculateAcTargetPower(const std::string& data);
+    int   CalculateChargerOpStatus(const std::string& data);
+    int   CalculateAcCurrentLimitRaw(const std::string& data);
+    int   CalculateChargerOutputRaw(const std::string& data);
+    int   CalculateChargerOutputTargetRaw(const std::string& data);
+    int   CalculateAcUsableRaw(const std::string& data);
+    bool  CalculateMyRoom(const std::string& data);
+    float CalculateAcConsumption(const std::string& data);
+    int   CalculateChargeOutcome(const std::string& data);
+    int   CalculateChargeStopReq(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
     int CalculateControlMode(const std::string& data);
     float CalculateHVACSetpoint(const std::string& data);
@@ -103,6 +155,7 @@ private:
     float CalculateVehicleSpeed(const std::string& data);
 
     // Metric setter functions
+    void SetAcOpStatus(int v);
     void SetAmbientTemperature(float temperature);
     void SetAwake(bool awake);
     void SetBatteryChargingPower(float power);
@@ -118,19 +171,38 @@ private:
     void SetCabinTemperature(float temperature);
     void SetChargeMode(int chargeMode);
     void SetChargeType(int chargeType);
-    void SetChargeState(std::string chargeState);
+    void SetChargeState(PollState state);
     void SetChargerInputPower(float power);
     void SetChargingStatus(bool status);
     void SetChargingDoorStatus(bool status);
     void SetControlMode(int controlMode);
+    void SetHlcState(int v);
     void SetHVACSetpoint(float temperature);
     void SetOdometer(float odometer);
+    void SetPISWRaw(int v);
     void SetPISWStatus(bool status);
     void SetPollState(int state);
     void SetReadyStatus(bool status);
     void SetShiftPosition(int position);
     void SetVehicleSpeed(float speed);
     void SetVehicleVIN(std::string vin);
+    void SetStationVoltage(float volts);
+    void SetStationCurrent(float amps);
+    void SetPermissionPower(float kw);
+    void SetTargetCurrent(float amps);
+    void SetStationMaxPower(float kw);
+    void SetStationMaxCurrent(float amps);
+    void SetStationMaxVoltage(float volts);
+    void SetAcTargetPower(float kw);
+    void SetChargerOpStatus(int v);
+    void SetAcCurrentLimitRaw(int v);
+    void SetChargerOutputRaw(int v);
+    void SetChargerOutputTargetRaw(int v);
+    void SetAcUsableRaw(int v);
+    void SetMyRoom(bool active);
+    void SetAcConsumption(float kw);
+    void SetChargeOutcome(int v);
+    void SetChargeStopReq(int v);
 
     void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
     void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);
@@ -141,11 +213,17 @@ private:
     void HandleSleepState();
     void HandleAwakeState();
     void HandleDrivingState();
-    void HandleChargingState();
+    void HandleChargeHandshakeState();
+    void HandleChargeWaitState();
+    void HandleChargeAcState();
+    void HandleChargeDcState();
     void TransitionToSleepState();
     void TransitionToAwakeState();
     void TransitionToDrivingState();
-    void TransitionToChargingState();
+    void TransitionToChargeHandshakeState();
+    void TransitionToChargeWaitState();
+    void TransitionToChargeAcState();
+    void TransitionToChargeDcState();
 
     void RequestVIN();
     void IncomingVINSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, CAN_frame_format_t format, const std::string &data);
@@ -203,9 +281,28 @@ enum CANPID
     PID_VEHICLE_SPEED = 0x1F0D,
     PID_VIN = 0xF190,
     
-    PID_DC_CHARGER_PRESENT_CURRENT = 0x166C,
+    PID_DC_CHARGER_PRESENT_CURRENT = 0x166C,  // u16 BE x1 A/LSB; DC station present current (idle 0 when no station)
 
-    PID_DC_CHARGER_PRESENT_VOLTAGE = 0x166B
+    PID_DC_CHARGER_PRESENT_VOLTAGE = 0x166B,  // u16 BE x1 V/LSB; DC station present voltage (idle 0 when no station)
+
+    PID_AC_CHARGING_OP_STATUS = 0x1684,  // 0=Stop,1=Startup,2=Running,3=Finishing
+    PID_HLC_STATE = 0x1666,              // DC HLC: 0xFF=Unconnected, 0x0A-0x12 active
+
+    PID_MIN_PERMISSION_POWER = 0x16A1,   // s16 BE x0.01 kW; 0x8000 sentinel = inactive — THE DC taper curve
+    PID_TARGET_CHARGING_CURRENT = 0x166D, // u16 BE x1 A; live current request
+
+    PID_DC_CHARGER_MAX_POWER = 0x166A,    // u16 BE x0.01 kW; station advertised max power
+    PID_DC_CHARGER_MAX_CURRENT = 0x1679,  // u16 BE x1 A; station advertised max current (CCS)
+    PID_DC_CHARGER_MAX_VOLTAGE = 0x1681,  // u16 BE x1 V; station advertised max voltage (CCS)
+
+    PID_CHARGER_STATE_CLUSTER = 0x1619,   // AC-only: b1-2 target power (biased-32768 x0.01kW), b3 op status, b4-5 current limit (raw)
+    PID_CHARGER_OUTPUT_POWER = 0x161E,    // AC-only: b1-2 output (raw), b3-4 target-from-charger (raw)
+    PID_AC_USABLE_POWER = 0x1665,         // AC-only: u8 useable power (raw)
+
+    PID_AC_CONSUMPTION = 0x106E,    // A/C consumption power: u8 x0.05 kW/LSB (50 W/LSB) — cabin draw, OBC view
+    PID_CHARGE_STOP_REQ = 0x1667,   // Charge Seq Stop Request from CCM: u8 enum (0x00 Normal / 0x06 HLC-error; partial)
+    PID_CHARGE_HISTORY = 0x1688,    // Charging History (outcome/stop-reason): u8 26-state enum
+    PID_MYROOM = 0x1692,            // byte 2 bit 0 = My Room active flag (live)
 
 };
 
@@ -270,8 +367,17 @@ inline const char* ConvertPollStateToString(int state) {
         case (PollState::DRIVING):
             pollStateText = "DRIVING";
             break;
-        case (PollState::CHARGING):
-            pollStateText = "CHARGING";
+        case (PollState::CHARGE_HANDSHAKE):
+            pollStateText = "CHARGE_HANDSHAKE";
+            break;
+        case (PollState::CHARGE_WAIT):
+            pollStateText = "CHARGE_WAIT";
+            break;
+        case (PollState::CHARGE_AC):
+            pollStateText = "CHARGE_AC";
+            break;
+        case (PollState::CHARGE_DC):
+            pollStateText = "CHARGE_DC";
             break;
         default:
             pollStateText = "UNKNOWN";

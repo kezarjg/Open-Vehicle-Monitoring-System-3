@@ -38,8 +38,11 @@
 
 #define VEHICLE_POLL_TYPE_NONE          0x00
 
-// Number of polling states supported
-#define VEHICLE_POLL_NSTATES            4
+// Number of polling states supported.
+// Bumped 4->7 for vehicle_toyota_etnga's charge sub-machine (CHARGE_HANDSHAKE/
+// WAIT/AC/DC = states 3-6). Other vehicles' shorter polltime[] initialisers
+// zero-fill the extra slots (no polling in states 4-6) — backward-safe.
+#define VEHICLE_POLL_NSTATES            7
 
 // A note on "PID" and their sizes here:
 //  By "PID" for the service types we mean the part of the request parameters
