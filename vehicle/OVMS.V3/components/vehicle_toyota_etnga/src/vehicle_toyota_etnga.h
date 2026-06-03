@@ -69,6 +69,9 @@ protected:
     OvmsMetricInt* m_v_charge_hlc;        // 0x1666 DC HLC state
     OvmsMetricFloat* m_v_charge_perm;     // 0x16A1 min permission power (kW, s16 two's-comp, NOT biased-32768) — DC curve
     OvmsMetricFloat* m_v_charge_tgti;     // 0x166D target charging current (A)
+    OvmsMetricFloat* m_v_charge_sta_max_p;  // 0x166A station max power (kW)
+    OvmsMetricFloat* m_v_charge_sta_max_i;  // 0x1679 station max current (A)
+    OvmsMetricFloat* m_v_charge_sta_max_v;  // 0x1681 station max voltage (V)
     OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
     OvmsMetricFloat* m_v_bat_speed_water_pump;
@@ -120,6 +123,12 @@ private:
     void  SetTargetCurrent(float amps);
     float CalculateStationVoltage(const std::string& data);
     float CalculateStationCurrent(const std::string& data);
+    float CalculateStationMaxPower(const std::string& data);
+    void  SetStationMaxPower(float kw);
+    float CalculateStationMaxCurrent(const std::string& data);
+    void  SetStationMaxCurrent(float amps);
+    float CalculateStationMaxVoltage(const std::string& data);
+    void  SetStationMaxVoltage(float volts);
     float CalculateChargerInputPower(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
     int CalculateControlMode(const std::string& data);
@@ -251,6 +260,10 @@ enum CANPID
 
     PID_MIN_PERMISSION_POWER = 0x16A1,   // s16 BE x0.01 kW; 0x8000 sentinel = inactive — THE DC taper curve
     PID_TARGET_CHARGING_CURRENT = 0x166D, // u16 BE x1 A; live current request
+
+    PID_DC_CHARGER_MAX_POWER = 0x166A,    // u16 BE x0.01 kW; station advertised max power
+    PID_DC_CHARGER_MAX_CURRENT = 0x1679,  // u16 BE x1 A; station advertised max current (CCS)
+    PID_DC_CHARGER_MAX_VOLTAGE = 0x1681,  // u16 BE x1 V; station advertised max voltage (CCS)
 
 };
 

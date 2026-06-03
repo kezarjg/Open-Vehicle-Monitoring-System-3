@@ -236,6 +236,19 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
             break;
         }
 
+        case PID_DC_CHARGER_MAX_POWER: {
+            SetStationMaxPower(CalculateStationMaxPower(m_rxbuf));
+            break;
+        }
+        case PID_DC_CHARGER_MAX_CURRENT: {
+            SetStationMaxCurrent(CalculateStationMaxCurrent(m_rxbuf));
+            break;
+        }
+        case PID_DC_CHARGER_MAX_VOLTAGE: {
+            SetStationMaxVoltage(CalculateStationMaxVoltage(m_rxbuf));
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:

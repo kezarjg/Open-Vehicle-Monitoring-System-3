@@ -20,6 +20,9 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     m_v_charge_hlc      = MyMetrics.InitInt("xte.v.c.hlc",  SM_STALE_MID);
     m_v_charge_perm = MyMetrics.InitFloat("xte.v.c.perm", SM_STALE_MID, 0.0f, kW);
     m_v_charge_tgti = MyMetrics.InitFloat("xte.v.c.tgti", SM_STALE_MID, 0.0f, Amps);
+    m_v_charge_sta_max_p = MyMetrics.InitFloat("xte.v.c.stamaxp", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_sta_max_i = MyMetrics.InitFloat("xte.v.c.stamaxi", SM_STALE_MID, 0.0f, Amps);
+    m_v_charge_sta_max_v = MyMetrics.InitFloat("xte.v.c.stamaxv", SM_STALE_MID, 0.0f, Volts);
     m_v_bat_heater_status = MyMetrics.InitBool("xte.v.b.heater", SM_STALE_MID);  // This variable stores the status of the battery coolant heater relay
     m_v_bat_soc_bms = MyMetrics.InitFloat("xte.v.b.soc.bms", SM_STALE_MID, 0.0f, Percentage, true);  // This variable stores the SOC as reported by the BMS
     m_v_bat_speed_water_pump = MyMetrics.InitFloat("xte.v.b.speed.waterpump", SM_STALE_MID, 0.0f, Other);  // This variable stores the RPM of the battery water pump
@@ -191,6 +194,24 @@ float OvmsVehicleToyotaETNGA::CalculateStationCurrent(const std::string& data)
     return static_cast<float>(GetRxBUint16(data, 0));  // 0x166C x1 A/LSB; idle=0, no sentinel
 }
 void OvmsVehicleToyotaETNGA::SetStationCurrent(float amps)  { StandardMetrics.ms_v_charge_current->SetValue(amps); }
+
+float OvmsVehicleToyotaETNGA::CalculateStationMaxPower(const std::string& data)
+{
+    return static_cast<float>(GetRxBUint16(data, 0)) / 100.0f;  // 0x166A x0.01 kW
+}
+void OvmsVehicleToyotaETNGA::SetStationMaxPower(float kw) { m_v_charge_sta_max_p->SetValue(kw); }
+
+float OvmsVehicleToyotaETNGA::CalculateStationMaxCurrent(const std::string& data)
+{
+    return static_cast<float>(GetRxBUint16(data, 0));  // 0x1679 x1 A
+}
+void OvmsVehicleToyotaETNGA::SetStationMaxCurrent(float amps) { m_v_charge_sta_max_i->SetValue(amps); }
+
+float OvmsVehicleToyotaETNGA::CalculateStationMaxVoltage(const std::string& data)
+{
+    return static_cast<float>(GetRxBUint16(data, 0));  // 0x1681 x1 V
+}
+void OvmsVehicleToyotaETNGA::SetStationMaxVoltage(float volts) { m_v_charge_sta_max_v->SetValue(volts); }
 
 int OvmsVehicleToyotaETNGA::CalculateControlMode(const std::string& data)
 {
