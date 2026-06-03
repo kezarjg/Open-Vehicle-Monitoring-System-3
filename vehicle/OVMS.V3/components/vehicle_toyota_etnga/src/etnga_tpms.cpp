@@ -7,7 +7,6 @@
 
 #include "ovms_log.h"
 #include "vehicle_toyota_etnga.h"
-#include <vector>
 
 void OvmsVehicleToyotaETNGA::IncomingTPMS(uint16_t pid)
 {
@@ -20,6 +19,7 @@ void OvmsVehicleToyotaETNGA::IncomingTPMS(uint16_t pid)
         }
 
         default:
+            ESP_LOGW(TAG, "IncomingTPMS: unsupported PID %04X", pid);
             break;
     }
 }
