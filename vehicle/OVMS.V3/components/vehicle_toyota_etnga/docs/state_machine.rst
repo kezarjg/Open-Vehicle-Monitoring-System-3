@@ -475,8 +475,15 @@ These four metrics feed the in-module charge report (work item D).
      - ``0x106E``
      - kW
      - A/C consumption power (cabin / HVAC draw).  Decoded as
-       ``u8 × 0.05 kW/LSB`` at offset 0.  Used for the
-       EVSE-to-cabin power split in My-Room energy accounting.
+       ``u8 × 0.05 kW/LSB`` at offset 0.  ``0x106E`` is a dedicated
+       cabin-power PID, so the My-Room cabin energy is the **direct
+       time-integral of this channel** (∫ acpwr dt over the
+       My-Room-active interval) — *not* an EVSE-to-cabin
+       (input − pack) split.  The old delta method was AC-only and
+       read 0 for DC (``0x161D`` charger-input is 0 during DC), so the
+       direct integral is used for both AC and DC (confirmed
+       2026-06-03; host ``charge_report_writer.py`` / ``analyze-myroom``
+       use the same direct integral).
    * - ``xte.v.c.outcome``
      - ``0x1688``
      - enum
@@ -492,6 +499,20 @@ These four metrics feed the in-module charge report (work item D).
      - Charge Sequence Stop Request from the CCM — HLC-layer fault
        reason.  ``0x00`` = Normal; ``0x06`` = "HLC Detection
        Communication Error".  Full enum TBD (partial decode).
+
+.. note::
+
+   **Limiting-side attribution (work item D, not yet implemented).**
+   When the report attributes who capped the charge rate, compare the
+   car's permission ``0x16A1`` against the station's **declared max**
+   ``0x166A`` and take the lower as the binding cap.  Do **not** fold the
+   station's instantaneous V×I output (``0x166B`` × ``0x166C``) in as a
+   "station cap": that is delivered power — always ≤ the true cap — so it
+   makes every BMS taper misread as station-limited.  Label a non-cold
+   car-limited phase "taper".  (Host-side ``charge_report_writer`` had
+   exactly this bug; fixed 2026-06-03 — a real DC session that tapered
+   from 61.8 → 51.3 kW under a 100 kW station was wrongly reported
+   "station 60.6 kW" before the fix.)
 
 Cooldown latch
 ==============
