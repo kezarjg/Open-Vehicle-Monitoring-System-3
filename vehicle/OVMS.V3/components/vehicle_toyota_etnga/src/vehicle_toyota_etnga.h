@@ -62,7 +62,8 @@ protected:
     };
     ChargeSessionState m_charge_session;
 
-    int8_t m_tpms_corner[5] = {0};   // slot->corner cache: 0=unread/none, 1=FL,2=FR,3=RL,4=RR
+    static constexpr int TPMS_SLOT_COUNT = 5;
+    int8_t m_tpms_corner[TPMS_SLOT_COUNT] = {0};   // slot->corner cache: 0=unread/none, 1=FL,2=FR,3=RL,4=RR
 
 //    ControlState m_s_controlstate;
     OvmsMetricInt* m_s_controlstate;
