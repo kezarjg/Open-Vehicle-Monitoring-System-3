@@ -112,6 +112,7 @@ private:
     void IncomingHybridControlSystem(uint16_t pid);
     void IncomingPlugInControlSystem(uint16_t pid);
     void IncomingTPMS(uint16_t pid);
+    bool TPMSCornerMapValid();
 
     // Data calculation functions
     float CalculateAmbientTemperature(const std::string& data);
