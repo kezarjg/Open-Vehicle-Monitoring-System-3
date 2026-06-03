@@ -29,7 +29,7 @@ GPS Location                Yes
 Speed Display               Yes
 Temperature Display         Yes
 BMS v+t Display             No
-TPMS Display                No
+TPMS Display                Yes
 Charge Status Display       Yes
 Charge Interruption Alerts  No
 Charge Control              No

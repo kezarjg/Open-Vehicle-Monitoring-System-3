@@ -558,3 +558,133 @@ Notes and quirks
   only in RAM.  A hard reset or power cycle mid-session will lose the
   session-open state; the wake-reconcile will not fire because
   ``in_session`` will be ``false`` after boot.
+
+TPMS
+====
+
+Tyre pressure and temperature data are retrieved from the TPMS ECU via the
+gateway sub-target ``0x2A`` at address ``0x750``, using the module's
+``ISOTP_EXTADR`` mixed-addressing mode.  This is the first gateway-relay poll
+in the eTNGA module.  Readings are collected every 60 seconds while in the
+``AWAKE`` or ``DRIVING`` poll states.
+
+Metrics
+-------
+
+Three standard OVMS vector metrics are populated, one element per wheel in
+canonical order ``[FL, FR, RL, RR]`` (indices 0–3):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 35 10 25
+
+   * - Metric
+     - OVMS name
+     - Unit
+     - Meaning
+   * - ``v.tp.p``
+     - ``ms_v_tpms_pressure``
+     - kPa
+     - Tyre pressures
+   * - ``v.tp.t``
+     - ``ms_v_tpms_temp``
+     - °C
+     - Tyre temperatures
+   * - ``v.tp.alert``
+     - ``ms_v_tpms_alert``
+     - enum
+     - 0 = normal, 1 = warning, 2 = alert
+
+Source DIDs
+-----------
+
+All reads go to gateway ``0x750`` sub-target ``0x2A`` via ``ISOTP_EXTADR``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 20 68
+
+   * - DID
+     - Data
+     - Decode
+   * - ``0x1005``
+     - Pressures (5 slot bytes)
+     - ``psi = raw × 0.25 − 7.35``; convert to kPa (``× 6.89476``).
+       A slot with raw value 0 is treated as no-sensor and excluded from
+       alerts.
+   * - ``0x1004``
+     - Temperatures (5 slot bytes)
+     - ``°C = raw − 40``.
+   * - ``0x2021``
+     - Slot→corner map (5 corner bytes)
+     - Each byte gives the corner ID for that slot: 1 = FL, 2 = FR,
+       3 = RL, 4 = RR.  Used to build the remap table on first read.
+
+Slot→corner remap
+-----------------
+
+The TPMS ECU numbers sensor *slots* (physical transmitter positions as
+learned during the last relearn), not *corners* (FL/FR/RL/RR positions on
+the car).  DID ``0x2021`` provides the current slot→corner mapping; the
+module reads it once at startup and caches it.
+
+The mapping places each reading at ``vector_index = corner_id − 1``:
+
+* corner 1 (FL) → index 0
+* corner 2 (FR) → index 1
+* corner 3 (RL) → index 2
+* corner 4 (RR) → index 3
+
+.. note::
+
+   The mapping is car-specific and will change after a tyre rotation or
+   TPMS relearn procedure.  The module must be restarted (or the cached
+   map refreshed) to pick up the new assignment.
+
+Alert thresholds
+----------------
+
+Four ``xte`` config params control the alert levels.  Pressure uses a
+low-pressure test (``≤``); temperature uses an overheat test (``≥``):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 15 55
+
+   * - Config key
+     - Default
+     - Meaning
+   * - ``tpms.pressure.warn``
+     - 240 kPa
+     - Pressure at or below which a tyre enters the *warning* state
+   * - ``tpms.pressure.alert``
+     - 220 kPa
+     - Pressure at or below which a tyre enters the *alert* state
+   * - ``tpms.temp.warn``
+     - 90 °C
+     - Temperature at or above which a tyre enters the *warning* state
+   * - ``tpms.temp.alert``
+     - 100 °C
+     - Temperature at or above which a tyre enters the *alert* state
+
+.. warning::
+
+   For the three-level (normal / warning / alert) behaviour to work
+   correctly, the pressure warn threshold must be **above** the alert
+   threshold (``warn ≥ alert``) and the temperature warn threshold must be
+   **below** the alert threshold (``warn ≤ alert``).  Reversing this
+   collapses the intermediate warning state: a tyre would jump straight
+   from normal to alert with no warning step.
+
+Notes
+-----
+
+* **Values are stale when parked.** TPMS sensors are motion-activated —
+  they transmit only while the wheels are rolling.  The ECU receiver holds
+  the last values reported while the car was in motion; these are the values
+  the module reads.  Freshness is not guaranteed for a vehicle that has been
+  stationary for an extended period.
+* **No-sensor slots publish 0 and are excluded from alerts.** A slot whose
+  pressure raw byte is 0 is treated as unpopulated; the corresponding
+  ``v.tp.p`` element is published as 0.0 and is skipped when evaluating
+  alert thresholds.
