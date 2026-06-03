@@ -51,6 +51,10 @@ void OvmsVehicleToyotaETNGA::IncomingPollReply(const OvmsPoller::poll_job_t &job
             IncomingHPCMHybridPtCtr(job.pid);
             break;
 
+        case TPMS_GW_RX:
+            IncomingTPMS(job.pid);
+            break;
+
         default:
             ESP_LOGW(TAG, "Unknown module: %03" PRIx32, job.moduleid_rec);
             return;
