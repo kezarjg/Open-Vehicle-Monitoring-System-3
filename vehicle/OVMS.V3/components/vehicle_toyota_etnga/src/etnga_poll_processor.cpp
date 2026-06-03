@@ -218,11 +218,11 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
         }
 
         case PID_DC_CHARGER_PRESENT_CURRENT:
-            StandardMetrics.ms_v_charge_current->SetValue(CalculateStationCurrent(m_rxbuf));
+            SetStationCurrent(CalculateStationCurrent(m_rxbuf));
             break;
 
         case PID_DC_CHARGER_PRESENT_VOLTAGE:
-            StandardMetrics.ms_v_charge_voltage->SetValue(CalculateStationVoltage(m_rxbuf));
+            SetStationVoltage(CalculateStationVoltage(m_rxbuf));
             break;
 
         case PID_MIN_PERMISSION_POWER: {

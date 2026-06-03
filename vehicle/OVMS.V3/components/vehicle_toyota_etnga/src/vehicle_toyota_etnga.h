@@ -162,6 +162,8 @@ private:
     void SetShiftPosition(int position);
     void SetVehicleSpeed(float speed);
     void SetVehicleVIN(std::string vin);
+    void SetStationVoltage(float volts);
+    void SetStationCurrent(float amps);
 
     void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
     void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);
@@ -240,9 +242,9 @@ enum CANPID
     PID_VEHICLE_SPEED = 0x1F0D,
     PID_VIN = 0xF190,
     
-    PID_DC_CHARGER_PRESENT_CURRENT = 0x166C,
+    PID_DC_CHARGER_PRESENT_CURRENT = 0x166C,  // u16 BE x1 A/LSB; DC station present current (idle 0 when no station)
 
-    PID_DC_CHARGER_PRESENT_VOLTAGE = 0x166B,
+    PID_DC_CHARGER_PRESENT_VOLTAGE = 0x166B,  // u16 BE x1 V/LSB; DC station present voltage (idle 0 when no station)
 
     PID_AC_CHARGING_OP_STATUS = 0x1684,  // 0=Stop,1=Startup,2=Running,3=Finishing
     PID_HLC_STATE = 0x1666,              // DC HLC: 0xFF=Unconnected, 0x0A-0x12 active
