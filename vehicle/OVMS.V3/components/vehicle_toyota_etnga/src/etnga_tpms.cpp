@@ -7,6 +7,7 @@
 
 #include <vector>
 #include "ovms_log.h"
+#include "ovms_config.h"
 #include "vehicle_toyota_etnga.h"
 
 bool OvmsVehicleToyotaETNGA::TPMSCornerMapValid()
@@ -14,6 +15,27 @@ bool OvmsVehicleToyotaETNGA::TPMSCornerMapValid()
     for (int s = 0; s < TPMS_SLOT_COUNT; s++)
         if (m_tpms_corner[s] >= 1 && m_tpms_corner[s] <= 4) return true;
     return false;
+}
+
+void OvmsVehicleToyotaETNGA::UpdateTPMSAlert()
+{
+    float p_warn  = MyConfig.GetParamValueFloat("xte", "tpms.pressure.warn",  240.0f);  // kPa
+    float p_alert = MyConfig.GetParamValueFloat("xte", "tpms.pressure.alert", 220.0f);  // kPa
+    float t_warn  = MyConfig.GetParamValueFloat("xte", "tpms.temp.warn",       90.0f);  // C
+    float t_alert = MyConfig.GetParamValueFloat("xte", "tpms.temp.alert",     100.0f);  // C
+
+    std::vector<float> p = StandardMetrics.ms_v_tpms_pressure->AsVector();
+    std::vector<float> t = StandardMetrics.ms_v_tpms_temp->AsVector();
+    std::vector<short> alert(4, 0);
+    for (int i = 0; i < 4; i++) {
+        float pi = (i < (int)p.size()) ? p[i] : 0.0f;
+        float ti = (i < (int)t.size()) ? t[i] : 0.0f;
+        if (pi <= 0.0f) { alert[i] = 0; continue; }   // no reading on this wheel — no false alert
+        if (pi <= p_alert || (ti > 0.0f && ti >= t_alert))      alert[i] = 2;
+        else if (pi <= p_warn || (ti > 0.0f && ti >= t_warn))   alert[i] = 1;
+        else                                                     alert[i] = 0;
+    }
+    StandardMetrics.ms_v_tpms_alert->SetValue(alert);
 }
 
 void OvmsVehicleToyotaETNGA::IncomingTPMS(uint16_t pid)
@@ -41,6 +63,7 @@ void OvmsVehicleToyotaETNGA::IncomingTPMS(uint16_t pid)
                 v[corner - 1] = psi * 6.894757f;
             }
             StandardMetrics.ms_v_tpms_pressure->SetValue(v);
+            UpdateTPMSAlert();
             break;
         }
 
@@ -57,6 +80,7 @@ void OvmsVehicleToyotaETNGA::IncomingTPMS(uint16_t pid)
                 v[corner - 1] = static_cast<float>(raw) - 40.0f;
             }
             StandardMetrics.ms_v_tpms_temp->SetValue(v);
+            UpdateTPMSAlert();
             break;
         }
 
