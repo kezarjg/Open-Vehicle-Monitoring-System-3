@@ -78,7 +78,7 @@ protected:
     OvmsMetricInt*   m_v_charge_out;       // 0x161E b1-2 charger output (raw, scale deferred)
     OvmsMetricInt*   m_v_charge_out_tgt;   // 0x161E b3-4 target-from-charger (raw, scale deferred)
     OvmsMetricInt*   m_v_charge_ac_usable; // 0x1665 useable power (raw, scale deferred)
-    OvmsMetricBool*  m_v_charge_myroom;   // 0x1692 b2 bit0 My Room active
+    OvmsMetricBool*  m_v_charge_myroom;   // 0x1692 byte 2 (idx 1) bit 0 = My Room active
     OvmsMetricFloat* m_v_charge_acpwr;    // 0x106E A/C consumption power (kW)
     OvmsMetricInt*   m_v_charge_outcome;  // 0x1688 charging history / outcome enum
     OvmsMetricInt*   m_v_charge_stopreq;  // 0x1667 charge seq stop request (enum, partial)

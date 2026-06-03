@@ -249,13 +249,14 @@ void OvmsVehicleToyotaETNGA::SetMyRoom(bool active) { m_v_charge_myroom->SetValu
 
 float OvmsVehicleToyotaETNGA::CalculateAcConsumption(const std::string& data)
 {
-    // 0x106E u8 x0.05 kW/LSB at doc "byte 1" = offset 0 (offset unverified on-car; the host CSV
-    // lambda uses b[1] but that contradicts its own convention note — treated as a CSV bug).
+    // 0x106E A/C consumption: u8 x0.05 kW/LSB at offset 0. Confirmed empirically — candump
+    // 62106E0B => raw 0x0B at b[0]; pin #35 raw 0x10 = 0.80 kW. ("byte 1" in the Toyota doc is
+    // 1-indexed = offset 0.) Host charge_csv_writer.py / analyze-myroom decoders agree (b[0]).
     return static_cast<float>(GetRxBByte(data, 0)) * 0.05f;
 }
 void OvmsVehicleToyotaETNGA::SetAcConsumption(float kw) { m_v_charge_acpwr->SetValue(kw); }
 
-int OvmsVehicleToyotaETNGA::CalculateChargeOutcome(const std::string& data)  { return GetRxBByte(data, 0); }  // 0x1688 26-state enum
+int OvmsVehicleToyotaETNGA::CalculateChargeOutcome(const std::string& data)  { return GetRxBByte(data, 0); }  // 0x1688 26-state enum; RETAINED between sessions (does not reset on plug-in) — report must scope it per-session
 void OvmsVehicleToyotaETNGA::SetChargeOutcome(int v) { m_v_charge_outcome->SetValue(v); }
 
 int OvmsVehicleToyotaETNGA::CalculateChargeStopReq(const std::string& data)  { return GetRxBByte(data, 0); }  // 0x1667 enum (partial)
