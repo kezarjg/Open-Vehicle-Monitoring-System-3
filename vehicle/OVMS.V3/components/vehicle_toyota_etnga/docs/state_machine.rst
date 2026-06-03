@@ -629,7 +629,7 @@ All reads go to gateway ``0x750`` sub-target ``0x2A`` via ``ISOTP_EXTADR``.
      - Data
      - Decode
    * - ``0x1005``
-     - Pressures (5 slot bytes)
+     - Pressures (5 × u16 status/raw pairs)
      - ``psi = raw × 0.25 − 7.35``; convert to kPa (``× 6.89476``).
        A slot with raw value 0 is treated as no-sensor and excluded from
        alerts.
