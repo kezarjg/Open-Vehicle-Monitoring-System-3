@@ -118,17 +118,12 @@ private:
     int CalculateHlcState(const std::string& data);
     int CalculatePISWRaw(const std::string& data);
     float CalculatePermissionPower(const std::string& data);
-    void  SetPermissionPower(float kw);
     float CalculateTargetCurrent(const std::string& data);
-    void  SetTargetCurrent(float amps);
     float CalculateStationVoltage(const std::string& data);
     float CalculateStationCurrent(const std::string& data);
     float CalculateStationMaxPower(const std::string& data);
-    void  SetStationMaxPower(float kw);
     float CalculateStationMaxCurrent(const std::string& data);
-    void  SetStationMaxCurrent(float amps);
     float CalculateStationMaxVoltage(const std::string& data);
-    void  SetStationMaxVoltage(float volts);
     float CalculateChargerInputPower(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
     int CalculateControlMode(const std::string& data);
@@ -173,6 +168,11 @@ private:
     void SetVehicleVIN(std::string vin);
     void SetStationVoltage(float volts);
     void SetStationCurrent(float amps);
+    void SetPermissionPower(float kw);
+    void SetTargetCurrent(float amps);
+    void SetStationMaxPower(float kw);
+    void SetStationMaxCurrent(float amps);
+    void SetStationMaxVoltage(float volts);
 
     void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
     void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);

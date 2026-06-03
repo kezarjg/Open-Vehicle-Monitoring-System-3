@@ -197,19 +197,19 @@ void OvmsVehicleToyotaETNGA::SetStationCurrent(float amps)  { StandardMetrics.ms
 
 float OvmsVehicleToyotaETNGA::CalculateStationMaxPower(const std::string& data)
 {
-    return static_cast<float>(GetRxBUint16(data, 0)) / 100.0f;  // 0x166A x0.01 kW
+    return static_cast<float>(GetRxBUint16(data, 0)) / 100.0f;  // 0x166A x0.01 kW/LSB; idle=0 when no station
 }
 void OvmsVehicleToyotaETNGA::SetStationMaxPower(float kw) { m_v_charge_sta_max_p->SetValue(kw); }
 
 float OvmsVehicleToyotaETNGA::CalculateStationMaxCurrent(const std::string& data)
 {
-    return static_cast<float>(GetRxBUint16(data, 0));  // 0x1679 x1 A
+    return static_cast<float>(GetRxBUint16(data, 0));  // 0x1679 x1 A/LSB; idle=0 when no station
 }
 void OvmsVehicleToyotaETNGA::SetStationMaxCurrent(float amps) { m_v_charge_sta_max_i->SetValue(amps); }
 
 float OvmsVehicleToyotaETNGA::CalculateStationMaxVoltage(const std::string& data)
 {
-    return static_cast<float>(GetRxBUint16(data, 0));  // 0x1681 x1 V
+    return static_cast<float>(GetRxBUint16(data, 0));  // 0x1681 x1 V/LSB; idle=0 when no station
 }
 void OvmsVehicleToyotaETNGA::SetStationMaxVoltage(float volts) { m_v_charge_sta_max_v->SetValue(volts); }
 
