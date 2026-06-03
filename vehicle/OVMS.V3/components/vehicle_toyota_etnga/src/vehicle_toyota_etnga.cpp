@@ -78,10 +78,11 @@ static const OvmsPoller::poll_pid_t obdii_polls[] = {
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGE_HISTORY,    { 0,  0, 0,  5, 10,  5,  5}, 0, ISOTP_STD }, // 0x1688 outcome/history: HS=5,WAIT=10,AC=5,DC=5 (sim DID_HISTORY)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGE_STOP_REQ,   { 0,  0, 0,  1, 30,  5,  5}, 0, ISOTP_STD }, // 0x1667 stop-request: HS=1,WAIT=30,AC=5,DC=5 (sim DID_STOP_REQ)
 
-  // TPMS — gateway-relayed (0x750 sub-target 0x2A) via ISOTP_EXTADR; AWAKE+DRIVING @ 60s
-  { TPMS_GW_TX, TPMS_GW_RX, VEHICLE_POLL_TYPE_READDATA, PID_TPMS_CORNERS,    { 0, 60, 60, 0, 0, 0, 0}, 0, ISOTP_EXTADR }, // 0x2021 slot->corner map
-  { TPMS_GW_TX, TPMS_GW_RX, VEHICLE_POLL_TYPE_READDATA, PID_TPMS_PRESSURES, { 0, 60, 60, 0, 0, 0, 0}, 0, ISOTP_EXTADR }, // 0x1005 pressures (kPa)
-  { TPMS_GW_TX, TPMS_GW_RX, VEHICLE_POLL_TYPE_READDATA, PID_TPMS_TEMPS,     { 0, 60, 60, 0, 0, 0, 0}, 0, ISOTP_EXTADR }, // 0x1004 temperatures (C)
+  // TPMS — gateway-relayed (0x750 sub-target 0x2A) via ISOTP_EXTADR; DRIVING @ 60s
+  // (0x2A only answers while driving/My-Room — asleep parked & during charging, per the 2026-06-03 gateway census — so AWAKE polls just timed out)
+  { TPMS_GW_TX, TPMS_GW_RX, VEHICLE_POLL_TYPE_READDATA, PID_TPMS_CORNERS,    { 0,  0, 60, 0, 0, 0, 0}, 0, ISOTP_EXTADR }, // 0x2021 slot->corner map
+  { TPMS_GW_TX, TPMS_GW_RX, VEHICLE_POLL_TYPE_READDATA, PID_TPMS_PRESSURES, { 0,  0, 60, 0, 0, 0, 0}, 0, ISOTP_EXTADR }, // 0x1005 pressures (kPa)
+  { TPMS_GW_TX, TPMS_GW_RX, VEHICLE_POLL_TYPE_READDATA, PID_TPMS_TEMPS,     { 0,  0, 60, 0, 0, 0, 0}, 0, ISOTP_EXTADR }, // 0x1004 temperatures (C)
 
     // Tester Present
   //{ PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_TESTERPRESENT, 0, { 0, 2, 2, 2}, 0, ISOTP_STD },
