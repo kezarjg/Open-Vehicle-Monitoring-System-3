@@ -335,9 +335,10 @@ Charge curve & station metrics
 
 Tasks 1–4 of the ``v3-charge-statemachine`` feature added eleven custom
 ``xte.v.c.*`` metrics and began populating two standard OVMS metrics
-during DC fast-charge.  All are populated inside
-``HandleChargeDcState()`` and ``HandleChargeAcState()`` (and their
-associated poll decoders in ``etnga_charge.cpp``).
+during charging.  They are decoded by ``IncomingPlugInControlSystem()``
+in ``etnga_poll_processor.cpp`` (with scale/decode math in
+``etnga_metrics.cpp``) as the poller runs in the ``CHARGE_AC`` and
+``CHARGE_DC`` states.
 
 DC / universal custom metrics
 ------------------------------
