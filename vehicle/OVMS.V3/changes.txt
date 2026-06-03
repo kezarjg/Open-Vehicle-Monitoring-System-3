@@ -1,6 +1,11 @@
 Open Vehicle Monitor System v3 - Change log
 
 ????-??-?? ???  ???????  OTA release
+- hw3.1: Fix random crash (abort in esp_sha_read_digest_state) during TLS handshakes by disabling
+    mbedTLS hardware SHA acceleration (CONFIG_MBEDTLS_HARDWARE_SHA). The shared ESP32 SHA engine
+    could return an all-zero digest state when mbedtls_sha256_clone() snapshotted it mid-handshake,
+    tripping the IDF fault-injection abort(). SHA now runs in software (AES/MPI hardware accel kept);
+    matches the hw3.0 preset, which already had hardware SHA disabled. Rebuild + reflash required.
 
 
 2026-05-17 MB   3.3.006  OTA release
