@@ -72,6 +72,12 @@ protected:
     OvmsMetricFloat* m_v_charge_sta_max_p;  // 0x166A station max power (kW)
     OvmsMetricFloat* m_v_charge_sta_max_i;  // 0x1679 station max current (A)
     OvmsMetricFloat* m_v_charge_sta_max_v;  // 0x1681 station max voltage (V)
+    OvmsMetricFloat* m_v_charge_ac_tgt_p;  // 0x1619 b1-2 AC target power (kW)
+    OvmsMetricInt*   m_v_charge_chgr_op;   // 0x1619 b3 charger op status (enum) — distinct from m_v_charge_ac_op (0x1684)
+    OvmsMetricInt*   m_v_charge_ac_ilim;   // 0x1619 b4-5 current upper limit (raw, scale deferred)
+    OvmsMetricInt*   m_v_charge_out;       // 0x161E b1-2 charger output (raw, scale deferred)
+    OvmsMetricInt*   m_v_charge_out_tgt;   // 0x161E b3-4 target-from-charger (raw, scale deferred)
+    OvmsMetricInt*   m_v_charge_ac_usable; // 0x1665 useable power (raw, scale deferred)
     OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
     OvmsMetricFloat* m_v_bat_speed_water_pump;
@@ -125,6 +131,12 @@ private:
     float CalculateStationMaxCurrent(const std::string& data);
     float CalculateStationMaxVoltage(const std::string& data);
     float CalculateChargerInputPower(const std::string& data);
+    float CalculateAcTargetPower(const std::string& data);
+    int   CalculateChargerOpStatus(const std::string& data);
+    int   CalculateAcCurrentLimitRaw(const std::string& data);
+    int   CalculateChargerOutputRaw(const std::string& data);
+    int   CalculateChargerOutputTargetRaw(const std::string& data);
+    int   CalculateAcUsableRaw(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
     int CalculateControlMode(const std::string& data);
     float CalculateHVACSetpoint(const std::string& data);
@@ -173,6 +185,12 @@ private:
     void SetStationMaxPower(float kw);
     void SetStationMaxCurrent(float amps);
     void SetStationMaxVoltage(float volts);
+    void  SetAcTargetPower(float kw);
+    void  SetChargerOpStatus(int v);
+    void  SetAcCurrentLimitRaw(int v);
+    void  SetChargerOutputRaw(int v);
+    void  SetChargerOutputTargetRaw(int v);
+    void  SetAcUsableRaw(int v);
 
     void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
     void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);
@@ -264,6 +282,10 @@ enum CANPID
     PID_DC_CHARGER_MAX_POWER = 0x166A,    // u16 BE x0.01 kW; station advertised max power
     PID_DC_CHARGER_MAX_CURRENT = 0x1679,  // u16 BE x1 A; station advertised max current (CCS)
     PID_DC_CHARGER_MAX_VOLTAGE = 0x1681,  // u16 BE x1 V; station advertised max voltage (CCS)
+
+    PID_CHARGER_STATE_CLUSTER = 0x1619,   // AC-only: b1-2 target power (biased-32768 x0.01kW), b3 op status, b4-5 current limit (raw)
+    PID_CHARGER_OUTPUT_POWER = 0x161E,    // AC-only: b1-2 output (raw), b3-4 target-from-charger (raw)
+    PID_AC_USABLE_POWER = 0x1665,         // AC-only: u8 useable power (raw)
 
 };
 

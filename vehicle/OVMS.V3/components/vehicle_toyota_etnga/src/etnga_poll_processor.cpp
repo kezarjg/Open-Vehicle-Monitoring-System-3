@@ -249,6 +249,22 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
             break;
         }
 
+        case PID_CHARGER_STATE_CLUSTER: {
+            SetAcTargetPower(CalculateAcTargetPower(m_rxbuf));
+            SetChargerOpStatus(CalculateChargerOpStatus(m_rxbuf));
+            SetAcCurrentLimitRaw(CalculateAcCurrentLimitRaw(m_rxbuf));
+            break;
+        }
+        case PID_CHARGER_OUTPUT_POWER: {
+            SetChargerOutputRaw(CalculateChargerOutputRaw(m_rxbuf));
+            SetChargerOutputTargetRaw(CalculateChargerOutputTargetRaw(m_rxbuf));
+            break;
+        }
+        case PID_AC_USABLE_POWER: {
+            SetAcUsableRaw(CalculateAcUsableRaw(m_rxbuf));
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:
