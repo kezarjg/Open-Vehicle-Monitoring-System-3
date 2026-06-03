@@ -330,6 +330,124 @@ session immediately (sets ``ms_v_charge_state = "done"`` and resets
 ``obdii_polls[]`` is required for this reconcile to fire — removing it
 would silently break the wake-reconcile path.
 
+Charge curve & station metrics
+==============================
+
+Tasks 1–4 of the ``v3-charge-statemachine`` feature added eleven custom
+``xte.v.c.*`` metrics and began populating two standard OVMS metrics
+during DC fast-charge.  All are populated inside
+``HandleChargeDcState()`` and ``HandleChargeAcState()`` (and their
+associated poll decoders in ``etnga_charge.cpp``).
+
+DC / universal custom metrics
+------------------------------
+
+These are populated during DC charging (and where applicable, AC charging).
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 12 12 56
+
+   * - Metric
+     - DID
+     - Unit
+     - Meaning
+   * - ``xte.v.c.perm``
+     - ``0x16A1``
+     - kW
+     - Minimum charging permission power — the taper floor of the DC
+       charge curve.  Decoded as ``s16 BE × 0.01 kW/LSB``.  The
+       ``0x8000`` sentinel is skipped (metric left unchanged).
+   * - ``xte.v.c.tgti``
+     - ``0x166D``
+     - A
+     - Target charging current set by the vehicle during DC
+       fast-charge.
+   * - ``xte.v.c.stamaxp``
+     - ``0x166A``
+     - kW
+     - DC station maximum power capability as negotiated via HLC.
+   * - ``xte.v.c.stamaxi``
+     - ``0x1679``
+     - A
+     - DC station maximum current (CCS contract).
+   * - ``xte.v.c.stamaxv``
+     - ``0x1681``
+     - V
+     - DC station maximum voltage (CCS contract).
+
+Standard metrics driven during DC charging
+-------------------------------------------
+
+These standard OVMS metrics are populated (for the first time in this
+module) while ``PollState == CHARGE_DC``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 12 12 51
+
+   * - Metric
+     - DID
+     - Unit
+     - Meaning
+   * - ``v.c.voltage`` (``ms_v_charge_voltage``)
+     - ``0x166B``
+     - V
+     - DC station present voltage.
+   * - ``v.c.current`` (``ms_v_charge_current``)
+     - ``0x166C``
+     - A
+     - DC station present current.
+
+AC-only custom metrics
+-----------------------
+
+These metrics are populated only while ``PollState == CHARGE_AC``.  Note
+that ``xte.v.c.chgrop`` (charger operation status, from ``0x1619`` byte 3)
+is distinct from ``xte.v.c.acop`` (``0x1684``), which drives the
+``CHARGE_HANDSHAKE → CHARGE_AC`` transition.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 16 12 52
+
+   * - Metric
+     - DID / bytes
+     - Unit
+     - Meaning
+   * - ``xte.v.c.actgtp``
+     - ``0x1619`` b1–2
+     - kW
+     - AC target charging power.  Decoded as ``u16 BE biased-32768
+       × 0.01 kW/LSB``.
+   * - ``xte.v.c.chgrop``
+     - ``0x1619`` b3
+     - enum
+     - Charger operation status (see source for enum values).
+   * - ``xte.v.c.acilim``
+     - ``0x1619`` b4–5
+     - RAW
+     - AC charging current upper limit (raw integer; scale pending).
+   * - ``xte.v.c.chgout``
+     - ``0x161E`` b1–2
+     - RAW
+     - Charger output power (raw integer; scale pending).
+   * - ``xte.v.c.chgotgt``
+     - ``0x161E`` b3–4
+     - RAW
+     - Target-from-charger power (raw integer; scale pending).
+   * - ``xte.v.c.acusbl``
+     - ``0x1665``
+     - RAW
+     - A/C useable power (raw integer; scale pending).
+
+.. note::
+
+   The four RAW AC channels (``xte.v.c.acilim``, ``xte.v.c.chgout``,
+   ``xte.v.c.chgotgt``, ``xte.v.c.acusbl``) store unscaled integer
+   values.  Their physical scales are deferred pending a sustained
+   AC-charge capture.
+
 Cooldown latch
 ==============
 
