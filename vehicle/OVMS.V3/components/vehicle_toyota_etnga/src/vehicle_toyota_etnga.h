@@ -199,10 +199,10 @@ private:
     void SetChargerOutputRaw(int v);
     void SetChargerOutputTargetRaw(int v);
     void SetAcUsableRaw(int v);
-    void  SetMyRoom(bool active);
-    void  SetAcConsumption(float kw);
-    void  SetChargeOutcome(int v);
-    void  SetChargeStopReq(int v);
+    void SetMyRoom(bool active);
+    void SetAcConsumption(float kw);
+    void SetChargeOutcome(int v);
+    void SetChargeStopReq(int v);
 
     void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
     void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);
