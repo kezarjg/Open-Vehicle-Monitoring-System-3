@@ -62,7 +62,7 @@ protected:
     };
     ChargeSessionState m_charge_session;
 
-    int8_t m_tpms_corner[5] = {0};   // slot->corner cache (0 = invalid/unread)
+    int8_t m_tpms_corner[5] = {0};   // slot->corner cache: 0=unread/none, 1=FL,2=FR,3=RL,4=RR
 
 //    ControlState m_s_controlstate;
     OvmsMetricInt* m_s_controlstate;
@@ -249,8 +249,8 @@ enum CANAddress
     PLUG_IN_CONTROL_SYSTEM_TX = 0x745,
     PLUG_IN_CONTROL_SYSTEM_RX = 0x74D,
     HPCM_HYBRIDPTCTR_RX = 0x7EA,
-    TPMS_GW_TX = 0x75002A,   // gateway 0x750, sub-target 0x2A (ISOTP_EXTADR mixed addressing)
-    TPMS_GW_RX = 0x75802A,   // gateway response 0x758, sub-target 0x2A
+    TPMS_GW_TX = 0x7502A,    // (0x750 << 8) | 0x2A  -> MsgID 0x750, sub 0x2A (ISOTP_EXTADR mixed addressing)
+    TPMS_GW_RX = 0x7582A,    // (0x758 << 8) | 0x2A  -> MsgID 0x758, sub 0x2A
 };
 
 // CAN PIDs
