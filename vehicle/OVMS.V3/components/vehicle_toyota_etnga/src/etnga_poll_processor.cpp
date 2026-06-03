@@ -225,6 +225,17 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
             // curve channel — captured for future report (DC station V); no metric yet
             break;
 
+        case PID_MIN_PERMISSION_POWER: {
+            if (GetRxBUint16(m_rxbuf, 0) != 0x8000)  // 0x8000 = feature inactive; preserve forward-fill
+                SetPermissionPower(CalculatePermissionPower(m_rxbuf));
+            break;
+        }
+
+        case PID_TARGET_CHARGING_CURRENT: {
+            SetTargetCurrent(CalculateTargetCurrent(m_rxbuf));
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:

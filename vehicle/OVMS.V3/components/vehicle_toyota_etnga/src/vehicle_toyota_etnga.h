@@ -67,6 +67,8 @@ protected:
     OvmsMetricInt* m_v_charge_pisw_raw;   // 0x1669 raw u8 connector state
     OvmsMetricInt* m_v_charge_ac_op;      // 0x1684 AC op status
     OvmsMetricInt* m_v_charge_hlc;        // 0x1666 DC HLC state
+    OvmsMetricFloat* m_v_charge_perm;     // 0x16A1 min permission power (kW, s16 two's-comp, NOT biased-32768) — DC curve
+    OvmsMetricFloat* m_v_charge_tgti;     // 0x166D target charging current (A)
     OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
     OvmsMetricFloat* m_v_bat_speed_water_pump;
@@ -112,6 +114,10 @@ private:
     int CalculateChargeType(const std::string& data);
     int CalculateHlcState(const std::string& data);
     int CalculatePISWRaw(const std::string& data);
+    float CalculatePermissionPower(const std::string& data);
+    void  SetPermissionPower(float kw);
+    float CalculateTargetCurrent(const std::string& data);
+    void  SetTargetCurrent(float amps);
     float CalculateChargerInputPower(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
     int CalculateControlMode(const std::string& data);
@@ -238,6 +244,9 @@ enum CANPID
 
     PID_AC_CHARGING_OP_STATUS = 0x1684,  // 0=Stop,1=Startup,2=Running,3=Finishing
     PID_HLC_STATE = 0x1666,              // DC HLC: 0xFF=Unconnected, 0x0A-0x12 active
+
+    PID_MIN_PERMISSION_POWER = 0x16A1,   // s16 BE x0.01 kW; 0x8000 sentinel = inactive — THE DC taper curve
+    PID_TARGET_CHARGING_CURRENT = 0x166D, // u16 BE x1 A; live current request
 
 };
 
