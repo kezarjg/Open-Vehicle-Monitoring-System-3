@@ -185,12 +185,12 @@ private:
     void SetStationMaxPower(float kw);
     void SetStationMaxCurrent(float amps);
     void SetStationMaxVoltage(float volts);
-    void  SetAcTargetPower(float kw);
-    void  SetChargerOpStatus(int v);
-    void  SetAcCurrentLimitRaw(int v);
-    void  SetChargerOutputRaw(int v);
-    void  SetChargerOutputTargetRaw(int v);
-    void  SetAcUsableRaw(int v);
+    void SetAcTargetPower(float kw);
+    void SetChargerOpStatus(int v);
+    void SetAcCurrentLimitRaw(int v);
+    void SetChargerOutputRaw(int v);
+    void SetChargerOutputTargetRaw(int v);
+    void SetAcUsableRaw(int v);
 
     void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
     void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);
