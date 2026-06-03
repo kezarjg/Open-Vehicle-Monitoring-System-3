@@ -618,7 +618,8 @@ All reads go to gateway ``0x750`` sub-target ``0x2A`` via ``ISOTP_EXTADR``.
    * - ``0x2021``
      - Slot→corner map (5 corner bytes)
      - Each byte gives the corner ID for that slot: 1 = FL, 2 = FR,
-       3 = RL, 4 = RR.  Used to build the remap table on first read.
+       3 = RL, 4 = RR.  Re-read every poll cycle to keep the remap table
+       current.
 
 Slot→corner remap
 -----------------
@@ -626,7 +627,7 @@ Slot→corner remap
 The TPMS ECU numbers sensor *slots* (physical transmitter positions as
 learned during the last relearn), not *corners* (FL/FR/RL/RR positions on
 the car).  DID ``0x2021`` provides the current slot→corner mapping; the
-module reads it once at startup and caches it.
+module re-reads it every poll cycle (60 s) and caches the latest mapping.
 
 The mapping places each reading at ``vector_index = corner_id − 1``:
 
@@ -637,9 +638,10 @@ The mapping places each reading at ``vector_index = corner_id − 1``:
 
 .. note::
 
-   The mapping is car-specific and will change after a tyre rotation or
-   TPMS relearn procedure.  The module must be restarted (or the cached
-   map refreshed) to pick up the new assignment.
+   The mapping is car-specific and changes after a tyre rotation or TPMS
+   relearn.  Because ``0x2021`` is polled every cycle (60 s), the module
+   picks up the new assignment automatically within about a minute — no
+   restart required.
 
 Alert thresholds
 ----------------
