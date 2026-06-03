@@ -449,6 +449,50 @@ is distinct from ``xte.v.c.acop`` (``0x1684``), which drives the
    values.  Their physical scales are deferred pending a sustained
    AC-charge capture.
 
+Charge-report supporting channels
+----------------------------------
+
+These four metrics feed the in-module charge report (work item D).
+``xte.v.c.myroom`` and ``xte.v.c.acpwr`` are polled only in the
+``CHARGE_AC`` and ``CHARGE_DC`` states; ``xte.v.c.outcome`` and
+``xte.v.c.stopreq`` are also polled in ``CHARGE_HANDSHAKE`` and
+``CHARGE_WAIT``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 12 10 56
+
+   * - Metric
+     - DID / bytes
+     - Unit
+     - Meaning
+   * - ``xte.v.c.myroom``
+     - ``0x1692`` b2 bit 0
+     - bool
+     - My Room active — cabin run on grid power while plugged in or
+       charging.  This is the only on-bus live My-Room signal.
+   * - ``xte.v.c.acpwr``
+     - ``0x106E``
+     - kW
+     - A/C consumption power (cabin / HVAC draw).  Decoded as
+       ``u8 × 0.05 kW/LSB`` at offset 0.  Used for the
+       EVSE-to-cabin power split in My-Room energy accounting.
+   * - ``xte.v.c.outcome``
+     - ``0x1688``
+     - enum
+     - Charging History outcome — why the session ended (e.g.
+       ``0x39`` = DC Charging Stop (System)).  26-state enum; 6
+       states empirically confirmed.  **Retained between sessions**:
+       the vehicle does not reset this on plug-in, so a report must
+       scope it per-session (capture value at session open and
+       compare at session close).
+   * - ``xte.v.c.stopreq``
+     - ``0x1667``
+     - enum
+     - Charge Sequence Stop Request from the CCM — HLC-layer fault
+       reason.  ``0x00`` = Normal; ``0x06`` = "HLC Detection
+       Communication Error".  Full enum TBD (partial decode).
+
 Cooldown latch
 ==============
 
