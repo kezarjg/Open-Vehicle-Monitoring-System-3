@@ -249,7 +249,9 @@ void OvmsVehicleToyotaETNGA::SetMyRoom(bool active) { m_v_charge_myroom->SetValu
 
 float OvmsVehicleToyotaETNGA::CalculateAcConsumption(const std::string& data)
 {
-    return static_cast<float>(GetRxBByte(data, 1)) * 0.05f;   // 0x106E u8 x0.05 kW/LSB
+    // 0x106E u8 x0.05 kW/LSB at doc "byte 1" = offset 0 (offset unverified on-car; the host CSV
+    // lambda uses b[1] but that contradicts its own convention note — treated as a CSV bug).
+    return static_cast<float>(GetRxBByte(data, 0)) * 0.05f;
 }
 void OvmsVehicleToyotaETNGA::SetAcConsumption(float kw) { m_v_charge_acpwr->SetValue(kw); }
 
