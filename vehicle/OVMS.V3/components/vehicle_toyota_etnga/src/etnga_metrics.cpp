@@ -29,6 +29,10 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     m_v_charge_out       = MyMetrics.InitInt("xte.v.c.chgout", SM_STALE_MID);
     m_v_charge_out_tgt   = MyMetrics.InitInt("xte.v.c.chgotgt", SM_STALE_MID);
     m_v_charge_ac_usable = MyMetrics.InitInt("xte.v.c.acusbl", SM_STALE_MID);
+    m_v_charge_myroom  = MyMetrics.InitBool("xte.v.c.myroom", SM_STALE_MID);
+    m_v_charge_acpwr   = MyMetrics.InitFloat("xte.v.c.acpwr", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_outcome = MyMetrics.InitInt("xte.v.c.outcome", SM_STALE_MID);
+    m_v_charge_stopreq = MyMetrics.InitInt("xte.v.c.stopreq", SM_STALE_MID);
     m_v_bat_heater_status = MyMetrics.InitBool("xte.v.b.heater", SM_STALE_MID);  // This variable stores the status of the battery coolant heater relay
     m_v_bat_soc_bms = MyMetrics.InitFloat("xte.v.b.soc.bms", SM_STALE_MID, 0.0f, Percentage, true);  // This variable stores the SOC as reported by the BMS
     m_v_bat_speed_water_pump = MyMetrics.InitFloat("xte.v.b.speed.waterpump", SM_STALE_MID, 0.0f, Other);  // This variable stores the RPM of the battery water pump
@@ -236,6 +240,24 @@ void OvmsVehicleToyotaETNGA::SetAcCurrentLimitRaw(int v)      { m_v_charge_ac_il
 void OvmsVehicleToyotaETNGA::SetChargerOutputRaw(int v)       { m_v_charge_out->SetValue(v); }
 void OvmsVehicleToyotaETNGA::SetChargerOutputTargetRaw(int v) { m_v_charge_out_tgt->SetValue(v); }
 void OvmsVehicleToyotaETNGA::SetAcUsableRaw(int v)            { m_v_charge_ac_usable->SetValue(v); }
+
+bool OvmsVehicleToyotaETNGA::CalculateMyRoom(const std::string& data)
+{
+    return GetRxBBit(data, 1, 0);   // 0x1692 byte 2 (idx 1), bit 0 = My Room active
+}
+void OvmsVehicleToyotaETNGA::SetMyRoom(bool active) { m_v_charge_myroom->SetValue(active); }
+
+float OvmsVehicleToyotaETNGA::CalculateAcConsumption(const std::string& data)
+{
+    return static_cast<float>(GetRxBByte(data, 1)) * 0.05f;   // 0x106E u8 x0.05 kW/LSB
+}
+void OvmsVehicleToyotaETNGA::SetAcConsumption(float kw) { m_v_charge_acpwr->SetValue(kw); }
+
+int OvmsVehicleToyotaETNGA::CalculateChargeOutcome(const std::string& data)  { return GetRxBByte(data, 0); }  // 0x1688 26-state enum
+void OvmsVehicleToyotaETNGA::SetChargeOutcome(int v) { m_v_charge_outcome->SetValue(v); }
+
+int OvmsVehicleToyotaETNGA::CalculateChargeStopReq(const std::string& data)  { return GetRxBByte(data, 0); }  // 0x1667 enum (partial)
+void OvmsVehicleToyotaETNGA::SetChargeStopReq(int v) { m_v_charge_stopreq->SetValue(v); }
 
 int OvmsVehicleToyotaETNGA::CalculateControlMode(const std::string& data)
 {

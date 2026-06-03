@@ -78,6 +78,10 @@ protected:
     OvmsMetricInt*   m_v_charge_out;       // 0x161E b1-2 charger output (raw, scale deferred)
     OvmsMetricInt*   m_v_charge_out_tgt;   // 0x161E b3-4 target-from-charger (raw, scale deferred)
     OvmsMetricInt*   m_v_charge_ac_usable; // 0x1665 useable power (raw, scale deferred)
+    OvmsMetricBool*  m_v_charge_myroom;   // 0x1692 b2 bit0 My Room active
+    OvmsMetricFloat* m_v_charge_acpwr;    // 0x106E A/C consumption power (kW)
+    OvmsMetricInt*   m_v_charge_outcome;  // 0x1688 charging history / outcome enum
+    OvmsMetricInt*   m_v_charge_stopreq;  // 0x1667 charge seq stop request (enum, partial)
     OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
     OvmsMetricFloat* m_v_bat_speed_water_pump;
@@ -137,6 +141,10 @@ private:
     int   CalculateChargerOutputRaw(const std::string& data);
     int   CalculateChargerOutputTargetRaw(const std::string& data);
     int   CalculateAcUsableRaw(const std::string& data);
+    bool  CalculateMyRoom(const std::string& data);
+    float CalculateAcConsumption(const std::string& data);
+    int   CalculateChargeOutcome(const std::string& data);
+    int   CalculateChargeStopReq(const std::string& data);
     bool CalculateChargingDoorStatus(const std::string& data);
     int CalculateControlMode(const std::string& data);
     float CalculateHVACSetpoint(const std::string& data);
@@ -191,6 +199,10 @@ private:
     void SetChargerOutputRaw(int v);
     void SetChargerOutputTargetRaw(int v);
     void SetAcUsableRaw(int v);
+    void  SetMyRoom(bool active);
+    void  SetAcConsumption(float kw);
+    void  SetChargeOutcome(int v);
+    void  SetChargeStopReq(int v);
 
     void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
     void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);
@@ -286,6 +298,11 @@ enum CANPID
     PID_CHARGER_STATE_CLUSTER = 0x1619,   // AC-only: b1-2 target power (biased-32768 x0.01kW), b3 op status, b4-5 current limit (raw)
     PID_CHARGER_OUTPUT_POWER = 0x161E,    // AC-only: b1-2 output (raw), b3-4 target-from-charger (raw)
     PID_AC_USABLE_POWER = 0x1665,         // AC-only: u8 useable power (raw)
+
+    PID_AC_CONSUMPTION = 0x106E,    // A/C consumption power: u8 x0.05 kW/LSB (50 W/LSB) — cabin draw, OBC view
+    PID_CHARGE_STOP_REQ = 0x1667,   // Charge Seq Stop Request from CCM: u8 enum (0x00 Normal / 0x06 HLC-error; partial)
+    PID_CHARGE_HISTORY = 0x1688,    // Charging History (outcome/stop-reason): u8 26-state enum
+    PID_MYROOM = 0x1692,            // byte 2 bit 0 = My Room active flag (live)
 
 };
 

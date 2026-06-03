@@ -265,6 +265,23 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
             break;
         }
 
+        case PID_MYROOM: {
+            SetMyRoom(CalculateMyRoom(m_rxbuf));
+            break;
+        }
+        case PID_AC_CONSUMPTION: {
+            SetAcConsumption(CalculateAcConsumption(m_rxbuf));
+            break;
+        }
+        case PID_CHARGE_HISTORY: {
+            SetChargeOutcome(CalculateChargeOutcome(m_rxbuf));
+            break;
+        }
+        case PID_CHARGE_STOP_REQ: {
+            SetChargeStopReq(CalculateChargeStopReq(m_rxbuf));
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:
