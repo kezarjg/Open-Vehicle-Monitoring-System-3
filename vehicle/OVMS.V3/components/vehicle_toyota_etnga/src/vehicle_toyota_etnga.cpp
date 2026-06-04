@@ -37,6 +37,10 @@ static const OvmsPoller::poll_pid_t obdii_polls[] = {
   { HYBRID_BATTERY_SYSTEM_TX,  HYBRID_BATTERY_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_TEMPERATURES,      { 0,  0, 10, 0,  0,  0, 20}, 0, ISOTP_STD }, // 0x1814 cell-temp array: DRIVING@10s, DC@20s (sim: DC=20 only)
   { HYBRID_BATTERY_SYSTEM_TX,  HYBRID_BATTERY_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_CELL_VOLTAGES,     { 0,  0, 5,  0,  0,  0, 30}, 0, ISOTP_STD }, // 0x182E cell voltages: DRIVING@5s, DC@30s (sim: DC=30 only)
 
+    // Capacity arrays (data-collection only) — near-static, recalibrate over charge cycles; sampled at rest, driving, and both charge phases to watch drift
+  { HYBRID_BATTERY_SYSTEM_TX,  HYBRID_BATTERY_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_CAPACITY,          { 0, 60, 120, 0,  0, 60, 60}, 0, ISOTP_STD }, // 0x1D3E 8x per-module full-charge capacity (Ah)
+  { HYBRID_BATTERY_SYSTEM_TX,  HYBRID_BATTERY_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_CAPACITY_ALT,      { 0, 60, 120, 0,  0, 60, 60}, 0, ISOTP_STD }, // 0x1D3F 8x parallel capacity array, function unconfirmed
+
     // Driving polls
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_VEHICLE_SPEED,             { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1F0D speed: DRIVING only
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_SHIFT_POSITION,            { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1061 gear: DRIVING only

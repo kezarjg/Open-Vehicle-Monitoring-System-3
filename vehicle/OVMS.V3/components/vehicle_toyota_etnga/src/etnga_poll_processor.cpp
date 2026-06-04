@@ -322,6 +322,24 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
             break;
         }
 
+        case PID_BATTERY_CAPACITY: {
+            std::vector<float> caps = CalculateBatteryCapacityArray(m_rxbuf);
+            SetBatteryCapacityFull(caps);
+            if (caps.size() >= 8)
+                ESP_LOGD(TAG, "Battery capacity 0x1D3E (Ah): %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f",
+                         caps[0], caps[1], caps[2], caps[3], caps[4], caps[5], caps[6], caps[7]);
+            break;
+        }
+
+        case PID_BATTERY_CAPACITY_ALT: {
+            std::vector<float> caps = CalculateBatteryCapacityArray(m_rxbuf);
+            SetBatteryCapacityAlt(caps);
+            if (caps.size() >= 8)
+                ESP_LOGD(TAG, "Battery capacity 0x1D3F (Ah): %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f",
+                         caps[0], caps[1], caps[2], caps[3], caps[4], caps[5], caps[6], caps[7]);
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:

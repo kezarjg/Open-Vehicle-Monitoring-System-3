@@ -33,6 +33,8 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     m_v_charge_acpwr   = MyMetrics.InitFloat("xte.v.c.acpwr", SM_STALE_MID, 0.0f, kW);
     m_v_charge_outcome = MyMetrics.InitInt("xte.v.c.outcome", SM_STALE_MID);
     m_v_charge_stopreq = MyMetrics.InitInt("xte.v.c.stopreq", SM_STALE_MID);
+    m_v_bat_cap_full = MyMetrics.InitVector<float>("xte.v.b.cap.full", SM_STALE_HIGH, 0, AmpHours);  // 0x1D3E 8x per-module full-charge capacity (data collection)
+    m_v_bat_cap_alt  = MyMetrics.InitVector<float>("xte.v.b.cap.alt",  SM_STALE_HIGH, 0, AmpHours);  // 0x1D3F 8x parallel capacity array, function unconfirmed (data collection)
     m_v_bat_heater_status = MyMetrics.InitBool("xte.v.b.heater", SM_STALE_MID);  // This variable stores the status of the battery coolant heater relay
     m_v_bat_soc_bms = MyMetrics.InitFloat("xte.v.b.soc.bms", SM_STALE_MID, 0.0f, Percentage, true);  // This variable stores the SOC as reported by the BMS
     m_v_bat_speed_water_pump = MyMetrics.InitFloat("xte.v.b.speed.waterpump", SM_STALE_MID, 0.0f, Other);  // This variable stores the RPM of the battery water pump
@@ -133,6 +135,22 @@ std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryCellVoltages(const st
     }
 
     return voltages;
+}
+
+std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryCapacityArray(const std::string& data)
+{
+    // 0x1D3E / 0x1D3F payload: 8 × uint16 BE, each LSB = 0.01 Ah.
+    // The 8 elements are believed to be per-module (pack = 8 modules); collecting all
+    // 8 raw for study rather than reducing to a scalar. No semantic commitment here.
+    std::vector<float> caps;
+    caps.reserve(8);
+
+    for (size_t i = 0; i < 16; i += 2) {
+        uint16_t raw = GetRxBUint16(data, i);
+        caps.push_back(static_cast<float>(raw) * 0.01f);
+    }
+
+    return caps;
 }
 
 std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryTemperatures(const std::string& data)
@@ -449,6 +467,16 @@ void OvmsVehicleToyotaETNGA::SetBatteryCellVoltages(const std::vector<float>& vo
     } else {
         StandardMetrics.ms_v_bat_cell_voltage->SetValue(voltages);
     }
+}
+
+void OvmsVehicleToyotaETNGA::SetBatteryCapacityFull(const std::vector<float>& caps)
+{
+    m_v_bat_cap_full->SetValue(caps);
+}
+
+void OvmsVehicleToyotaETNGA::SetBatteryCapacityAlt(const std::vector<float>& caps)
+{
+    m_v_bat_cap_alt->SetValue(caps);
 }
 
 void OvmsVehicleToyotaETNGA::SetBatteryCellVoltageStatistics(const std::vector<float>& voltages)

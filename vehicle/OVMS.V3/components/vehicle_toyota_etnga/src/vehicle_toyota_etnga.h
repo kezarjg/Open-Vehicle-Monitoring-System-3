@@ -85,6 +85,8 @@ protected:
     OvmsMetricFloat* m_v_charge_acpwr;    // 0x106E A/C consumption power (kW)
     OvmsMetricInt*   m_v_charge_outcome;  // 0x1688 charging history / outcome enum
     OvmsMetricInt*   m_v_charge_stopreq;  // 0x1667 charge seq stop request (enum, partial)
+    OvmsMetricVector<float>* m_v_bat_cap_full;  // 0x1D3E 8x u16 x0.01 Ah — per-module full-charge capacity (data collection)
+    OvmsMetricVector<float>* m_v_bat_cap_alt;   // 0x1D3F 8x u16 x0.01 Ah — parallel array, function unconfirmed (data collection)
     OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
     OvmsMetricFloat* m_v_bat_speed_water_pump;
@@ -120,6 +122,7 @@ private:
     float CalculateAmbientTemperature(const std::string& data);
     float CalculateAmbientTemperatureEV(const std::string& data);
     std::vector<float> CalculateBatteryCellVoltages(const std::string& data);
+    std::vector<float> CalculateBatteryCapacityArray(const std::string& data);
     float CalculateBatteryChargingPower(const std::string& data);
     float CalculateBatteryCurrent(const std::string& data);
     float CalculateBatteryPower(float voltage, float current);
@@ -170,6 +173,8 @@ private:
     void SetBatterySOC(float soc);
     void SetBatterySOCBMS(float soc);
     void SetBatteryCellVoltages(const std::vector<float>& voltages);
+    void SetBatteryCapacityFull(const std::vector<float>& caps);
+    void SetBatteryCapacityAlt(const std::vector<float>& caps);
     void SetBatteryCellVoltageStatistics(const std::vector<float>& voltages);
     void SetBatteryTemperatures(const std::vector<float>& temperatures);
     void SetBatteryTemperatureStatistics(const std::vector<float>& temperatures);
@@ -263,7 +268,8 @@ enum CANPID
     PID_AC_INPUT_CURRENT = 0x1654,
     PID_AMBIENT_TEMPERATURE = 0x1002,
     PID_AMBIENT_TEMPERATURE_EV = 0x1F46,
-    PID_BATTERY_CAPACITY = 0x1D3E,
+    PID_BATTERY_CAPACITY = 0x1D3E,        // 8x u16 BE x0.01 Ah — per-module full-charge capacity (data-collection only)
+    PID_BATTERY_CAPACITY_ALT = 0x1D3F,    // 8x u16 BE x0.01 Ah — parallel array ~4.5% lower, function unconfirmed (data-collection only)
     PID_BATTERY_CELL_VOLTAGES = 0x182E,
     PID_BATTERY_CHARGING_POWER = 0x10D4,
     PID_BATTERY_COOLANT_TEMPERATURE = 0x1848,
