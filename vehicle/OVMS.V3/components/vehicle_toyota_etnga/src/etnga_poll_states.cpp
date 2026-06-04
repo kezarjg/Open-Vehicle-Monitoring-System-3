@@ -76,6 +76,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
 
     if (!StandardMetrics.ms_v_env_awake->AsBool()) {
         // No CAN communication - bus is dead, go to sleep
+        ESP_LOGI(TAG, "CAN bus idle (env_awake cleared) — sleeping");
         TransitionToSleepState();
         return;
     }
@@ -103,7 +104,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
             m_cable_watch_start = monotonic;
         } else if (monotonic - m_v_env_awaketime->AsInt() > 300) {
             // Door watch expired (5 min in AWAKE, charge door never opened) → sleep
-            ESP_LOGD(TAG, "Vehicle awake for over 300s with no activity — forcing sleep state");
+            ESP_LOGI(TAG, "Vehicle awake for over 300s with no activity — forcing sleep state");
             m_sleep_entry_time = monotonic;
             m_allow_wake = false;
             TransitionToSleepState();
@@ -111,7 +112,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
         }
     } else if (monotonic - m_cable_watch_start > 900) {
         // Cable watch expired (15 min armed, no cable plug-in) → sleep
-        ESP_LOGD(TAG, "Armed 15min, no cable plug-in — giving up");
+        ESP_LOGI(TAG, "Armed 15min, no cable plug-in — giving up");
         m_sleep_entry_time = monotonic;
         m_allow_wake = false;
         TransitionToSleepState();
