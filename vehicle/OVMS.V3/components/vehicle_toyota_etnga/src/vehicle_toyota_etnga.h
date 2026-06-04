@@ -50,6 +50,8 @@ protected:
 
     bool m_allow_wake = true;  // Used to implement a cooldown timer if the vehicle is put into sleep
     int m_sleep_entry_time = 0;  // Used to track the time that cooldown timer started
+    int m_sleep_cooldown_secs = 10;  // Cooldown window (s) that applied to the current sleep
+    int m_sleep_backoff_idx = 0;     // Index into SLEEP_COOLDOWN_SECS; escalates on consecutive no-activity sleeps
 
     bool m_armed_for_charge = false;   // charge lid seen open since entering AWAKE
     int  m_cable_watch_start = 0;      // monotonic s when armed (15-min cable watch)
@@ -235,6 +237,8 @@ private:
     void TransitionToChargeWaitState();
     void TransitionToChargeAcState();
     void TransitionToChargeDcState();
+
+    void ResetSleepBackoff();   // reset cooldown escalation to the base step (real activity seen)
 
     void RequestVIN();
     void IncomingVINSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, CAN_frame_format_t format, const std::string &data);
