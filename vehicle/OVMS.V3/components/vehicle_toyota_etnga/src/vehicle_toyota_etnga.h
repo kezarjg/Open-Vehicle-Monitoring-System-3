@@ -62,6 +62,9 @@ protected:
     };
     ChargeSessionState m_charge_session;
 
+    static constexpr int TPMS_SLOT_COUNT = 5;
+    int8_t m_tpms_corner[TPMS_SLOT_COUNT] = {0};   // slot->corner cache: 0=unread/none, 1=FL,2=FR,3=RL,4=RR
+
 //    ControlState m_s_controlstate;
     OvmsMetricInt* m_s_controlstate;
     OvmsMetricInt* m_v_charge_pisw_raw;   // 0x1669 raw u8 connector state
@@ -109,6 +112,9 @@ private:
     void IncomingHybridBatterySystem(uint16_t pid);
     void IncomingHybridControlSystem(uint16_t pid);
     void IncomingPlugInControlSystem(uint16_t pid);
+    void IncomingTPMS(uint16_t pid);
+    void UpdateTPMSAlert();
+    bool TPMSCornerMapValid();
 
     // Data calculation functions
     float CalculateAmbientTemperature(const std::string& data);
@@ -245,7 +251,9 @@ enum CANAddress
     HYBRID_CONTROL_SYSTEM_RX = 0x7DA,
     PLUG_IN_CONTROL_SYSTEM_TX = 0x745,
     PLUG_IN_CONTROL_SYSTEM_RX = 0x74D,
-    HPCM_HYBRIDPTCTR_RX = 0x7EA
+    HPCM_HYBRIDPTCTR_RX = 0x7EA,
+    TPMS_GW_TX = 0x7502A,    // (0x750 << 8) | 0x2A  -> MsgID 0x750, sub 0x2A (ISOTP_EXTADR mixed addressing)
+    TPMS_GW_RX = 0x7582A,    // (0x758 << 8) | 0x2A  -> MsgID 0x758, sub 0x2A
 };
 
 // CAN PIDs
@@ -303,6 +311,9 @@ enum CANPID
     PID_CHARGE_STOP_REQ = 0x1667,   // Charge Seq Stop Request from CCM: u8 enum (0x00 Normal / 0x06 HLC-error; partial)
     PID_CHARGE_HISTORY = 0x1688,    // Charging History (outcome/stop-reason): u8 26-state enum
     PID_MYROOM = 0x1692,            // byte 2 bit 0 = My Room active flag (live)
+    PID_TPMS_PRESSURES = 0x1005,  // gateway 0x2A: 5x u16 [status][raw]; psi = raw*0.25 - 7.35
+    PID_TPMS_TEMPS = 0x1004,      // gateway 0x2A: 5x u8;  C = raw - 40
+    PID_TPMS_CORNERS = 0x2021,    // gateway 0x2A: 5x u8 corner enum (0 none/1 FL/2 FR/3 RL/4 RR)
 
 };
 
