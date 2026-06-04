@@ -20,6 +20,17 @@
 //    CHARGE_AC (5)         : AC charging in progress
 //    CHARGE_DC (6)         : DC fast charging in progress
 
+// Escalating sleep cooldown schedule (seconds). Each consecutive no-activity sleep uses the
+// next entry; real activity (drive/charge/charge-door/12V wake) resets to [0]. Caps at the
+// last entry. See ResetSleepBackoff() and TransitionToSleepState().
+static const int SLEEP_COOLDOWN_SECS[] = {10, 30, 60, 120, 300};
+static const int SLEEP_COOLDOWN_STEPS  = sizeof(SLEEP_COOLDOWN_SECS) / sizeof(SLEEP_COOLDOWN_SECS[0]);
+
+void OvmsVehicleToyotaETNGA::ResetSleepBackoff()
+{
+    m_sleep_backoff_idx = 0;
+}
+
 void OvmsVehicleToyotaETNGA::HandleSleepState()
 {
     int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
@@ -105,16 +116,12 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
         } else if (monotonic - m_v_env_awaketime->AsInt() > 300) {
             // Door watch expired (5 min in AWAKE, charge door never opened) → sleep
             ESP_LOGI(TAG, "Vehicle awake for over 300s with no activity — forcing sleep state");
-            m_sleep_entry_time = monotonic;
-            m_allow_wake = false;
             TransitionToSleepState();
             return;
         }
     } else if (monotonic - m_cable_watch_start > 900) {
         // Cable watch expired (15 min armed, no cable plug-in) → sleep
         ESP_LOGI(TAG, "Armed 15min, no cable plug-in — giving up");
-        m_sleep_entry_time = monotonic;
-        m_allow_wake = false;
         TransitionToSleepState();
         return;
     }
@@ -185,8 +192,6 @@ void OvmsVehicleToyotaETNGA::HandleChargeWaitState()
     }
     if (!StandardMetrics.ms_v_env_awake->AsBool()) {
         // Bus went dead during scheduled wait (OBC slept or gateway isolated OBD)
-        m_sleep_entry_time = StandardMetrics.ms_m_monotonic->AsInt();
-        m_allow_wake = false;
         TransitionToSleepState();
         return;
     }
@@ -237,7 +242,16 @@ void OvmsVehicleToyotaETNGA::HandleChargeDcState()
 
 void OvmsVehicleToyotaETNGA::TransitionToSleepState()
 {
+    int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
     m_armed_for_charge = false;
+    // Arm the escalating cooldown: ignore CAN-frame wakes for the current window, then step
+    // the index up (clamped) so the next consecutive no-activity sleep waits longer.
+    // ResetSleepBackoff() returns the index to 0 on real activity.
+    m_sleep_entry_time = monotonic;
+    m_sleep_cooldown_secs = SLEEP_COOLDOWN_SECS[m_sleep_backoff_idx];
+    m_allow_wake = false;
+    if (m_sleep_backoff_idx < SLEEP_COOLDOWN_STEPS - 1)
+        m_sleep_backoff_idx++;
     SetPollState(PollState::SLEEP);
     SetAwake(false);
 }
