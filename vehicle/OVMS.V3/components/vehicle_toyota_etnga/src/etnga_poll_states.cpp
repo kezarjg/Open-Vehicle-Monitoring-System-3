@@ -115,6 +115,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
             // Charge door just opened: arm and start the 15-min cable watch
             m_armed_for_charge = true;
             m_cable_watch_start = monotonic;
+            ResetSleepBackoff();   // deliberate user action — resume responsive cooldowns
         } else if (monotonic - m_v_env_awaketime->AsInt() > 300) {
             // Door watch expired (5 min in AWAKE, charge door never opened) → sleep
             ESP_LOGI(TAG, "Vehicle awake for over 300s with no activity — forcing sleep state");
@@ -292,6 +293,7 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
 void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
 {
     m_armed_for_charge = false;
+    ResetSleepBackoff();   // real drive — resume responsive cooldowns
     SetPollState(PollState::DRIVING);
     m_v_pos_trip_start->SetStale(true);
     RequestVIN();
@@ -300,6 +302,7 @@ void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
 void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
 {
     m_armed_for_charge = false;  // arm state consumed on entering handshake
+    ResetSleepBackoff();   // charge session beginning — resume responsive cooldowns
     m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
     SetPollState(PollState::CHARGE_HANDSHAKE);
     SetChargingStatus(false);    // not yet delivering energy (AC/DC states set true)
