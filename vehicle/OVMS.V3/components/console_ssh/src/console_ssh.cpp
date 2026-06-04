@@ -340,6 +340,9 @@ ConsoleSSH::ConsoleSSH(OvmsSSH* server, struct mg_connection* nc)
 
 ConsoleSSH::~ConsoleSSH()
   {
+  // Stop any follow-mode command task (e.g. "vfs tail") before freeing the
+  // transport it writes to, otherwise it would dereference a freed writer.
+  TerminateCommandTask();
   WOLFSSH* ssh = m_ssh;
   m_ssh = NULL;
   wolfSSH_free(ssh);
