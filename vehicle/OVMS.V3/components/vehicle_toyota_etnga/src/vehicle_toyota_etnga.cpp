@@ -107,8 +107,11 @@ OvmsVehicleToyotaETNGA::OvmsVehicleToyotaETNGA()
     // Init CAN
     RegisterCanBus(2, CAN_MODE_ACTIVE, CAN_SPEED_500KBPS);
 
-    // Set polling state
-    TransitionToSleepState();
+    // Set polling state directly (not via TransitionToSleepState, which would arm a
+    // sleep cooldown and advance the backoff index — neither is wanted at boot).
+    m_armed_for_charge = false;
+    SetPollState(PollState::SLEEP);
+    SetAwake(false);
 
     // Set polling PID list
     PollSetPidList(m_can2, obdii_polls);

@@ -24,7 +24,7 @@
 // next entry; real activity (drive/charge/charge-door/12V wake) resets to [0]. Caps at the
 // last entry. See ResetSleepBackoff() and TransitionToSleepState().
 static const int SLEEP_COOLDOWN_SECS[] = {10, 30, 60, 120, 300};
-static const int SLEEP_COOLDOWN_STEPS  = sizeof(SLEEP_COOLDOWN_SECS) / sizeof(SLEEP_COOLDOWN_SECS[0]);
+static const int SLEEP_COOLDOWN_STEPS  = (int)(sizeof(SLEEP_COOLDOWN_SECS) / sizeof(SLEEP_COOLDOWN_SECS[0]));
 
 void OvmsVehicleToyotaETNGA::ResetSleepBackoff()
 {
