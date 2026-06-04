@@ -37,9 +37,9 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
     
     if (!m_allow_wake)
     {
-        if ((monotonic - m_sleep_entry_time) > 10)
+        if ((monotonic - m_sleep_entry_time) > m_sleep_cooldown_secs)
         {
-            ESP_LOGI(TAG, "Cooling off period ended, allowing wake");
+            ESP_LOGI(TAG, "Cooling off period ended (%ds), allowing wake", m_sleep_cooldown_secs);
             m_allow_wake = true;
         }
     }
@@ -50,6 +50,8 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
     } else if (StandardMetrics.ms_v_bat_12v_voltage->AsFloat() > (StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat()+0.2f)) {
         // Voltage is high. Maybe awake as well...
         ESP_LOGI(TAG, "Aux 12V has exceeded the threshold");
+        // Real power-up — resume responsive cooldowns.
+        ResetSleepBackoff();
         // Send a CAN reset.
         esp_err_t result = m_can2->Reset();
         if (result == ESP_OK) {
