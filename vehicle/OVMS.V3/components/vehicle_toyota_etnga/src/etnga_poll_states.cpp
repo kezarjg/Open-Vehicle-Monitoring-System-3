@@ -20,15 +20,26 @@
 //    CHARGE_AC (5)         : AC charging in progress
 //    CHARGE_DC (6)         : DC fast charging in progress
 
+// Escalating sleep cooldown schedule (seconds). Each consecutive no-activity sleep uses the
+// next entry; real activity (drive/charge/charge-door/12V wake) resets to [0]. Caps at the
+// last entry. See ResetSleepBackoff() and TransitionToSleepState().
+static const int SLEEP_COOLDOWN_SECS[] = {10, 30, 60, 120, 300};
+static const int SLEEP_COOLDOWN_STEPS  = (int)(sizeof(SLEEP_COOLDOWN_SECS) / sizeof(SLEEP_COOLDOWN_SECS[0]));
+
+void OvmsVehicleToyotaETNGA::ResetSleepBackoff()
+{
+    m_sleep_backoff_idx = 0;
+}
+
 void OvmsVehicleToyotaETNGA::HandleSleepState()
 {
     int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
     
     if (!m_allow_wake)
     {
-        if ((monotonic - m_sleep_entry_time) > 10)
+        if ((monotonic - m_sleep_entry_time) > m_sleep_cooldown_secs)
         {
-            ESP_LOGI(TAG, "Cooling off period ended, allowing wake");
+            ESP_LOGI(TAG, "Cooling off period ended (%ds), allowing wake", m_sleep_cooldown_secs);
             m_allow_wake = true;
         }
     }
@@ -39,6 +50,8 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
     } else if (StandardMetrics.ms_v_bat_12v_voltage->AsFloat() > (StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat()+0.2f)) {
         // Voltage is high. Maybe awake as well...
         ESP_LOGI(TAG, "Aux 12V has exceeded the threshold");
+        // Real power-up — resume responsive cooldowns.
+        ResetSleepBackoff();
         // Send a CAN reset.
         esp_err_t result = m_can2->Reset();
         if (result == ESP_OK) {
@@ -76,6 +89,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
 
     if (!StandardMetrics.ms_v_env_awake->AsBool()) {
         // No CAN communication - bus is dead, go to sleep
+        ESP_LOGI(TAG, "CAN bus idle (env_awake cleared) — sleeping");
         TransitionToSleepState();
         return;
     }
@@ -101,19 +115,16 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
             // Charge door just opened: arm and start the 15-min cable watch
             m_armed_for_charge = true;
             m_cable_watch_start = monotonic;
+            ResetSleepBackoff();   // deliberate user action — resume responsive cooldowns
         } else if (monotonic - m_v_env_awaketime->AsInt() > 300) {
             // Door watch expired (5 min in AWAKE, charge door never opened) → sleep
-            ESP_LOGD(TAG, "Vehicle awake for over 300s with no activity — forcing sleep state");
-            m_sleep_entry_time = monotonic;
-            m_allow_wake = false;
+            ESP_LOGI(TAG, "Vehicle awake for over 300s with no activity — forcing sleep state");
             TransitionToSleepState();
             return;
         }
     } else if (monotonic - m_cable_watch_start > 900) {
         // Cable watch expired (15 min armed, no cable plug-in) → sleep
-        ESP_LOGD(TAG, "Armed 15min, no cable plug-in — giving up");
-        m_sleep_entry_time = monotonic;
-        m_allow_wake = false;
+        ESP_LOGI(TAG, "Armed 15min, no cable plug-in — giving up");
         TransitionToSleepState();
         return;
     }
@@ -184,8 +195,6 @@ void OvmsVehicleToyotaETNGA::HandleChargeWaitState()
     }
     if (!StandardMetrics.ms_v_env_awake->AsBool()) {
         // Bus went dead during scheduled wait (OBC slept or gateway isolated OBD)
-        m_sleep_entry_time = StandardMetrics.ms_m_monotonic->AsInt();
-        m_allow_wake = false;
         TransitionToSleepState();
         return;
     }
@@ -236,7 +245,16 @@ void OvmsVehicleToyotaETNGA::HandleChargeDcState()
 
 void OvmsVehicleToyotaETNGA::TransitionToSleepState()
 {
+    int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
     m_armed_for_charge = false;
+    // Arm the escalating cooldown: ignore CAN-frame wakes for the current window, then step
+    // the index up (clamped) so the next consecutive no-activity sleep waits longer.
+    // ResetSleepBackoff() returns the index to 0 on real activity.
+    m_sleep_entry_time = monotonic;
+    m_sleep_cooldown_secs = SLEEP_COOLDOWN_SECS[m_sleep_backoff_idx];
+    m_allow_wake = false;
+    if (m_sleep_backoff_idx < SLEEP_COOLDOWN_STEPS - 1)
+        m_sleep_backoff_idx++;
     SetPollState(PollState::SLEEP);
     SetAwake(false);
 }
@@ -275,6 +293,7 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
 void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
 {
     m_armed_for_charge = false;
+    ResetSleepBackoff();   // real drive — resume responsive cooldowns
     SetPollState(PollState::DRIVING);
     m_v_pos_trip_start->SetStale(true);
     RequestVIN();
@@ -283,6 +302,7 @@ void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
 void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
 {
     m_armed_for_charge = false;  // arm state consumed on entering handshake
+    ResetSleepBackoff();   // charge session beginning — resume responsive cooldowns
     m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
     SetPollState(PollState::CHARGE_HANDSHAKE);
     SetChargingStatus(false);    // not yet delivering energy (AC/DC states set true)

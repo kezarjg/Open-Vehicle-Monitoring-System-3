@@ -587,7 +587,9 @@ Tyre pressure and temperature data are retrieved from the TPMS ECU via the
 gateway sub-target ``0x2A`` at address ``0x750``, using the module's
 ``ISOTP_EXTADR`` mixed-addressing mode.  This is the first gateway-relay poll
 in the eTNGA module.  Readings are collected every 60 seconds while in the
-``AWAKE`` or ``DRIVING`` poll states.
+``DRIVING`` poll state.  The gateway sub-target ``0x2A`` only answers while the
+car is driving (or in *My Room*); parked-asleep and during charging it does not
+respond, so polling it in ``AWAKE`` only produced timeouts and was dropped.
 
 Metrics
 -------
