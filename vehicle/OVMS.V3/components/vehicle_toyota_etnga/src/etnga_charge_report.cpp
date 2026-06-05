@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 #include <algorithm>
 
@@ -76,6 +77,16 @@ const char* OvmsVehicleToyotaETNGA::ChargeOutcomeLabel(int code)
         case 0x46: return "Vehicle Factor";
         default:   return "";   // unknown -> caller shows raw hex
     }
+}
+
+// Append a monotonic-timestamped event to the session event log.
+// No-op outside a session (guard matches the in_session flag set in TransitionToChargeHandshakeState).
+void OvmsVehicleToyotaETNGA::LogChargeEvent(const char* label)
+{
+    if (!m_charge_session.in_session)
+        return;
+    m_charge_session.events.push_back(
+        std::make_pair(StandardMetrics.ms_m_monotonic->AsInt(), label));
 }
 
 // Live aggregation while charging: peak power, battery-temp range, and the current phase type.
