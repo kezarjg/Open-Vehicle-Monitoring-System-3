@@ -186,31 +186,26 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
     f << row;
 }
 
-// Retain only the newest CHARGE_REPORT_MAX .html reports (timestamp filenames sort chronologically).
-static void PruneChargeReports(const char* tag)
+// Retain only the newest CHARGE_REPORT_MAX sessions; delete both .html and .csv for each pruned stem.
+static void PruneChargeReports(const char* tag, const std::string& dir)
 {
-    DIR* dir = opendir(CHARGE_REPORT_DIR);
-    if (!dir)
-        return;
-
-    std::vector<std::string> files;
-    struct dirent* ent;
-    while ((ent = readdir(dir)) != NULL) {
-        std::string name = ent->d_name;
-        if (name.size() > 5 && name.compare(name.size() - 5, 5, ".html") == 0)
-            files.push_back(name);
+    DIR* d = opendir(dir.c_str());
+    if (!d) return;
+    std::vector<std::string> stems;   // basenames without extension
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        std::string n = e->d_name;
+        if (n.size() > 5 && n.compare(n.size()-5, 5, ".html") == 0)
+            stems.push_back(n.substr(0, n.size()-5));
     }
-    closedir(dir);
-
-    if ((int) files.size() <= CHARGE_REPORT_MAX)
-        return;
-
-    std::sort(files.begin(), files.end());
-    int to_delete = (int) files.size() - CHARGE_REPORT_MAX;
-    for (int i = 0; i < to_delete; i++) {
-        std::string path = std::string(CHARGE_REPORT_DIR "/") + files[i];
-        if (unlink(path.c_str()) == 0)
-            ESP_LOGD(tag, "Charge report pruned: %s", files[i].c_str());
+    closedir(d);
+    if ((int)stems.size() <= CHARGE_REPORT_MAX) return;
+    std::sort(stems.begin(), stems.end());
+    int del = (int)stems.size() - CHARGE_REPORT_MAX;
+    for (int i = 0; i < del; i++) {
+        unlink((dir + "/" + stems[i] + ".html").c_str());
+        unlink((dir + "/" + stems[i] + ".csv").c_str());
+        ESP_LOGD(tag, "Charge report pruned: %s", stems[i].c_str());
     }
 }
 
@@ -366,5 +361,5 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
 
     ESP_LOGI(TAG, "Charge report written: %s.html (%.2f kWh, %d%%->%d%%)",
         m_charge_session.base.c_str(), energy_kwh, start_soc, end_soc);
-    PruneChargeReports(TAG);
+    PruneChargeReports(TAG, ChargeReportDir());
 }
