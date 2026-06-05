@@ -17,6 +17,11 @@ Open Vehicle Monitor System v3 - Change log
     Within `Ticker3600`, a routine removes all timestamps older than 24 hours and updates `xsq.12v.trickle.count` by -1.
     New metric:
       xsq.12v.trickle.count             -- Count of 12V trickle-charge cycles in 24h
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): at the end of each charging session the module
+    now writes a self-contained HTML charge report to /store/charge-reports/<timestamp>.html
+    (SOC delta, energy delivered + from grid, peak/avg power, battery-temp range, AC/DC, outcome).
+    The newest 50 reports are kept. This first version covers single-phase, live-telemetry
+    sessions; multi-phase, sleep-survival and limiting-side attribution are planned follow-ups.
 
 2026-05-17 MB   3.3.006  OTA release
 - VW e-Up: extended battery health / aging info (with web UI integration): total battery age,

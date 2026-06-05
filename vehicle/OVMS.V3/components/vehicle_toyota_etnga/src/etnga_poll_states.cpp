@@ -207,6 +207,8 @@ void OvmsVehicleToyotaETNGA::HandleChargeAcState()
     // timeouts — only an explicit fresh PISW=Unconnected (0x00) read or a clean phase-end
     // (ac_op==0x00) terminates the session.  On unlock the OBC answers again and these
     // handlers resume normally.  Do not add timeout-based session teardown here.
+    UpdateChargeSessionStats();   // aggregate peak power / temp range / type for the session report
+
     int pisw = m_v_charge_pisw_raw->AsInt();
     int ac_op = m_v_charge_ac_op->AsInt();
 
@@ -228,6 +230,8 @@ void OvmsVehicleToyotaETNGA::HandleChargeDcState()
     // in_session do NOT tear down the session.  Only an explicit fresh PISW=Unconnected
     // (0x00) read or hlc==0xFF (HLC Unconnected) terminates the DC phase.  On unlock the
     // OBC answers again and polling resumes.  Do not add timeout-based session teardown here.
+    UpdateChargeSessionStats();   // aggregate peak power / temp range / type for the session report
+
     int pisw = m_v_charge_pisw_raw->AsInt();
     int hlc = m_v_charge_hlc->AsInt();
 
@@ -280,14 +284,18 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
     if (oldState == PollState::CHARGE_AC || oldState == PollState::CHARGE_DC) {
         StandardMetrics.ms_v_charge_state->SetValue("done");
         StandardMetrics.ms_v_charge_mode->SetValue("");   // clear AC/DC indicator on session end
-        if (m_charge_session.in_session)
+        if (m_charge_session.in_session) {
             ESP_LOGI(TAG, "Charge session closed");
+            GenerateChargeReport();   // write the session-end HTML report (no-op if no energy delivered)
+        }
         m_charge_session = ChargeSessionState{};   // reset (clears in_session)
     } else if (oldState == PollState::CHARGE_HANDSHAKE || oldState == PollState::CHARGE_WAIT) {
         StandardMetrics.ms_v_charge_state->SetValue("");
         StandardMetrics.ms_v_charge_mode->SetValue("");
-        if (m_charge_session.in_session)
+        if (m_charge_session.in_session) {
             ESP_LOGI(TAG, "Charge session closed");
+            GenerateChargeReport();   // write the session-end HTML report (no-op if no energy delivered)
+        }
         m_charge_session = ChargeSessionState{};   // reset (clears in_session)
     }
 }
@@ -312,6 +320,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
     if (!m_charge_session.in_session) {
         m_charge_session.in_session = true;
         m_charge_session.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
+        m_charge_session.start_utc = StandardMetrics.ms_m_timeutc->AsInt();
         m_charge_session.start_soc = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
         ESP_LOGI(TAG, "Charge session opened (SOC %d%%)", m_charge_session.start_soc);
     }
