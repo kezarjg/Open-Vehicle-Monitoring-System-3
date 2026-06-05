@@ -605,15 +605,15 @@ canonical order ``[FL, FR, RL, RR]`` (indices 0–3):
      - OVMS name
      - Unit
      - Meaning
-   * - ``v.tp.p``
+   * - ``v.t.pressure``
      - ``ms_v_tpms_pressure``
      - kPa
      - Tyre pressures
-   * - ``v.tp.t``
+   * - ``v.t.temp``
      - ``ms_v_tpms_temp``
      - °C
      - Tyre temperatures
-   * - ``v.tp.alert``
+   * - ``v.t.alert``
      - ``ms_v_tpms_alert``
      - enum
      - 0 = normal, 1 = warning, 2 = alert
@@ -711,5 +711,5 @@ Notes
   stationary for an extended period.
 * **No-sensor slots publish 0 and are excluded from alerts.** A slot whose
   pressure raw byte is 0 is treated as unpopulated; the corresponding
-  ``v.tp.p`` element is published as 0.0 and is skipped when evaluating
+  ``v.t.pressure`` element is published as 0.0 and is skipped when evaluating
   alert thresholds.
