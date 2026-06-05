@@ -45,6 +45,7 @@ static const OvmsPoller::poll_pid_t obdii_polls[] = {
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_VEHICLE_SPEED,             { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1F0D speed: DRIVING only
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_SHIFT_POSITION,            { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1061 gear: DRIVING only
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_ODOMETER,                  { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1FA6 odometer: DRIVING only
+  { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_AC_CONSUMPTION,            { 0,  0, 5,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x106E HVAC power (hybrid control): DRIVING @5s
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_AMBIENT_TEMPERATURE,       { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1002 ambient temp: DRIVING only
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_CABIN_TEMPERATURE,         { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1001 cabin temp: DRIVING only
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_HVAC_SETPOINT,             { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1036 HVAC setpoint: DRIVING only
@@ -145,6 +146,9 @@ void OvmsVehicleToyotaETNGA::NotifyChargeStart()
 
     StandardMetrics.ms_v_charge_kwh_grid->SetValue(0);
     lastGridEnergyLogTime = 0;
+
+    m_v_env_hvac_kwh->SetValue(0);
+    lastHvacEnergyLogTime = 0;
     
 }
 

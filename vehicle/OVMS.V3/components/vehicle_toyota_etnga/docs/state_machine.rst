@@ -453,10 +453,11 @@ Charge-report supporting channels
 ----------------------------------
 
 These four metrics feed the in-module charge report (work item D).
-``xte.v.c.myroom`` and ``xte.v.c.acpwr`` are polled only in the
-``CHARGE_AC`` and ``CHARGE_DC`` states; ``xte.v.c.outcome`` and
-``xte.v.c.stopreq`` are also polled in ``CHARGE_HANDSHAKE`` and
-``CHARGE_WAIT``.
+``xte.v.c.myroom`` is polled only in the ``CHARGE_AC`` and ``CHARGE_DC``
+states; ``xte.v.e.hvac.power`` is polled in those charge states (from the
+OBC, ``0x745``) **and** in ``DRIVING`` (from the hybrid control ECU,
+``0x7D2``); ``xte.v.c.outcome`` and ``xte.v.c.stopreq`` are also polled in
+``CHARGE_HANDSHAKE`` and ``CHARGE_WAIT``.
 
 .. list-table::
    :header-rows: 1
@@ -471,19 +472,24 @@ These four metrics feed the in-module charge report (work item D).
      - bool
      - My Room active — cabin run on grid power while plugged in or
        charging.  This is the only on-bus live My-Room signal.
-   * - ``xte.v.c.acpwr``
+   * - ``xte.v.e.hvac.power``
      - ``0x106E``
      - kW
-     - A/C consumption power (cabin / HVAC draw).  Decoded as
-       ``u8 × 0.05 kW/LSB`` at offset 0.  ``0x106E`` is a dedicated
-       cabin-power PID, so the My-Room cabin energy is the **direct
-       time-integral of this channel** (∫ acpwr dt over the
-       My-Room-active interval) — *not* an EVSE-to-cabin
-       (input − pack) split.  The old delta method was AC-only and
-       read 0 for DC (``0x161D`` charger-input is 0 during DC), so the
-       direct integral is used for both AC and DC (confirmed
-       2026-06-03; host ``charge_report_writer.py`` / ``analyze-myroom``
-       use the same direct integral).
+     - HVAC / cabin power draw.  Decoded as ``u8 × 0.05 kW/LSB`` at
+       offset 0.  Sourced from the OBC (``0x745``) while charging and from
+       the hybrid control ECU (``0x7D2``) while driving, so it tracks
+       cabin/HVAC power in both contexts.
+   * - ``xte.v.e.hvac.kwh``
+     - (derived)
+     - kWh
+     - My-Room cabin energy — the **direct time-integral of**
+       ``xte.v.e.hvac.power`` over the My-Room-active interval (reset at
+       charge start).  ``0x106E`` is a dedicated cabin-power PID, so this
+       is valid for both AC and DC — *not* an EVSE-to-cabin (input − pack)
+       split.  The old delta method was AC-only and read 0 for DC
+       (``0x161D`` charger-input is 0 during DC).  Confirmed 2026-06-03;
+       host ``charge_report_writer.py`` / ``analyze-myroom`` use the same
+       direct integral.
    * - ``xte.v.c.outcome``
      - ``0x1688``
      - enum
