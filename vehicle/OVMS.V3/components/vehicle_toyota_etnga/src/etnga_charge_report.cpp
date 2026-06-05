@@ -301,16 +301,19 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     std::ofstream f(m_charge_session.base + ".html", std::ios::out | std::ios::trunc);
     if (!f) { ESP_LOGE(TAG, "Charge report: cannot write %s.html", m_charge_session.base.c_str()); return; }
 
+    const char* vn = MyVehicleFactory.ActiveVehicleName();
+    std::string vname = (vn && *vn) ? vn : "Toyota e-TNGA";
+
     char b[96];
     f << "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n"
       << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-      << "<title>Charge report " << sbuf << "</title>\n"
+      << "<title>" << vname << " charge report " << sbuf << "</title>\n"
       << "<style>body{font:14px/1.4 system-ui,sans-serif;margin:1rem;max-width:46rem}"
       << "h1{font-size:1.3rem}h2{font-size:1.05rem;margin-top:1.3rem}"
       << "dl{display:grid;grid-template-columns:max-content 1fr;gap:.2rem .8rem}dt{font-weight:600}"
       << "table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.15rem .4rem;font-size:13px}"
       << ".est{color:#555}.note{color:#888;font-size:12px;margin-top:1.2rem}</style></head><body>\n"
-      << "<h1>Charging session report</h1>\n";
+      << "<h1>" << vname << " — charging session report</h1>\n";
 
     f << "<h2>Summary</h2>\n<dl>\n"
       << "<dt>Plug-in</dt><dd>" << sbuf << "</dd>\n<dt>Unplug</dt><dd>" << ebuf << "</dd>\n";
