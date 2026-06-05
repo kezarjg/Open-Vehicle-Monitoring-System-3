@@ -415,6 +415,12 @@ esp32wifi::esp32wifi(const char* name)
   m_powermode = Off;
   m_poweredup = false;
   m_sta_reconnect = 0;
+  m_priority_enable = false;
+  m_priority_interval = 60;
+  m_sta_upgrade_scan = false;
+  m_sta_switching = false;
+  m_upgrade_scan_next = 0;
+  m_sta_switch_deadline = 0;
   m_sta_connected = false;
   m_sta_rssi = -1270;
   m_good_signal = false;
@@ -1539,6 +1545,32 @@ void esp32wifi::OutputStatus(int verbosity, OvmsWriter* writer)
     }
   }
 
+void esp32wifi::ParsePriorityList(const std::string& csv)
+  {
+  m_priority_list.clear();
+  size_t start = 0;
+  while (start <= csv.length())
+    {
+    size_t comma = csv.find(',', start);
+    if (comma == std::string::npos) comma = csv.length();
+    std::string item = csv.substr(start, comma - start);
+    // trim leading/trailing whitespace:
+    size_t a = item.find_first_not_of(" \t");
+    size_t b = item.find_last_not_of(" \t");
+    if (a != std::string::npos)
+      {
+      item = item.substr(a, b - a + 1);
+      // first occurrence wins (skip duplicates):
+      bool dup = false;
+      for (size_t i = 0; i < m_priority_list.size(); i++)
+        if (m_priority_list[i] == item) { dup = true; break; }
+      if (!dup)
+        m_priority_list.push_back(item);
+      }
+    start = comma + 1;
+    }
+  }
+
 void esp32wifi::ConfigChanged(std::string event, void* data)
   {
   OvmsConfigParam* param = (OvmsConfigParam*)data;
@@ -1550,6 +1582,10 @@ void esp32wifi::ConfigChanged(std::string event, void* data)
     m_ap2client_timeout  = MyConfig.GetParamValueInt("network", "wifi.ap2client.timeout", 30) * 60;        //!< Wifi Mode APClient to client timeout in minutes to seconds for ticker1
     m_ap2client_enabled  = MyConfig.GetParamValueInt("network", "wifi.ap2client.enable", false);           //!< Wifi Mode APClient to client enable/disable    
     m_ap2client_active = m_ap2client_enabled;                                                              // Mirror enabled to active
+    m_priority_enable = MyConfig.GetParamValueBool("network", "wifi.priority.enable", false);
+    m_priority_interval = MyConfig.GetParamValueInt("network", "wifi.priority.interval", 60);
+    if (m_priority_interval < 10) m_priority_interval = 10;                                                // clamp: avoid hammering
+    ParsePriorityList(MyConfig.GetParamValue("network", "wifi.priority", ""));
     }
   }
 
