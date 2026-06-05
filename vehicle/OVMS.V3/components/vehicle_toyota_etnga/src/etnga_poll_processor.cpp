@@ -82,6 +82,19 @@ void OvmsVehicleToyotaETNGA::IncomingAirConditionerSystem(uint16_t pid)
             break;
         }
 
+        case PID_HEATER_POWER: {
+            // 0x1086 HV electric heater power (W, 2-byte cluster, split TBD): any draw => heating active.
+            StandardMetrics.ms_v_env_heating->SetValue(GetRxBUint16(m_rxbuf, 0) > 0);
+            break;
+        }
+
+        case PID_BLOWER_LEVEL: {
+            // 0x2801 blower level (u8 1-7) -> cabin fan percentage (standard metric unit is %).
+            int level = GetRxBByte(m_rxbuf, 0);
+            StandardMetrics.ms_v_env_cabinfan->SetValue(level * 100 / 7);
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:
