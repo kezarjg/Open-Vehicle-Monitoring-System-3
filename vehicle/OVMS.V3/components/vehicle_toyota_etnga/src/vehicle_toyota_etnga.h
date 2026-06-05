@@ -86,6 +86,7 @@ protected:
     OvmsMetricBool*  m_v_charge_myroom;   // 0x1692 byte 2 (idx 1) bit 0 = My Room active
     OvmsMetricFloat* m_v_env_hvac_power;  // 0x106E HVAC/cabin power draw (kW): OBC view (0x745) while charging, hybrid-control view (0x7D2) while driving
     OvmsMetricFloat* m_v_env_hvac_kwh;    // My-Room cabin energy (kWh): time-integral of m_v_env_hvac_power over the My-Room-active interval
+    OvmsMetricFloat* m_v_env_hvac_kwh_drive;  // Driving cabin/HVAC energy (kWh): per-trip time-integral of m_v_env_hvac_power while DRIVING (reset in NotifyVehicleOn)
     OvmsMetricInt*   m_v_charge_outcome;  // 0x1688 charging history / outcome enum
     OvmsMetricInt*   m_v_charge_stopreq;  // 0x1667 charge seq stop request (enum, partial)
     OvmsMetricVector<float>* m_v_bat_cap_full;  // 0x1D3E 8x u16 x0.01 Ah — per-module full-charge capacity (data collection)
@@ -108,6 +109,7 @@ private:
     uint32_t lastChargerEnergyLogTime;
     uint32_t lastGridEnergyLogTime;
     uint32_t lastHvacEnergyLogTime;
+    uint32_t lastHvacDriveEnergyLogTime;
 
     void InitializeMetrics();  // Initializes the metrics specific to this vehicle module
     void ResetStaleMetrics();  // Checks if state transition metrics are stale (and resets them)
@@ -289,6 +291,8 @@ enum CANPID
     PID_CHARGING_LID = 0x1625,
     PID_CHARGING_VOLTAGE_TYPE = 0x161C,
     PID_HVAC_SETPOINT = 0x1036,
+    PID_HEATER_POWER = 0x1086,            // HV electric heater power (W, 2-byte cluster, split TBD); >0 => v.e.heating
+    PID_BLOWER_LEVEL = 0x2801,            // Blower level (u8 1-7) => v.e.cabinfan %
     PID_ODOMETER = 0x1FA6,
     PID_PISW_STATUS = 0x1669,
     PID_READY_SIGNAL = 0x1076,

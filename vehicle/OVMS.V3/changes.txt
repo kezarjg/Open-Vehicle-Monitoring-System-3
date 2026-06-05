@@ -17,8 +17,13 @@ Open Vehicle Monitor System v3 - Change log
     Within `Ticker3600`, a routine removes all timestamps older than 24 hours and updates `xsq.12v.trickle.count` by -1.
     New metric:
       xsq.12v.trickle.count             -- Count of 12V trickle-charge cycles in 24h
-
-2026-05-17 MB   3.3.006  OTA release
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): populate more standard metrics that were
+    previously unset — climate flags v.e.cooling / v.e.heating, fan speed v.e.cabinfan,
+    consumption v.b.consumption, and the trip/lifetime accumulators v.b.coulomb.used/.recd
+    (+ .total), v.b.energy.used.total / .recd.total, and v.c.kwh.grid.total. The driving HVAC
+    poll (0x106E) now runs at 1 Hz so the cabin-energy integral matches the battery integrator.
+    New metric:
+      xte.v.e.hvac.kwh.drive            -- Cabin/HVAC energy used during the current trip (kWh)
 - VW e-Up: extended battery health / aging info (with web UI integration): total battery age,
     charge time counters AC/DC and parked battery state times (by SOC & temperature ranges)
     (inspired by OBD Amigos)
