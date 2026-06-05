@@ -32,6 +32,7 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     m_v_charge_myroom  = MyMetrics.InitBool("xte.v.c.myroom", SM_STALE_MID);
     m_v_env_hvac_power = MyMetrics.InitFloat("xte.v.e.hvac.power", SM_STALE_MID, 0.0f, kW);
     m_v_env_hvac_kwh   = MyMetrics.InitFloat("xte.v.e.hvac.kwh",   SM_STALE_MID, 0.0f, kWh);
+    m_v_env_hvac_kwh_drive = MyMetrics.InitFloat("xte.v.e.hvac.kwh.drive", SM_STALE_MID, 0.0f, kWh);  // Per-trip driving cabin/HVAC energy
     m_v_charge_outcome = MyMetrics.InitInt("xte.v.c.outcome", SM_STALE_MID);
     m_v_charge_stopreq = MyMetrics.InitInt("xte.v.c.stopreq", SM_STALE_MID);
     m_v_bat_cap_full = MyMetrics.InitVector<float>("xte.v.b.cap.full", SM_STALE_HIGH, 0, AmpHours);  // 0x1D3E 8x per-module full-charge capacity (data collection)
@@ -286,6 +287,22 @@ void OvmsVehicleToyotaETNGA::SetHvacPower(float kw)
     } else {
         lastHvacEnergyLogTime = 0;   // reset so the next My-Room interval starts fresh
     }
+
+    // A/C cooling active: 0x106E is the dedicated A/C consumption channel, so any draw => cooling on.
+    StandardMetrics.ms_v_env_cooling->SetValue(kw > 0.0f);
+
+    // Driving cabin/HVAC energy: per-trip time-integral of this power while DRIVING (reset in
+    // NotifyVehicleOn). My-Room (charging) energy above and this are exclusive — different poll states.
+    if (static_cast<PollState>(m_poll_state) == PollState::DRIVING) {
+        uint32_t now = esp_log_timestamp();
+        float hours = 1.0f / 3600.0f;   // default 1 s for the first sample of the interval
+        if (lastHvacDriveEnergyLogTime != 0)
+            hours = static_cast<float>((now - lastHvacDriveEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
+        m_v_env_hvac_kwh_drive->SetValue(m_v_env_hvac_kwh_drive->AsFloat() + kw * hours);
+        lastHvacDriveEnergyLogTime = now;
+    } else {
+        lastHvacDriveEnergyLogTime = 0;   // reset so the next driving interval starts fresh
+    }
 }
 
 int OvmsVehicleToyotaETNGA::CalculateChargeOutcome(const std::string& data)  { return GetRxBByte(data, 0); }  // 0x1688 26-state enum; RETAINED between sessions (does not reset on plug-in) — report must scope it per-session
@@ -421,18 +438,35 @@ void OvmsVehicleToyotaETNGA::SetBatteryPower(float power)
 
     ESP_LOGD(TAG, "Battery Energy: %f kWh", energy);
 
-    // Only log energy use/recovery while driving
+    // Coulomb count (Ah) over the same interval. Current shares the power sign (+ = discharge);
+    // ms_v_bat_current was just set from the same 0x1F9A reply (see IncomingHybridControlSystem).
+    const float charge = StandardMetrics.ms_v_bat_current->AsFloat() * hoursSinceLastUpdate;
+
+    // Only log energy/coulomb use/recovery while driving. The per-trip metrics reset in
+    // NotifyVehicleOn; the *_total accumulators are persistent (lifetime) and never reset here.
     if (static_cast<PollState>(m_poll_state) == PollState::DRIVING)
     {
         if (power > 0)
         {
             StandardMetrics.ms_v_bat_energy_used->SetValue(
                 StandardMetrics.ms_v_bat_energy_used->AsFloat() + energy);
+            StandardMetrics.ms_v_bat_energy_used_total->SetValue(
+                StandardMetrics.ms_v_bat_energy_used_total->AsFloat() + energy);
+            StandardMetrics.ms_v_bat_coulomb_used->SetValue(
+                StandardMetrics.ms_v_bat_coulomb_used->AsFloat() + charge);
+            StandardMetrics.ms_v_bat_coulomb_used_total->SetValue(
+                StandardMetrics.ms_v_bat_coulomb_used_total->AsFloat() + charge);
         }
         else if (power < 0)
         {
             StandardMetrics.ms_v_bat_energy_recd->SetValue(
                 StandardMetrics.ms_v_bat_energy_recd->AsFloat() - energy);
+            StandardMetrics.ms_v_bat_energy_recd_total->SetValue(
+                StandardMetrics.ms_v_bat_energy_recd_total->AsFloat() - energy);
+            StandardMetrics.ms_v_bat_coulomb_recd->SetValue(
+                StandardMetrics.ms_v_bat_coulomb_recd->AsFloat() - charge);
+            StandardMetrics.ms_v_bat_coulomb_recd_total->SetValue(
+                StandardMetrics.ms_v_bat_coulomb_recd_total->AsFloat() - charge);
         }
     }
 
@@ -647,6 +681,7 @@ void OvmsVehicleToyotaETNGA::SetChargerInputPower(float power)
     ESP_LOGD(TAG, "Grid Energy: %f kWh", energy);
 
     StandardMetrics.ms_v_charge_kwh_grid->SetValue(StandardMetrics.ms_v_charge_kwh_grid->AsFloat() + energy);
+    StandardMetrics.ms_v_charge_kwh_grid_total->SetValue(StandardMetrics.ms_v_charge_kwh_grid_total->AsFloat() + energy);  // persistent lifetime grid energy
 
     // Update the update time for the next energy period
     lastGridEnergyLogTime = now;
