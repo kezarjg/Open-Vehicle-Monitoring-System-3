@@ -51,7 +51,6 @@ static const OvmsPoller::poll_pid_t obdii_polls[] = {
 
     // Charging polls — state-machine DIDs
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_AMBIENT_TEMPERATURE_EV,   { 0,  0, 0,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1F46: not polled by sim in any charge state; 0 until confirmed useful
-  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGING_CONTROL_STATUS,  { 0,  0, 0,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1668: sim uses 0x1684 (PID_AC_CHARGING_OP_STATUS); 0x1668 not in sim charge lists
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_PISW_STATUS,              { 0,  5, 0,  1, 30, 10, 10}, 0, ISOTP_STD }, // 0x1669 PISW: AWAKE=5 (Task 5); HS=1,WAIT=30,AC=10,DC=10 (sim)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGING_VOLTAGE_TYPE,    { 0,  0, 0,  5,  0,  0,  0}, 0, ISOTP_STD }, // 0x161C VTYPE: HS=5s only (sim: HANDSHAKE=5, absent elsewhere)
 
