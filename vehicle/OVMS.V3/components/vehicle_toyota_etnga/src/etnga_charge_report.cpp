@@ -261,92 +261,110 @@ std::string OvmsVehicleToyotaETNGA::RenderPowerSvg()
     return out;
 }
 
-// Write the session-end report. No-op if no meaningful energy was delivered (plug-in then unplug).
 void OvmsVehicleToyotaETNGA::GenerateChargeReport()
 {
     const float energy_kwh = StandardMetrics.ms_v_charge_kwh->AsFloat();
-    if (energy_kwh < 0.05f) {
-        ESP_LOGD(TAG, "Charge report skipped: only %.3f kWh delivered", energy_kwh);
+    if (energy_kwh < 0.05f || m_charge_session.base.empty()) {
+        ESP_LOGD(TAG, "Charge report skipped (%.3f kWh)", energy_kwh);
         return;
     }
-
     const float grid_kwh  = StandardMetrics.ms_v_charge_kwh_grid->AsFloat();
     const int   end_soc   = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
     const int   start_soc = m_charge_session.start_soc;
-    int duration_s = StandardMetrics.ms_m_monotonic->AsInt() - m_charge_session.start_monotonic;
-    if (duration_s < 0)
-        duration_s = 0;
-    const float avg_kw  = (duration_s > 0) ? energy_kwh / (duration_s / 3600.0f) : 0.0f;
+    int dur = StandardMetrics.ms_m_monotonic->AsInt() - m_charge_session.start_monotonic;
+    if (dur < 0) dur = 0;
+    const float avg_kw = (dur > 0) ? energy_kwh / (dur / 3600.0f) : 0.0f;
     const int   outcome = m_v_charge_outcome->AsInt();
+    const bool  time_ok = (m_charge_session.start_utc > 1000000000);
 
-    // Time formatting (UTC). start_utc is 0 / tiny if the clock was never synced.
-    const bool time_ok = (m_charge_session.start_utc > 1000000000);   // ~2001 sanity floor
-    char start_buf[40] = "(clock not synced)";
-    char end_buf[40]   = "(clock not synced)";
-    char fname[80];
+    char sbuf[40] = "(clock not synced)", ebuf[40] = "(clock not synced)";
     if (time_ok) {
-        time_t st = (time_t) m_charge_session.start_utc;
-        time_t et = st + duration_s;
-        struct tm tmv;
-        gmtime_r(&st, &tmv); strftime(start_buf, sizeof(start_buf), "%Y-%m-%d %H:%M:%S UTC", &tmv);
-        gmtime_r(&et, &tmv); strftime(end_buf,   sizeof(end_buf),   "%Y-%m-%d %H:%M:%S UTC", &tmv);
-        gmtime_r(&st, &tmv); strftime(fname, sizeof(fname), CHARGE_REPORT_DIR "/%Y%m%dT%H%M%SZ.html", &tmv);
-    } else {
-        snprintf(fname, sizeof(fname), CHARGE_REPORT_DIR "/charge-%d.html", m_charge_session.start_monotonic);
+        time_t st = (time_t) m_charge_session.start_utc, et = st + dur; struct tm tmv;
+        gmtime_r(&st, &tmv); strftime(sbuf, sizeof(sbuf), "%Y-%m-%d %H:%M:%S UTC", &tmv);
+        gmtime_r(&et, &tmv); strftime(ebuf, sizeof(ebuf), "%Y-%m-%d %H:%M:%S UTC", &tmv);
     }
+    int dh = dur/3600, dm = (dur%3600)/60, ds = dur%60;
 
-    const int dh = duration_s / 3600, dm = (duration_s % 3600) / 60, ds = duration_s % 60;
+    std::ofstream f(m_charge_session.base + ".html", std::ios::out | std::ios::trunc);
+    if (!f) { ESP_LOGE(TAG, "Charge report: cannot write %s.html", m_charge_session.base.c_str()); return; }
 
-    mkdir(CHARGE_REPORT_DIR, 0755);   // ensure the directory exists (ignores EEXIST)
-
-    std::ofstream f(fname, std::ios::out | std::ios::trunc);
-    if (!f) {
-        ESP_LOGE(TAG, "Charge report: cannot write %s", fname);
-        return;
-    }
-
-    char buf[64];
+    char b[96];
     f << "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n"
       << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-      << "<title>Charge report " << start_buf << "</title>\n"
-      << "<style>body{font:14px/1.4 system-ui,sans-serif;margin:1rem;max-width:42rem}"
-      << "h1{font-size:1.3rem}dl{display:grid;grid-template-columns:max-content 1fr;gap:.2rem .8rem}"
-      << "dt{font-weight:600}.note{color:#888;font-size:12px;margin-top:1.2rem}</style></head><body>\n"
-      << "<h1>Charging session report</h1>\n<dl>\n"
-      << "<dt>Plug-in</dt><dd>" << start_buf << "</dd>\n"
-      << "<dt>Unplug</dt><dd>"  << end_buf   << "</dd>\n";
+      << "<title>Charge report " << sbuf << "</title>\n"
+      << "<style>body{font:14px/1.4 system-ui,sans-serif;margin:1rem;max-width:46rem}"
+      << "h1{font-size:1.3rem}h2{font-size:1.05rem;margin-top:1.3rem}"
+      << "dl{display:grid;grid-template-columns:max-content 1fr;gap:.2rem .8rem}dt{font-weight:600}"
+      << "table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.15rem .4rem;font-size:13px}"
+      << ".est{color:#555}.note{color:#888;font-size:12px;margin-top:1.2rem}</style></head><body>\n"
+      << "<h1>Charging session report</h1>\n";
 
-    snprintf(buf, sizeof(buf), "%dh %02dm %02ds", dh, dm, ds);
-    f << "<dt>Duration</dt><dd>" << buf << "</dd>\n"
-      << "<dt>Type</dt><dd>" << (m_charge_session.is_dc ? "DC fast" : "AC") << "</dd>\n";
-
-    snprintf(buf, sizeof(buf), "%d%% &rarr; %d%% (+%d%%)", start_soc, end_soc,
-             (start_soc >= 0 ? end_soc - start_soc : 0));
-    f << "<dt>SOC</dt><dd>" << buf << "</dd>\n";
-
-    snprintf(buf, sizeof(buf), "%.2f kWh", energy_kwh);
-    f << "<dt>Energy delivered</dt><dd>" << buf << "</dd>\n";
-    snprintf(buf, sizeof(buf), "%.2f kWh", grid_kwh);
-    f << "<dt>Energy from grid</dt><dd>" << buf << "</dd>\n";
-    snprintf(buf, sizeof(buf), "%.1f kW peak / %.2f kW avg", m_charge_session.peak_power, avg_kw);
-    f << "<dt>Power</dt><dd>" << buf << "</dd>\n";
-
+    f << "<h2>Summary</h2>\n<dl>\n"
+      << "<dt>Plug-in</dt><dd>" << sbuf << "</dd>\n<dt>Unplug</dt><dd>" << ebuf << "</dd>\n";
+    snprintf(b, sizeof(b), "%dh %02dm %02ds", dh, dm, ds);
+    f << "<dt>Duration</dt><dd>" << b << "</dd>\n";
+    if (m_charge_session.has_loc) {
+        snprintf(b, sizeof(b), "%.5f, %.5f", m_charge_session.start_lat, m_charge_session.start_lon);
+        f << "<dt>Location</dt><dd>" << b
+          << " (<a target=\"_blank\" href=\"https://www.openstreetmap.org/?mlat="
+          << m_charge_session.start_lat << "&mlon=" << m_charge_session.start_lon
+          << "#map=17/" << m_charge_session.start_lat << "/" << m_charge_session.start_lon << "\">map</a>)</dd>\n";
+    }
+    if (m_charge_session.amb_seen) {
+        snprintf(b, sizeof(b), "%.0f&deg;C &rarr; %.0f&deg;C", m_charge_session.amb_min, m_charge_session.amb_max);
+        f << "<dt>Ambient</dt><dd>" << b << "</dd>\n";
+    }
+    f << "<dt>Type</dt><dd>" << (m_charge_session.is_dc ? "DC fast" : "AC") << "</dd>\n";
+    snprintf(b, sizeof(b), "%d%% &rarr; %d%% (+%d%%)", start_soc, end_soc, start_soc>=0?end_soc-start_soc:0);
+    f << "<dt>SOC</dt><dd>" << b << "</dd>\n";
+    snprintf(b, sizeof(b), "%.2f kWh delivered, %.2f kWh from grid", energy_kwh, grid_kwh);
+    f << "<dt>Energy</dt><dd>" << b << "</dd>\n";
+    snprintf(b, sizeof(b), "%.1f kW peak / %.2f kW avg", m_charge_session.peak_power, avg_kw);
+    f << "<dt>Power</dt><dd>" << b << "</dd>\n";
     if (m_charge_session.temp_seen) {
-        snprintf(buf, sizeof(buf), "%.0f&deg;C &rarr; %.0f&deg;C",
-                 m_charge_session.temp_min, m_charge_session.temp_max);
-        f << "<dt>Battery temp</dt><dd>" << buf << "</dd>\n";
+        snprintf(b, sizeof(b), "%.0f&deg;C &rarr; %.0f&deg;C", m_charge_session.temp_min, m_charge_session.temp_max);
+        f << "<dt>Battery temp</dt><dd>" << b << "</dd>\n";
+    }
+    {
+        const char* lbl = ChargeOutcomeLabel(outcome);
+        if (lbl[0]) f << "<dt>Outcome</dt><dd>" << lbl << "</dd>\n";
+        else { snprintf(b, sizeof(b), "0x%02X", outcome & 0xFF); f << "<dt>Outcome</dt><dd>" << b << " (raw)</dd>\n"; }
+    }
+    f << "</dl>\n";
+
+    f << "<h2>Charging power</h2>\n" << RenderPowerSvg();
+
+    f << "<h2>Session events</h2>\n<table><tr><th>Time</th><th>Event</th></tr>\n";
+    for (size_t i = 0; i < m_charge_session.events.size(); i++) {
+        int rel = m_charge_session.events[i].first - m_charge_session.start_monotonic; if (rel < 0) rel = 0;
+        snprintf(b, sizeof(b), "%d:%02d", rel/60, rel%60);
+        f << "<tr><td>" << b << "</td><td>" << m_charge_session.events[i].second << "</td></tr>\n";
+    }
+    f << "</table>\n";
+
+    f << "<h2 class=\"est\">Estimates</h2>\n<dl class=\"est\">\n";
+    if (grid_kwh > 0.01f) {
+        snprintf(b, sizeof(b), "%.0f%% (%.2f kWh loss)", energy_kwh/grid_kwh*100.0f, grid_kwh-energy_kwh);
+        f << "<dt>Charging efficiency</dt><dd>" << b << "</dd>\n";
+    }
+    if (start_soc >= 0 && end_soc > start_soc && m_charge_session.delivered_ah > 0.5f) {
+        float cap = m_charge_session.delivered_ah / ((end_soc - start_soc) / 100.0f);
+        snprintf(b, sizeof(b), "%.0f Ah implied (~%.0f%% of 201 Ah nominal)", cap, cap/201.1f*100.0f);
+        f << "<dt>Implied capacity</dt><dd>" << b << "</dd>\n";
+    }
+    f << "</dl>\n";
+
+    {
+        std::string csv = m_charge_session.base + ".csv";
+        std::string name = csv.substr(csv.find_last_of('/') + 1);
+        f << "<p><a href=\"/xte/report?file=" << name << "\">Download per-sample CSV</a></p>\n";
     }
 
-    snprintf(buf, sizeof(buf), "0x%02X", outcome & 0xFF);
-    f << "<dt>Outcome (0x1688)</dt><dd>" << buf << "</dd>\n</dl>\n";
-
-    f << "<p class=\"note\">Generated on-module by OVMS (Toyota e-TNGA). Single-phase summary; "
-         "average power is over the whole plug-in interval. Multi-phase, sleep-survival, "
-         "limiting-side attribution and the per-sample timeline are not yet included.</p>\n"
-         "</body></html>\n";
+    f << "<p class=\"note\">Generated on-module by OVMS (Toyota e-TNGA). Single-phase; avg power is over the "
+         "whole plug-in interval. Estimates are provisional.</p>\n</body></html>\n";
     f.close();
 
-    ESP_LOGI(TAG, "Charge report written: %s (%.2f kWh, %d%%->%d%%)", fname, energy_kwh, start_soc, end_soc);
-
+    ESP_LOGI(TAG, "Charge report written: %s.html (%.2f kWh, %d%%->%d%%)",
+        m_charge_session.base.c_str(), energy_kwh, start_soc, end_soc);
     PruneChargeReports(TAG);
 }
