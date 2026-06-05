@@ -1143,6 +1143,7 @@ void esp32wifi::EventWifiStaConnected(std::string event, void* data)
 #endif
 
   m_sta_connected = true;
+  m_sta_switching = false;                       // association resolved (incl. completed priority switch)
   m_previous_reason = 0;
   UpdateNetMetrics();
 
@@ -1458,6 +1459,10 @@ void esp32wifi::EventWifiScanDone(std::string event, void* data)
   wifi_ap_record_t* list = NULL;
   std::string ssid, password;
 
+  // consume the upgrade-scan tag exactly once per scan-done (bounds its lifetime):
+  bool upgrade_scan = m_sta_upgrade_scan;
+  m_sta_upgrade_scan = false;
+
   if (m_mode == ESP32WIFI_MODE_SCAN) return; // Let scan routine handle it
 
   res = esp_wifi_scan_get_ap_num(&apCount);
@@ -1482,6 +1487,7 @@ void esp32wifi::EventWifiScanDone(std::string event, void* data)
   if (res != ESP_OK)
     {
     ESP_LOGE(TAG, "EventWifiScanDone: can't get AP records, error=0x%x", res);
+    free(list);
     return;
     }
 
@@ -1572,6 +1578,60 @@ void esp32wifi::EventWifiScanDone(std::string event, void* data)
             else
               StartDhcpClient();
             }
+          }
+        }
+      }
+    }
+  else if (m_sta_connected && upgrade_scan && PriorityActive())
+    {
+    int rssi_floor = (int)m_good_dbm;            // wifi.sq.good, plain dBm (matches list[k].rssi)
+    int cur_prio = GetNetworkPriority((const char*)m_wifi_sta_cfg.sta.ssid);
+    int k = SelectPriorityAP(list, apCount, /*betterThan=*/cur_prio, /*rssiFloor=*/rssi_floor);
+    if (k >= 0)
+      {
+      std::string ssid = (const char*)list[k].ssid;
+      std::string password = MyConfig.GetParamValue("wifi.ssid", ssid);
+      ESP_LOGI(TAG, "ScanDone: upgrade to higher-priority ssid='%s' bssid='" MACSTR "' chan=%d rssi=%d",
+        ssid.c_str(), MAC2STR(list[k].bssid), list[k].primary, list[k].rssi);
+
+      OvmsRecMutexLock exclusive(&m_mutex);
+      // Guard the deliberate teardown so EventTimer1's reconnect block does not race:
+      m_sta_switching = true;
+      m_sta_switch_deadline = monotonictime + 15;
+      m_sta_reconnect = monotonictime + 15;      // armed fallback if the switch fails
+
+      esp_wifi_disconnect();
+
+      memset(&m_wifi_sta_cfg,0,sizeof(m_wifi_sta_cfg));
+      strcpy((char*)m_wifi_sta_cfg.sta.ssid, ssid.c_str());
+      strcpy((char*)m_wifi_sta_cfg.sta.password, password.c_str());
+      m_wifi_sta_cfg.sta.bssid_set = true;
+      memcpy(m_wifi_sta_cfg.sta.bssid, list[k].bssid, sizeof(m_wifi_sta_cfg.sta.bssid));
+      m_wifi_sta_cfg.sta.channel = list[k].primary;
+      m_wifi_sta_cfg.sta.scan_method = WIFI_FAST_SCAN;
+      m_wifi_sta_cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+
+      esp_err_t res = esp_wifi_set_config(WIFI_IF_STA, &m_wifi_sta_cfg);
+      if (res != ESP_OK)
+        {
+        ESP_LOGE(TAG, "ScanDone(upgrade): esp_wifi_set_config error %d", res - ESP_ERR_WIFI_BASE);
+        m_sta_switching = false;                 // let normal reconnect recover
+        }
+      else
+        {
+        res = esp_wifi_connect();
+        if (res != ESP_OK)
+          {
+          ESP_LOGE(TAG, "ScanDone(upgrade): esp_wifi_connect error %d", res - ESP_ERR_WIFI_BASE);
+          m_sta_switching = false;
+          }
+        else
+          {
+          std::string ipconfig = MyConfig.GetParamValue("wifi.ssid", ssid + ".ovms.staticip");
+          if (!ipconfig.empty())
+            SetSTAWifiIP();
+          else
+            StartDhcpClient();
           }
         }
       }
