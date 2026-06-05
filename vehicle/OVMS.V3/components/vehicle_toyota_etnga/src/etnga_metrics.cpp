@@ -48,6 +48,15 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     SetAwake(false);
     SetReadyStatus(false);
     SetChargingDoorStatus(false);
+    // v.c.charging is a persistent metric (restored from RTC across soft reboots) and is
+    // read by ABRP as the charging indicator. Boot is forced into the SLEEP poll state, so
+    // initialize it false to match — otherwise a reboot mid-charge leaves it stale-true (and
+    // a fresh power-up leaves it undefined) until the poller re-derives the real state.
+    SetChargingStatus(false);
+    // v.c.mode pairs with the above: the poller only sets it ("standard" AC / "performance"
+    // DC, the ABRP is_dcfc indicator) while charging and clears it to "" on session end, so
+    // the not-charging boot value is empty.
+    StandardMetrics.ms_v_charge_mode->SetValue("");
 
     // Set poll state transition variables to shorter autostale than default
     // in case their ECUs go to sleep before the 'false' poll
