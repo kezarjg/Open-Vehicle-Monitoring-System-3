@@ -322,6 +322,17 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
         m_charge_session.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
         m_charge_session.start_utc = StandardMetrics.ms_m_timeutc->AsInt();
         m_charge_session.start_soc = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
+        if (StandardMetrics.ms_v_pos_gpslock->AsBool()) {
+            m_charge_session.has_loc = true;
+            m_charge_session.start_lat = StandardMetrics.ms_v_pos_latitude->AsFloat();
+            m_charge_session.start_lon = StandardMetrics.ms_v_pos_longitude->AsFloat();
+        }
+        float amb = StandardMetrics.ms_v_env_temp->AsFloat();
+        m_charge_session.amb_seen = true;
+        m_charge_session.amb_min = m_charge_session.amb_max = amb;
+        m_charge_session.svg_interval_s = 20;
+        m_charge_session.last_sample_monotonic = 0;
+        m_charge_session.last_svg_monotonic = 0;
         ESP_LOGI(TAG, "Charge session opened (SOC %d%%)", m_charge_session.start_soc);
     }
     RequestVIN();
