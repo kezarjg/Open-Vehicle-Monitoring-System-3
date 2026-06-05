@@ -17,6 +17,16 @@ Open Vehicle Monitor System v3 - Change log
     Within `Ticker3600`, a routine removes all timestamps older than 24 hours and updates `xsq.12v.trickle.count` by -1.
     New metric:
       xsq.12v.trickle.count             -- Count of 12V trickle-charge cycles in 24h
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): added web UI pages in the Vehicle menu —
+    BMS cell monitor, a live charging-metrics dashboard, and a configuration page that exposes
+    the TPMS alert thresholds (previously settable only via the `config` command).
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): populate more standard metrics that were
+    previously unset — climate flags v.e.cooling / v.e.heating, fan speed v.e.cabinfan,
+    consumption v.b.consumption, and the trip/lifetime accumulators v.b.coulomb.used/.recd
+    (+ .total), v.b.energy.used.total / .recd.total, and v.c.kwh.grid.total. The driving HVAC
+    poll (0x106E) now runs at 1 Hz so the cabin-energy integral matches the battery integrator.
+    New metric:
+      xte.v.e.hvac.kwh.drive            -- Cabin/HVAC energy used during the current trip (kWh)
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): at the end of each charging session the module
     now writes a self-contained HTML charge report to /store/charge-reports/<timestamp>.html
     (SOC delta, energy delivered + from grid, peak/avg power, battery-temp range, AC/DC, outcome).

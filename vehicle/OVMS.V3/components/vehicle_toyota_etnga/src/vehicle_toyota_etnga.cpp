@@ -45,10 +45,12 @@ static const OvmsPoller::poll_pid_t obdii_polls[] = {
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_VEHICLE_SPEED,             { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1F0D speed: DRIVING only
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_SHIFT_POSITION,            { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1061 gear: DRIVING only
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_ODOMETER,                  { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1FA6 odometer: DRIVING only
-  { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_AC_CONSUMPTION,            { 0,  0, 5,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x106E HVAC power (hybrid control): DRIVING @5s
+  { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_AC_CONSUMPTION,            { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x106E HVAC power (hybrid control): DRIVING @1s (matches battery V/I for the cabin-energy integrator)
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_AMBIENT_TEMPERATURE,       { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1002 ambient temp: DRIVING only
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_CABIN_TEMPERATURE,         { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1001 cabin temp: DRIVING only
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_HVAC_SETPOINT,             { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1036 HVAC setpoint: DRIVING only
+  { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_HEATER_POWER,              { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1086 HV heater power: DRIVING only (>0 => v.e.heating)
+  { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_BLOWER_LEVEL,              { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x2801 blower level 1-7: DRIVING only (=> v.e.cabinfan %)
 
     // Charging polls — state-machine DIDs
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_AMBIENT_TEMPERATURE_EV,   { 0,  0, 0,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1F46: not polled by sim in any charge state; 0 until confirmed useful
@@ -116,20 +118,32 @@ OvmsVehicleToyotaETNGA::OvmsVehicleToyotaETNGA()
     // Set polling PID list
     PollSetPidList(m_can2, obdii_polls);
     PollSetThrottling(0);
+
+#ifdef CONFIG_OVMS_COMP_WEBSERVER
+    WebInit();
+#endif
 }
 
 OvmsVehicleToyotaETNGA::~OvmsVehicleToyotaETNGA()
 {
     ESP_LOGI(TAG, "Shutdown Toyota eTNGA platform module");
+#ifdef CONFIG_OVMS_COMP_WEBSERVER
+    WebDeInit();
+#endif
 }
 
 void OvmsVehicleToyotaETNGA::NotifyVehicleOn()
 {
     ESP_LOGV(TAG, "Notification of vehicle on - Reset energy metrics for trip reporting");
-    // Vehicle started. Reset the trip statistics
+    // Vehicle started. Reset the trip statistics (per-trip metrics only; *_total are lifetime)
     StandardMetrics.ms_v_bat_energy_used->SetValue(0);
     StandardMetrics.ms_v_bat_energy_recd->SetValue(0);
+    StandardMetrics.ms_v_bat_coulomb_used->SetValue(0);
+    StandardMetrics.ms_v_bat_coulomb_recd->SetValue(0);
     lastBatteryEnergyLogTime = 0;
+
+    m_v_env_hvac_kwh_drive->SetValue(0);
+    lastHvacDriveEnergyLogTime = 0;
 }
 
 void OvmsVehicleToyotaETNGA::NotifyChargeStart()
@@ -171,6 +185,16 @@ void OvmsVehicleToyotaETNGA::Ticker1(uint32_t ticker)
 
     //ESP_LOGI(TAG, "Entering Ticker1: %d", ticker);
     ResetStaleMetrics();
+
+    // Trip-average consumption (Wh/km) while driving — derived from net trip energy / distance.
+    if (static_cast<PollState>(m_poll_state) == PollState::DRIVING) {
+        float trip = StandardMetrics.ms_v_pos_trip->AsFloat();
+        if (trip > 0.1f) {
+            float net_wh = (StandardMetrics.ms_v_bat_energy_used->AsFloat()
+                          - StandardMetrics.ms_v_bat_energy_recd->AsFloat()) * 1000.0f;
+            StandardMetrics.ms_v_bat_consumption->SetValue(net_wh / trip);
+        }
+    }
 
     switch (static_cast<PollState>(m_poll_state)) {
         case PollState::SLEEP:
