@@ -1356,6 +1356,57 @@ void esp32wifi::StartConnect()
   m_sta_reconnect = monotonictime + 10;
   }
 
+bool esp32wifi::PriorityActive()
+  {
+  // Feature runs only in scanning mode (m_sta_ssid empty) on CLIENT/APCLIENT:
+  return m_priority_enable
+      && !m_priority_list.empty()
+      && (m_mode == ESP32WIFI_MODE_CLIENT || m_mode == ESP32WIFI_MODE_APCLIENT)
+      && m_sta_ssid.empty();
+  }
+
+int esp32wifi::GetNetworkPriority(const char* ssid)
+  {
+  if (ssid == NULL || ssid[0] == 0)
+    return INT_MAX;
+  for (size_t i = 0; i < m_priority_list.size(); i++)
+    if (m_priority_list[i] == ssid)
+      return (int)i;
+  return INT_MAX;
+  }
+
+// Best AP in the scan list that is (a) in the priority list AND (b) has a wifi.ssid
+// password, subject to priority < betterThan and rssi >= rssiFloor.
+// Tie-break by RSSI (rssi is plain dBm from wifi_ap_record_t). Returns index or -1.
+int esp32wifi::SelectPriorityAP(wifi_ap_record_t* list, int count, int betterThan, int rssiFloor)
+  {
+  int best = -1;
+  int best_prio = INT_MAX;
+  int best_rssi = INT_MIN;
+  for (int k = 0; k < count; k++)
+    {
+    int prio = GetNetworkPriority((const char*)list[k].ssid);
+    if (prio == INT_MAX || prio >= betterThan)
+      continue;
+    if (list[k].rssi < rssiFloor)
+      continue;
+    if (MyConfig.GetParamValue("wifi.ssid", (const char*)list[k].ssid).empty())
+      continue;                                  // no stored credential -> not connectable
+    if (prio < best_prio || (prio == best_prio && list[k].rssi > best_rssi))
+      {
+      best = k;
+      best_prio = prio;
+      best_rssi = list[k].rssi;
+      }
+    }
+  return best;
+  }
+
+bool esp32wifi::CurrentIsTopPriority()
+  {
+  return GetNetworkPriority((const char*)m_wifi_sta_cfg.sta.ssid) == 0;
+  }
+
 void esp32wifi::EventWifiScanDone(std::string event, void* data)
   {
   uint16_t apCount = 0;
