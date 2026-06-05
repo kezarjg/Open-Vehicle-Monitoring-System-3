@@ -1,6 +1,11 @@
 Open Vehicle Monitor System v3 - Change log
 
 ????-??-?? ???  ???????  OTA release
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): charge report v2 — each session now writes an
+    HTML report (location, ambient, human-readable outcome, inline power-vs-time chart, event log,
+    efficiency/implied-capacity estimates) plus a fine-grained per-sample CSV (delivered/offered/
+    allowed power, pack + battery-temp over time) to /sd/charge-reports/ (fallback /store). Also
+    fixes peak charging power on DC (was sourced from the AC-only grid-input poll).
 - hw3.1: Fix random crash (abort in esp_sha_read_digest_state) during TLS handshakes by disabling
     mbedTLS hardware SHA acceleration (CONFIG_MBEDTLS_HARDWARE_SHA). The shared ESP32 SHA engine
     could return an all-zero digest state when mbedtls_sha256_clone() snapshotted it mid-handshake,

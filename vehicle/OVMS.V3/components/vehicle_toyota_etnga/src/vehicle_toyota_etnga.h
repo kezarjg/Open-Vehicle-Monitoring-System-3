@@ -12,6 +12,8 @@
 #define __VEHICLE_TOYOTA_ETNGA_H__
 
 #include <string>
+#include <vector>
+#include <utility>
 #include "vehicle.h"
 #ifdef CONFIG_OVMS_COMP_WEBSERVER
 #include "ovms_webserver.h"
@@ -74,12 +76,32 @@ protected:
         bool  in_session = false;
         int   start_monotonic = 0;
         int   start_soc = -1;
-        int   start_utc = 0;          // wallclock (epoch s) at session open — report timestamp/filename
-        bool  is_dc = false;          // last observed charge phase type (DC fast vs AC)
-        float peak_power = 0.0f;      // max charge power seen (kW)
-        bool  temp_seen = false;      // whether temp_min/max have been initialised
-        float temp_min = 0.0f;        // battery temperature range over the session (degC)
+        int   start_utc = 0;
+        bool  is_dc = false;
+        float peak_power = 0.0f;
+        bool  temp_seen = false;
+        float temp_min = 0.0f;
         float temp_max = 0.0f;
+        // v2: location + ambient captured at open
+        bool  has_loc = false;
+        float start_lat = 0.0f;
+        float start_lon = 0.0f;
+        bool  amb_seen = false;
+        float amb_min = 0.0f;
+        float amb_max = 0.0f;
+        // v2: charge-side coulomb counter (Ah) for the implied-capacity estimate
+        float delivered_ah = 0.0f;
+        int   last_sample_monotonic = 0;   // dt for delivered_ah + CSV row cadence
+        // v2: event log (monotonic seconds, static label string)
+        std::vector<std::pair<int,const char*>> events;
+        // v2: downsampled chart buffer
+        struct Sample { int t_s; float kw; int soc; };
+        std::vector<Sample> svg;
+        int   svg_interval_s = 20;
+        int   last_svg_monotonic = 0;
+        // v2: file basename (resolved "<dir>/<timestamp>", no extension) + CSV state
+        std::string base;
+        bool  csv_started = false;
     };
     ChargeSessionState m_charge_session;
 
@@ -103,6 +125,7 @@ protected:
     OvmsMetricInt*   m_v_charge_out_tgt;   // 0x161E b3-4 target-from-charger (raw, scale deferred)
     OvmsMetricInt*   m_v_charge_ac_usable; // 0x1665 useable power (raw, scale deferred)
     OvmsMetricBool*  m_v_charge_myroom;   // 0x1692 byte 2 (idx 1) bit 0 = My Room active
+    OvmsMetricFloat* m_v_charge_grid_power;  // 0x161D AC charger/grid input power (kW) — live, for CSV/efficiency
     OvmsMetricFloat* m_v_env_hvac_power;  // 0x106E HVAC/cabin power draw (kW): OBC view (0x745) while charging, hybrid-control view (0x7D2) while driving
     OvmsMetricFloat* m_v_env_hvac_kwh;    // My-Room cabin energy (kWh): time-integral of m_v_env_hvac_power over the My-Room-active interval
     OvmsMetricFloat* m_v_env_hvac_kwh_drive;  // Driving cabin/HVAC energy (kWh): per-trip time-integral of m_v_env_hvac_power while DRIVING (reset in NotifyVehicleOn)
@@ -135,7 +158,12 @@ private:
 
     // Charge session report (etnga_charge_report.cpp)
     void UpdateChargeSessionStats();   // live aggregation while charging (peak power, temp range, type)
+    std::string RenderPowerSvg();      // inline SVG power(+SOC)-vs-time chart from m_charge_session.svg
     void GenerateChargeReport();       // write the session-end HTML report to /store/charge-reports/
+    void LogChargeEvent(const char* label);            // append a timestamped event
+    void AppendChargeCsvRow();                          // stream one CSV row (opens+header on first call)
+    std::string ChargeReportDir();                      // "/sd/charge-reports" if SD mounted else "/store/..."
+    static const char* ChargeOutcomeLabel(int code);    // 0x1688 enum -> human text
 
     // Incoming message handling functions
     void IncomingAirConditionerSystem(uint16_t pid);

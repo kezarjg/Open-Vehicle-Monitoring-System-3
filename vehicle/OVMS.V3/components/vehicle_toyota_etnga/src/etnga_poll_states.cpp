@@ -8,6 +8,8 @@
    Licensed under the MIT License. See the LICENSE file for details.
 */
 
+#include <time.h>
+#include <sys/stat.h>
 #include "ovms_log.h"
 #include "vehicle_toyota_etnga.h"
 
@@ -273,6 +275,7 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
     if (oldState == PollState::CHARGE_HANDSHAKE) {
         m_armed_for_charge = true;
         m_cable_watch_start = monotonic;
+        LogChargeEvent("Unplug bounce — re-armed (DCFC retry)");
         ESP_LOGD(TAG, "Re-armed after HANDSHAKE→AWAKE bounce (DCFC retry)");
     }
     // For all other transitions into AWAKE (SLEEP→AWAKE, DRIVING→AWAKE),
@@ -286,6 +289,7 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
         StandardMetrics.ms_v_charge_mode->SetValue("");   // clear AC/DC indicator on session end
         if (m_charge_session.in_session) {
             ESP_LOGI(TAG, "Charge session closed");
+            LogChargeEvent("Unplugged");
             GenerateChargeReport();   // write the session-end HTML report (no-op if no energy delivered)
         }
         m_charge_session = ChargeSessionState{};   // reset (clears in_session)
@@ -294,6 +298,7 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
         StandardMetrics.ms_v_charge_mode->SetValue("");
         if (m_charge_session.in_session) {
             ESP_LOGI(TAG, "Charge session closed");
+            LogChargeEvent("Unplugged");
             GenerateChargeReport();   // write the session-end HTML report (no-op if no energy delivered)
         }
         m_charge_session = ChargeSessionState{};   // reset (clears in_session)
@@ -322,6 +327,31 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
         m_charge_session.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
         m_charge_session.start_utc = StandardMetrics.ms_m_timeutc->AsInt();
         m_charge_session.start_soc = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
+        if (StandardMetrics.ms_v_pos_gpslock->AsBool()) {
+            m_charge_session.has_loc = true;
+            m_charge_session.start_lat = StandardMetrics.ms_v_pos_latitude->AsFloat();
+            m_charge_session.start_lon = StandardMetrics.ms_v_pos_longitude->AsFloat();
+        }
+        float amb = StandardMetrics.ms_v_env_temp->AsFloat();
+        m_charge_session.amb_seen = true;
+        m_charge_session.amb_min = m_charge_session.amb_max = amb;
+        m_charge_session.svg_interval_s = 20;
+        m_charge_session.last_sample_monotonic = 0;
+        m_charge_session.last_svg_monotonic = 0;
+        // basename = "<dir>/<UTC timestamp>" (no extension); files are <base>.html / <base>.csv
+        {
+            char ts[40];
+            int utc = m_charge_session.start_utc;
+            if (utc > 1000000000) {
+                time_t st = (time_t) utc; struct tm tmv; gmtime_r(&st, &tmv);
+                strftime(ts, sizeof(ts), "%Y%m%dT%H%M%SZ", &tmv);
+            } else {
+                snprintf(ts, sizeof(ts), "charge-%d", m_charge_session.start_monotonic);
+            }
+            mkdir(ChargeReportDir().c_str(), 0755);
+            m_charge_session.base = ChargeReportDir() + "/" + ts;
+        }
+        LogChargeEvent("Plugged in — handshake");
         ESP_LOGI(TAG, "Charge session opened (SOC %d%%)", m_charge_session.start_soc);
     }
     RequestVIN();
@@ -333,6 +363,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeWaitState()
     SetPollState(PollState::CHARGE_WAIT);
     SetChargingStatus(false);
     SetChargeState(PollState::CHARGE_WAIT);
+    LogChargeEvent("Charging paused / phase ended");
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
@@ -342,6 +373,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
     SetChargingStatus(true);
     SetChargeState(PollState::CHARGE_AC);
     StandardMetrics.ms_v_charge_mode->SetValue("standard");      // AC charging (OVMS-standard v.c.mode)
+    LogChargeEvent("AC charging started");
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
@@ -351,4 +383,5 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
     SetChargingStatus(true);
     SetChargeState(PollState::CHARGE_DC);
     StandardMetrics.ms_v_charge_mode->SetValue("performance");   // DC fast charge -> ABRP is_dcfc (v.c.mode == "performance")
+    LogChargeEvent("DC charging started");
 }

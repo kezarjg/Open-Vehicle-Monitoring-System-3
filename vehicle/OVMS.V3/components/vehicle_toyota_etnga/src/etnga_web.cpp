@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <dirent.h>
+#include <sys/stat.h>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -27,6 +28,16 @@
 #include "vehicle_toyota_etnga.h"
 
 #define CHARGE_REPORT_DIR "/store/charge-reports"
+
+// Resolve the active report directory: SD card if mounted, else internal flash.
+// Mirrors OvmsVehicleToyotaETNGA::ChargeReportDir() (kept local to avoid a non-static call from these static handlers).
+static std::string etnga_report_dir()
+{
+    struct stat st;
+    if (stat("/sd", &st) == 0 && S_ISDIR(st.st_mode))
+        return "/sd/charge-reports";
+    return "/store/charge-reports";
+}
 
 // WebInit: register the e-TNGA pages in the vehicle menu.
 // Shared by all e-TNGA vehicles (Subaru Solterra, Toyota bZ4X).
@@ -185,7 +196,7 @@ void OvmsVehicleToyotaETNGA::WebChargeReports(PageEntry_t& p, PageContext_t& c)
     c.panel_start("primary", "Charge session reports");
 
     std::vector<std::string> files;
-    DIR* dir = opendir(CHARGE_REPORT_DIR);
+    DIR* dir = opendir(etnga_report_dir().c_str());
     if (dir) {
         struct dirent* ent;
         while ((ent = readdir(dir)) != NULL) {
@@ -202,8 +213,11 @@ void OvmsVehicleToyotaETNGA::WebChargeReports(PageEntry_t& p, PageContext_t& c)
         std::sort(files.rbegin(), files.rend());   // newest first (timestamp filenames sort chronologically)
         c.print("<ul class=\"list-unstyled\">");
         for (size_t i = 0; i < files.size(); i++) {
-            std::string enc = c.encode_html(files[i]);
-            c.printf("<li><a href=\"/xte/report?file=%s\" target=\"_blank\">%s</a></li>", enc.c_str(), enc.c_str());
+            std::string html = c.encode_html(files[i]);
+            std::string stem = files[i].substr(0, files[i].size() - 5);   // strip ".html"
+            std::string csv  = c.encode_html(stem + ".csv");
+            c.printf("<li><a href=\"/xte/report?file=%s\" target=\"_blank\">%s</a> "
+                     "&nbsp;<a href=\"/xte/report?file=%s\">csv</a></li>", html.c_str(), html.c_str(), csv.c_str());
         }
         c.print("</ul>");
     }
@@ -212,15 +226,17 @@ void OvmsVehicleToyotaETNGA::WebChargeReports(PageEntry_t& p, PageContext_t& c)
     c.done();
 }
 
-// WebChargeReport: stream one saved report as raw HTML (no page chrome), via ?file=<name>.
+// WebChargeReport: stream one saved report as raw HTML or CSV download, via ?file=<name>.
 void OvmsVehicleToyotaETNGA::WebChargeReport(PageEntry_t& p, PageContext_t& c)
 {
     std::string file = c.getvar("file");
 
-    // Validate: a .html basename only — reject path traversal (no '/', no "..").
-    bool valid = (file.size() > 5 && file.compare(file.size() - 5, 5, ".html") == 0
-                  && file.find('/') == std::string::npos
-                  && file.find("..") == std::string::npos);
+    // Validate: a .html or .csv basename only — reject path traversal.
+    bool is_html = (file.size() > 5 && file.compare(file.size()-5, 5, ".html") == 0);
+    bool is_csv  = (file.size() > 4 && file.compare(file.size()-4, 4, ".csv")  == 0);
+    bool valid = (is_html || is_csv)
+                 && file.find('/') == std::string::npos
+                 && file.find("..") == std::string::npos;
     if (!valid) {
         c.head(400, "Content-Type: text/plain; charset=utf-8");
         c.print("Invalid report name\n");
@@ -229,7 +245,7 @@ void OvmsVehicleToyotaETNGA::WebChargeReport(PageEntry_t& p, PageContext_t& c)
     }
 
     extram::string content;
-    std::string path = std::string(CHARGE_REPORT_DIR "/") + file;
+    std::string path = etnga_report_dir() + "/" + file;
     if (load_file(path, content) != 0) {
         c.head(404, "Content-Type: text/plain; charset=utf-8");
         c.print("Report not found\n");
@@ -237,8 +253,10 @@ void OvmsVehicleToyotaETNGA::WebChargeReport(PageEntry_t& p, PageContext_t& c)
         return;
     }
 
-    // Stream the stored document verbatim (it is already a complete, self-contained HTML page).
-    c.head(200, "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-cache");
+    if (is_csv)
+        c.head(200, "Content-Type: text/csv; charset=utf-8\r\nContent-Disposition: attachment");
+    else
+        c.head(200, "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-cache");
     c.print(content);
     c.done();
 }
