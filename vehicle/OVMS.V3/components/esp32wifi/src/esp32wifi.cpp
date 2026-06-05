@@ -1665,6 +1665,19 @@ void esp32wifi::OutputStatus(int verbosity, OvmsWriter* writer)
       m_wifi_sta_cfg.sta.ssid, (float)m_sta_rssi/10, (m_sta_ssid.empty()) ? "scanning" : "fixed", MAC2STR(m_mac_sta),
       IP2STR(&m_ip_info_sta.ip), IP2STR(&m_ip_info_sta.netmask), IP2STR(&m_ip_info_sta.gw),
       MAC2STR(m_sta_ap_info.bssid));
+    if (PriorityActive())
+      {
+      int cur = GetNetworkPriority((const char*)m_wifi_sta_cfg.sta.ssid);
+      if (cur == INT_MAX)
+        writer->printf("  Priority: unlisted/%d - upgrade-scanning every %ds\n",
+          (int)m_priority_list.size(), m_priority_interval);
+      else if (cur == 0)
+        writer->printf("  Priority: rank 1/%d (top) - not scanning\n",
+          (int)m_priority_list.size());
+      else
+        writer->printf("  Priority: rank %d/%d - upgrade-scanning every %ds\n",
+          cur+1, (int)m_priority_list.size(), m_priority_interval);
+      }
     }
 
   if (m_mode == ESP32WIFI_MODE_AP || m_mode == ESP32WIFI_MODE_APCLIENT)
