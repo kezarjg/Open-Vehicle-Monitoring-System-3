@@ -1320,11 +1320,28 @@ void esp32wifi::EventTimer1(std::string event, void* data)
       }
     }
 
-  // reconnect?
+  // switch-in-progress failsafe: clear the guard if a deliberate switch stalls
+  if (m_sta_switching && monotonictime >= m_sta_switch_deadline)
+    {
+    ESP_LOGD(TAG, "priority switch timed out; clearing guard");
+    m_sta_switching = false;
+    }
+
+  // reconnect? (suppressed while a deliberate switch is in progress)
   if ((m_mode == ESP32WIFI_MODE_CLIENT || m_mode == ESP32WIFI_MODE_APCLIENT)
-      && !m_sta_connected && m_sta_reconnect && monotonictime >= m_sta_reconnect)
+      && !m_sta_connected && !m_sta_switching && m_sta_reconnect && monotonictime >= m_sta_reconnect)
     {
     StartConnect();
+    }
+
+  // priority upgrade scan? (connected to a non-top network, feature active)
+  if (PriorityActive() && m_sta_connected && !m_sta_switching
+      && m_mode != ESP32WIFI_MODE_SCAN
+      && !CurrentIsTopPriority()
+      && monotonictime >= m_upgrade_scan_next)
+    {
+    m_upgrade_scan_next = monotonictime + m_priority_interval;
+    StartUpgradeScan();
     }
   }
 
@@ -1354,6 +1371,33 @@ void esp32wifi::StartConnect()
 
   // next regular scan in 10 seconds:
   m_sta_reconnect = monotonictime + 10;
+  }
+
+void esp32wifi::StartUpgradeScan()
+  {
+  // Background scan while still connected, to look for a higher-priority network.
+  // Unlike StartConnect(), this does NOT touch m_sta_reconnect and tags the scan
+  // so EventWifiScanDone routes it to the upgrade-evaluation branch.
+  OvmsRecMutexLock exclusive(&m_mutex);
+  esp_wifi_scan_stop();
+
+  wifi_scan_config_t scanConf;
+  memset(&scanConf,0,sizeof(scanConf));
+  scanConf.ssid = NULL;
+  scanConf.bssid = NULL;
+  scanConf.channel = 0;
+  scanConf.show_hidden = true;
+  scanConf.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+  scanConf.scan_time.active = GetScanTime();
+  m_sta_upgrade_scan = true;
+  esp_err_t res = esp_wifi_scan_start(&scanConf, false);
+  if (res != ESP_OK)
+    {
+    m_sta_upgrade_scan = false;
+    ESP_LOGE(TAG, "StartUpgradeScan: error 0x%x starting scan", res);
+    }
+  else
+    ESP_LOGV(TAG, "StartUpgradeScan: scan started");
   }
 
 bool esp32wifi::PriorityActive()
