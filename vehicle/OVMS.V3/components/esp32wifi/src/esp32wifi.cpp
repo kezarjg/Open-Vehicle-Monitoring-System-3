@@ -1445,28 +1445,39 @@ void esp32wifi::EventWifiScanDone(std::string event, void* data)
     {
     int ap_connect = -1;
 
-    // check scan results for usable networks:
-    for (int k=0; k<apCount; k++)
+    if (PriorityActive())
       {
-      ESP_LOGV(TAG, "ScanDone: #%02d ssid='%s' bssid='" MACSTR "' chan=%d rssi=%d",
-        k+1, (const char*)list[k].ssid, MAC2STR(list[k].bssid), list[k].primary, list[k].rssi);
+      // priority mode: best-ranked known network among all visible, no RSSI gate
+      // (disconnected: any usable known network beats nothing)
+      ap_connect = SelectPriorityAP(list, apCount, /*betterThan=*/INT_MAX, /*rssiFloor=*/INT_MIN);
       if (ap_connect >= 0)
-        continue;
-      if (m_sta_ssid.empty())
+        password = MyConfig.GetParamValue("wifi.ssid", (const char*)list[ap_connect].ssid);
+      }
+    else
+      {
+      // check scan results for usable networks (legacy: first known in scan order):
+      for (int k=0; k<apCount; k++)
         {
-        // scanning mode:
-        password = MyConfig.GetParamValue("wifi.ssid", (const char*)list[k].ssid);
-        if (!password.empty())
-          ap_connect = k;
-        }
-      else
-        {
-        // fixed mode:
-        if ((m_sta_bssid_set && memcmp(m_sta_bssid, list[k].bssid, 6) == 0)
-            || (!m_sta_bssid_set && m_sta_ssid == (const char*)list[k].ssid))
+        ESP_LOGV(TAG, "ScanDone: #%02d ssid='%s' bssid='" MACSTR "' chan=%d rssi=%d",
+          k+1, (const char*)list[k].ssid, MAC2STR(list[k].bssid), list[k].primary, list[k].rssi);
+        if (ap_connect >= 0)
+          continue;
+        if (m_sta_ssid.empty())
           {
-          password = m_sta_password;
-          ap_connect = k;
+          // scanning mode:
+          password = MyConfig.GetParamValue("wifi.ssid", (const char*)list[k].ssid);
+          if (!password.empty())
+            ap_connect = k;
+          }
+        else
+          {
+          // fixed mode:
+          if ((m_sta_bssid_set && memcmp(m_sta_bssid, list[k].bssid, 6) == 0)
+              || (!m_sta_bssid_set && m_sta_ssid == (const char*)list[k].ssid))
+            {
+            password = m_sta_password;
+            ap_connect = k;
+            }
           }
         }
       }
