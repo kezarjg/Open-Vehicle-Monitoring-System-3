@@ -84,7 +84,8 @@ protected:
     OvmsMetricInt*   m_v_charge_out_tgt;   // 0x161E b3-4 target-from-charger (raw, scale deferred)
     OvmsMetricInt*   m_v_charge_ac_usable; // 0x1665 useable power (raw, scale deferred)
     OvmsMetricBool*  m_v_charge_myroom;   // 0x1692 byte 2 (idx 1) bit 0 = My Room active
-    OvmsMetricFloat* m_v_charge_acpwr;    // 0x106E A/C consumption power (kW)
+    OvmsMetricFloat* m_v_env_hvac_power;  // 0x106E HVAC/cabin power draw (kW): OBC view (0x745) while charging, hybrid-control view (0x7D2) while driving
+    OvmsMetricFloat* m_v_env_hvac_kwh;    // My-Room cabin energy (kWh): time-integral of m_v_env_hvac_power over the My-Room-active interval
     OvmsMetricInt*   m_v_charge_outcome;  // 0x1688 charging history / outcome enum
     OvmsMetricInt*   m_v_charge_stopreq;  // 0x1667 charge seq stop request (enum, partial)
     OvmsMetricVector<float>* m_v_bat_cap_full;  // 0x1D3E 8x u16 x0.01 Ah — per-module full-charge capacity (data collection)
@@ -106,6 +107,7 @@ private:
     uint32_t lastBatteryEnergyLogTime;
     uint32_t lastChargerEnergyLogTime;
     uint32_t lastGridEnergyLogTime;
+    uint32_t lastHvacEnergyLogTime;
 
     void InitializeMetrics();  // Initializes the metrics specific to this vehicle module
     void ResetStaleMetrics();  // Checks if state transition metrics are stale (and resets them)
@@ -213,7 +215,7 @@ private:
     void SetChargerOutputTargetRaw(int v);
     void SetAcUsableRaw(int v);
     void SetMyRoom(bool active);
-    void SetAcConsumption(float kw);
+    void SetHvacPower(float kw);
     void SetChargeOutcome(int v);
     void SetChargeStopReq(int v);
 

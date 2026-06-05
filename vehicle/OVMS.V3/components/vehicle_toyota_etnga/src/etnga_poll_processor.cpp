@@ -140,6 +140,13 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
             break;
         }
 
+        case PID_AC_CONSUMPTION: {
+            // HVAC power while driving — 0x106E from the hybrid control ECU (0x7D2); the OBC
+            // (0x745) only answers while charging. Same decode, routes to the unified metric.
+            SetHvacPower(CalculateAcConsumption(m_rxbuf));
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:
@@ -274,7 +281,7 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
             break;
         }
         case PID_AC_CONSUMPTION: {
-            SetAcConsumption(CalculateAcConsumption(m_rxbuf));
+            SetHvacPower(CalculateAcConsumption(m_rxbuf));
             break;
         }
         case PID_CHARGE_HISTORY: {

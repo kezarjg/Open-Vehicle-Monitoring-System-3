@@ -30,7 +30,8 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     m_v_charge_out_tgt   = MyMetrics.InitInt("xte.v.c.chgotgt", SM_STALE_MID);
     m_v_charge_ac_usable = MyMetrics.InitInt("xte.v.c.acusbl", SM_STALE_MID);
     m_v_charge_myroom  = MyMetrics.InitBool("xte.v.c.myroom", SM_STALE_MID);
-    m_v_charge_acpwr   = MyMetrics.InitFloat("xte.v.c.acpwr", SM_STALE_MID, 0.0f, kW);
+    m_v_env_hvac_power = MyMetrics.InitFloat("xte.v.e.hvac.power", SM_STALE_MID, 0.0f, kW);
+    m_v_env_hvac_kwh   = MyMetrics.InitFloat("xte.v.e.hvac.kwh",   SM_STALE_MID, 0.0f, kWh);
     m_v_charge_outcome = MyMetrics.InitInt("xte.v.c.outcome", SM_STALE_MID);
     m_v_charge_stopreq = MyMetrics.InitInt("xte.v.c.stopreq", SM_STALE_MID);
     m_v_bat_cap_full = MyMetrics.InitVector<float>("xte.v.b.cap.full", SM_STALE_HIGH, 0, AmpHours);  // 0x1D3E 8x per-module full-charge capacity (data collection)
@@ -272,7 +273,25 @@ float OvmsVehicleToyotaETNGA::CalculateAcConsumption(const std::string& data)
     // 1-indexed = offset 0.) Host charge_csv_writer.py / analyze-myroom decoders agree (b[0]).
     return static_cast<float>(GetRxBByte(data, 0)) * 0.05f;
 }
-void OvmsVehicleToyotaETNGA::SetAcConsumption(float kw) { m_v_charge_acpwr->SetValue(kw); }
+void OvmsVehicleToyotaETNGA::SetHvacPower(float kw)
+{
+    m_v_env_hvac_power->SetValue(kw);
+
+    // My-Room cabin energy: 0x106E is a dedicated cabin-power channel, so cabin energy is its
+    // direct time-integral over the My-Room-active interval — valid for both AC and DC (the old
+    // 0x161D charger-input delta read 0 during DC). Integrate ONLY while My Room is active; this
+    // same power metric is also polled while DRIVING (from 0x7D2), which must not feed cabin energy.
+    if (m_v_charge_myroom->AsBool()) {
+        uint32_t now = esp_log_timestamp();
+        float hours = 1.0f / 3600.0f;   // default 1 s for the first sample of the interval
+        if (lastHvacEnergyLogTime != 0)
+            hours = static_cast<float>((now - lastHvacEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
+        m_v_env_hvac_kwh->SetValue(m_v_env_hvac_kwh->AsFloat() + kw * hours);
+        lastHvacEnergyLogTime = now;
+    } else {
+        lastHvacEnergyLogTime = 0;   // reset so the next My-Room interval starts fresh
+    }
+}
 
 int OvmsVehicleToyotaETNGA::CalculateChargeOutcome(const std::string& data)  { return GetRxBByte(data, 0); }  // 0x1688 26-state enum; RETAINED between sessions (does not reset on plug-in) — report must scope it per-session
 void OvmsVehicleToyotaETNGA::SetChargeOutcome(int v) { m_v_charge_outcome->SetValue(v); }
