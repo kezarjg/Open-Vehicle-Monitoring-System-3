@@ -54,6 +54,8 @@ public:
     void WebDeInit();
     static void WebCfgFeatures(PageEntry_t& p, PageContext_t& c);
     static void WebDispChgMetrics(PageEntry_t& p, PageContext_t& c);
+    static void WebChargeReports(PageEntry_t& p, PageContext_t& c);   // index of saved charge reports
+    static void WebChargeReport(PageEntry_t& p, PageContext_t& c);    // stream one report (raw HTML)
 #endif // CONFIG_OVMS_COMP_WEBSERVER
 
 protected:

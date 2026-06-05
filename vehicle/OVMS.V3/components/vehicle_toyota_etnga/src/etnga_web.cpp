@@ -13,14 +13,20 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <dirent.h>
 #include <string>
+#include <vector>
+#include <algorithm>
 
 #include "ovms_config.h"
 #include "ovms_metrics.h"
 #include "ovms_webserver.h"
+#include "ovms_utils.h"
 #include "metrics_standard.h"
 
 #include "vehicle_toyota_etnga.h"
+
+#define CHARGE_REPORT_DIR "/store/charge-reports"
 
 // WebInit: register the e-TNGA pages in the vehicle menu.
 // Shared by all e-TNGA vehicles (Subaru Solterra, Toyota bZ4X).
@@ -28,6 +34,8 @@ void OvmsVehicleToyotaETNGA::WebInit()
 {
     MyWebServer.RegisterPage("/bms/cellmon", "BMS cell monitor", OvmsWebServer::HandleBmsCellMonitor, PageMenu_Vehicle, PageAuth_Cookie);
     MyWebServer.RegisterPage("/xte/charge", "Charging metrics", WebDispChgMetrics, PageMenu_Vehicle, PageAuth_Cookie);
+    MyWebServer.RegisterPage("/xte/reports", "Charge reports", WebChargeReports, PageMenu_Vehicle, PageAuth_Cookie);
+    MyWebServer.RegisterPage("/xte/report", "Charge report", WebChargeReport, PageMenu_None, PageAuth_Cookie);
     MyWebServer.RegisterPage("/xte/config", "Configuration", WebCfgFeatures, PageMenu_Vehicle, PageAuth_Cookie);
 }
 
@@ -35,6 +43,8 @@ void OvmsVehicleToyotaETNGA::WebDeInit()
 {
     MyWebServer.DeregisterPage("/bms/cellmon");
     MyWebServer.DeregisterPage("/xte/charge");
+    MyWebServer.DeregisterPage("/xte/reports");
+    MyWebServer.DeregisterPage("/xte/report");
     MyWebServer.DeregisterPage("/xte/config");
 }
 
@@ -164,6 +174,72 @@ void OvmsVehicleToyotaETNGA::WebDispChgMetrics(PageEntry_t& p, PageContext_t& c)
         "</div>");
 
     PAGE_HOOK("body.post");
+    c.done();
+}
+
+// WebChargeReports: index of saved charge-session reports (newest first).
+// Each entry links to WebChargeReport, which streams the stored HTML file.
+void OvmsVehicleToyotaETNGA::WebChargeReports(PageEntry_t& p, PageContext_t& c)
+{
+    c.head(200);
+    c.panel_start("primary", "Charge session reports");
+
+    std::vector<std::string> files;
+    DIR* dir = opendir(CHARGE_REPORT_DIR);
+    if (dir) {
+        struct dirent* ent;
+        while ((ent = readdir(dir)) != NULL) {
+            std::string name = ent->d_name;
+            if (name.size() > 5 && name.compare(name.size() - 5, 5, ".html") == 0)
+                files.push_back(name);
+        }
+        closedir(dir);
+    }
+
+    if (files.empty()) {
+        c.print("<p>No charge reports yet. A report is written at the end of each charging session.</p>");
+    } else {
+        std::sort(files.rbegin(), files.rend());   // newest first (timestamp filenames sort chronologically)
+        c.print("<ul class=\"list-unstyled\">");
+        for (size_t i = 0; i < files.size(); i++) {
+            std::string enc = c.encode_html(files[i]);
+            c.printf("<li><a href=\"/xte/report?file=%s\" target=\"_blank\">%s</a></li>", enc.c_str(), enc.c_str());
+        }
+        c.print("</ul>");
+    }
+
+    c.panel_end();
+    c.done();
+}
+
+// WebChargeReport: stream one saved report as raw HTML (no page chrome), via ?file=<name>.
+void OvmsVehicleToyotaETNGA::WebChargeReport(PageEntry_t& p, PageContext_t& c)
+{
+    std::string file = c.getvar("file");
+
+    // Validate: a .html basename only — reject path traversal (no '/', no "..").
+    bool valid = (file.size() > 5 && file.compare(file.size() - 5, 5, ".html") == 0
+                  && file.find('/') == std::string::npos
+                  && file.find("..") == std::string::npos);
+    if (!valid) {
+        c.head(400, "Content-Type: text/plain; charset=utf-8");
+        c.print("Invalid report name\n");
+        c.done();
+        return;
+    }
+
+    extram::string content;
+    std::string path = std::string(CHARGE_REPORT_DIR "/") + file;
+    if (load_file(path, content) != 0) {
+        c.head(404, "Content-Type: text/plain; charset=utf-8");
+        c.print("Report not found\n");
+        c.done();
+        return;
+    }
+
+    // Stream the stored document verbatim (it is already a complete, self-contained HTML page).
+    c.head(200, "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-cache");
+    c.print(content);
     c.done();
 }
 
