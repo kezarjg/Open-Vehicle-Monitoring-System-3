@@ -32,6 +32,52 @@
 #define CHARGE_REPORT_DIR  "/store/charge-reports"
 static const int CHARGE_REPORT_MAX = 50;   // retain at most this many reports
 
+// Prefer the SD card (GBs, removable) for reports+CSV; fall back to internal flash.
+std::string OvmsVehicleToyotaETNGA::ChargeReportDir()
+{
+    struct stat st;
+    if (stat("/sd", &st) == 0 && S_ISDIR(st.st_mode))
+        return "/sd/charge-reports";
+    return "/store/charge-reports";
+}
+
+// Map a 0x1688 "Charging History Information" enum code to a human-readable label.
+// All 26 states sourced from solterra-can/ecus/plug-in-charge-control.md (Known enum values).
+// 6 of 26 are empirically confirmed; the rest are Techstream-inferred labels.
+// Returns "" for unknown codes so the caller can fall back to showing raw hex.
+const char* OvmsVehicleToyotaETNGA::ChargeOutcomeLabel(int code)
+{
+    switch (code & 0xFF) {
+        case 0x00: return "Default";
+        case 0x20: return "Default (AC Charging)";
+        case 0x21: return "AC Charging Complete (Full Charge)";
+        case 0x23: return "AC Charging Stop (Abnormal)";
+        case 0x24: return "AC Charging Stop (Battery)";
+        case 0x25: return "AC Charging Stop (High Power Consumption)";
+        case 0x26: return "AC Charging Stop (Operation)";
+        case 0x27: return "AC Charging Stop (Power Outage/Unplugged)";
+        case 0x28: return "AC Charging Stop (Reduced Supply Power)";
+        case 0x29: return "AC Charging Stop (System)";
+        case 0x2A: return "AC Charging Complete (Freeze Prevention)";
+        case 0x2C: return "AC Charging Stop (Connector Unlock)";
+        case 0x30: return "Default (DC Charging)";
+        case 0x31: return "DC Charging Complete";
+        case 0x32: return "DC Charging Stop (Abnormal)";
+        case 0x33: return "DC Charging Stop (Battery)";
+        case 0x38: return "DC Charging Stop (Over 60 Minutes)";
+        case 0x39: return "DC Charging Stop (System)";
+        case 0x3A: return "DC Charging Stop (Vehicle/System)";
+        case 0x40: return "Default (Power Feeding)";
+        case 0x41: return "Battery Level Low";
+        case 0x42: return "Fuel Level Low";
+        case 0x43: return "VPC Unplugged";
+        case 0x44: return "IG OFF Operation";
+        case 0x45: return "Remote Stop";
+        case 0x46: return "Vehicle Factor";
+        default:   return "";   // unknown -> caller shows raw hex
+    }
+}
+
 // Live aggregation while charging: peak power, battery-temp range, and the current phase type.
 // Called every tick from HandleChargeAcState / HandleChargeDcState.
 void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
