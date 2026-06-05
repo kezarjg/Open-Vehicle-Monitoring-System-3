@@ -136,7 +136,6 @@ private:
     float CalculateBatteryVoltage(const std::string& data);
     float CalculateCabinTemperature(const std::string& data);
     int CalculateAcOpStatus(const std::string& data);
-    int CalculateChargeMode(const std::string& data);
     int CalculateChargeType(const std::string& data);
     int CalculateHlcState(const std::string& data);
     int CalculatePISWRaw(const std::string& data);
@@ -184,7 +183,6 @@ private:
     void SetBatteryTemperatureStatistics(const std::vector<float>& temperatures);
     void SetBatteryVoltage(float voltage);
     void SetCabinTemperature(float temperature);
-    void SetChargeMode(int chargeMode);
     void SetChargeType(int chargeType);
     void SetChargeState(PollState state);
     void SetChargerInputPower(float power);
@@ -244,7 +242,6 @@ private:
     void RequestVIN();
     void IncomingVINSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, CAN_frame_format_t format, const std::string &data);
     void IncomingVINFail(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, int errorcode);
-    void RequestChargeMode();
     void RequestChargeType();
     void DiagnosticSession();
     
@@ -289,7 +286,6 @@ enum CANPID
     PID_CHARGER_INPUT_POWER = 0x161D,
     PID_CONTROL_SYSTEM_MODE = 0x10D1,
     PID_CHARGING_CONTROL_INFORMATION = 0x1689,
-    PID_CHARGING_CONTROL_STATUS = 0x1668,
     PID_CHARGING_LID = 0x1625,
     PID_CHARGING_VOLTAGE_TYPE = 0x161C,
     PID_HVAC_SETPOINT = 0x1036,

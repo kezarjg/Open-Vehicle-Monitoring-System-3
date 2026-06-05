@@ -279,11 +279,13 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
     // AC/DC normally exit via CHARGE_WAIT; this branch is a safety net for any future direct AC/DC->AWAKE path.
     if (oldState == PollState::CHARGE_AC || oldState == PollState::CHARGE_DC) {
         StandardMetrics.ms_v_charge_state->SetValue("done");
+        StandardMetrics.ms_v_charge_mode->SetValue("");   // clear AC/DC indicator on session end
         if (m_charge_session.in_session)
             ESP_LOGI(TAG, "Charge session closed");
         m_charge_session = ChargeSessionState{};   // reset (clears in_session)
     } else if (oldState == PollState::CHARGE_HANDSHAKE || oldState == PollState::CHARGE_WAIT) {
         StandardMetrics.ms_v_charge_state->SetValue("");
+        StandardMetrics.ms_v_charge_mode->SetValue("");
         if (m_charge_session.in_session)
             ESP_LOGI(TAG, "Charge session closed");
         m_charge_session = ChargeSessionState{};   // reset (clears in_session)
@@ -330,6 +332,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
     SetPollState(PollState::CHARGE_AC);
     SetChargingStatus(true);
     SetChargeState(PollState::CHARGE_AC);
+    StandardMetrics.ms_v_charge_mode->SetValue("standard");      // AC charging (OVMS-standard v.c.mode)
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
@@ -338,4 +341,5 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
     SetPollState(PollState::CHARGE_DC);
     SetChargingStatus(true);
     SetChargeState(PollState::CHARGE_DC);
+    StandardMetrics.ms_v_charge_mode->SetValue("performance");   // DC fast charge -> ABRP is_dcfc (v.c.mode == "performance")
 }

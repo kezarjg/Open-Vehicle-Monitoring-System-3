@@ -187,11 +187,6 @@ bool OvmsVehicleToyotaETNGA::CalculateChargingDoorStatus(const std::string& data
     return GetRxBBit(data, 1, 1);
 }
 
-int OvmsVehicleToyotaETNGA::CalculateChargeMode(const std::string& data)
-{
-    return GetRxBInt8(data, 0);
-}
-
 int OvmsVehicleToyotaETNGA::CalculateAcOpStatus(const std::string& data) { return GetRxBInt8(data, 0); }
 void OvmsVehicleToyotaETNGA::SetAcOpStatus(int v) { m_v_charge_ac_op->SetValue(v); }
 int OvmsVehicleToyotaETNGA::CalculateHlcState(const std::string& data) { return GetRxBByte(data, 0); }
@@ -569,13 +564,6 @@ void OvmsVehicleToyotaETNGA::SetBatteryVoltage(float voltage)
 {
     LogMetricChange(StandardMetrics.ms_v_bat_voltage, voltage, "Voltage", "V");
     StandardMetrics.ms_v_bat_voltage->SetValue(voltage);
-}
-
-void OvmsVehicleToyotaETNGA::SetChargeMode(int chargeMode)
-{
-    const std::string chargeModeValue = (chargeMode == 0x00) ? "Standard" : "Performance";
-    LogMetricChange(StandardMetrics.ms_v_charge_mode, chargeModeValue, "Charge Mode");
-    StandardMetrics.ms_v_charge_mode->SetValue(chargeModeValue);
 }
 
 void OvmsVehicleToyotaETNGA::SetChargingStatus(bool status)

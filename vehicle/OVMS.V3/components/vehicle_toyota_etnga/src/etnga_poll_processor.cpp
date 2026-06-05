@@ -175,12 +175,6 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
             break;
         }
 
-        case PID_CHARGING_CONTROL_STATUS: {
-            int chargeMode = CalculateChargeMode(m_rxbuf);
-            SetChargeMode(chargeMode);
-            break;
-        }
-
         case PID_CONTROL_SYSTEM_MODE: {
             int controlMode = CalculateControlMode(m_rxbuf);
             SetControlMode(controlMode);
@@ -215,7 +209,7 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
 
         case PID_CHARGER_INPUT_POWER: {
             // Only valid during AC charging
-            if (StandardMetrics.ms_v_charge_inprogress->AsBool() && std::string(StandardMetrics.ms_v_charge_mode->AsString()) == "Standard") {
+            if (m_poll_state == PollState::CHARGE_AC) {
                 float chargerInputPower = CalculateChargerInputPower(m_rxbuf);
                 SetChargerInputPower(chargerInputPower);
             }
@@ -422,47 +416,6 @@ void OvmsVehicleToyotaETNGA::DiagnosticSession()
     else
     {
         ESP_LOGW(TAG, "DiagnosticSession: Failed with error code %d", res);
-    }
-}
-
-void OvmsVehicleToyotaETNGA::RequestChargeMode()
-{
-    std::string response;
-    int chargeMode;
-    int maxRetries = 5;
-    int retryCount = 0;
-    int res = POLLSINGLE_TIMEOUT;  // non-OK sentinel so the retry loop runs at least once
-
-    while (retryCount < maxRetries && res != POLLSINGLE_OK)
-    {
-        res = PollSingleRequest(
-            m_can2,
-            PLUG_IN_CONTROL_SYSTEM_TX,
-            PLUG_IN_CONTROL_SYSTEM_RX,
-            VEHICLE_POLL_TYPE_READDATA,
-            PID_CHARGING_CONTROL_STATUS,
-            response,
-            1000,
-            ISOTP_STD
-        );
-
-        if (res == POLLSINGLE_OK)
-        {
-            // Request successful
-            chargeMode = response[0] & 0xFF;
-            SetChargeMode(chargeMode);
-            break;
-        }
-        else
-        {
-            retryCount++;
-            ESP_LOGW(TAG, "RequestChargeMode: Request failed with error code %d. Retrying (%d/%d)", res, retryCount, maxRetries);
-        }
-    }
-
-    if (res != POLLSINGLE_OK)
-    {
-        ESP_LOGE(TAG, "RequestChargeMode: Maximum retries reached. Request failed with error code %d", res);
     }
 }
 
