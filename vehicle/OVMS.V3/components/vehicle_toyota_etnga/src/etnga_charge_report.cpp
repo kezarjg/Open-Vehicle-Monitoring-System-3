@@ -122,8 +122,10 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
 
     // Delivered-Ah (charge-side coulomb): integrate pack current over dt.
     if (m_charge_session.last_sample_monotonic != 0) {
-        float dt_h = (now - m_charge_session.last_sample_monotonic) / 3600.0f;
-        m_charge_session.delivered_ah += fabsf(StandardMetrics.ms_v_bat_current->AsFloat()) * dt_h;
+        int dt = now - m_charge_session.last_sample_monotonic;
+        if (dt > 0 && dt <= 10) {   // ignore gaps (pause / lock-isolation / sleep) so delivered_ah stays accurate
+            m_charge_session.delivered_ah += fabsf(StandardMetrics.ms_v_bat_current->AsFloat()) * (dt / 3600.0f);
+        }
     }
     m_charge_session.last_sample_monotonic = now;
 
@@ -187,18 +189,32 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
 }
 
 // Retain only the newest CHARGE_REPORT_MAX sessions; delete both .html and .csv for each pruned stem.
+// Also removes orphan .csv files whose session never produced an .html (aborted/sleep-ended sessions).
 static void PruneChargeReports(const char* tag, const std::string& dir)
 {
     DIR* d = opendir(dir.c_str());
     if (!d) return;
-    std::vector<std::string> stems;   // basenames without extension
+    std::vector<std::string> stems;        // .html stems (a complete report)
+    std::vector<std::string> csv_stems;    // .csv stems (may be orphaned)
     struct dirent* e;
     while ((e = readdir(d)) != NULL) {
         std::string n = e->d_name;
         if (n.size() > 5 && n.compare(n.size()-5, 5, ".html") == 0)
             stems.push_back(n.substr(0, n.size()-5));
+        else if (n.size() > 4 && n.compare(n.size()-4, 4, ".csv") == 0)
+            csv_stems.push_back(n.substr(0, n.size()-4));
     }
     closedir(d);
+
+    // Remove orphan CSVs (streamed CSV whose session never produced an HTML report).
+    for (size_t i = 0; i < csv_stems.size(); i++) {
+        bool has_html = false;
+        for (size_t j = 0; j < stems.size(); j++)
+            if (stems[j] == csv_stems[i]) { has_html = true; break; }
+        if (!has_html)
+            unlink((dir + "/" + csv_stems[i] + ".csv").c_str());
+    }
+
     if ((int)stems.size() <= CHARGE_REPORT_MAX) return;
     std::sort(stems.begin(), stems.end());
     int del = (int)stems.size() - CHARGE_REPORT_MAX;
@@ -261,6 +277,8 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     const float energy_kwh = StandardMetrics.ms_v_charge_kwh->AsFloat();
     if (energy_kwh < 0.05f || m_charge_session.base.empty()) {
         ESP_LOGD(TAG, "Charge report skipped (%.3f kWh)", energy_kwh);
+        if (m_charge_session.csv_started && !m_charge_session.base.empty())   // remove the streamed stub CSV
+            unlink((m_charge_session.base + ".csv").c_str());
         return;
     }
     const float grid_kwh  = StandardMetrics.ms_v_charge_kwh_grid->AsFloat();
