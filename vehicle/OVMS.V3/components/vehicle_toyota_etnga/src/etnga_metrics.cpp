@@ -30,6 +30,7 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     m_v_charge_out_tgt   = MyMetrics.InitInt("xte.v.c.chgotgt", SM_STALE_MID);
     m_v_charge_ac_usable = MyMetrics.InitInt("xte.v.c.acusbl", SM_STALE_MID);
     m_v_charge_myroom  = MyMetrics.InitBool("xte.v.c.myroom", SM_STALE_MID);
+    m_v_charge_grid_power = MyMetrics.InitFloat("xte.v.c.gridpower", SM_STALE_MID, 0.0f, kW);
     m_v_env_hvac_power = MyMetrics.InitFloat("xte.v.e.hvac.power", SM_STALE_MID, 0.0f, kW);
     m_v_env_hvac_kwh   = MyMetrics.InitFloat("xte.v.e.hvac.kwh",   SM_STALE_MID, 0.0f, kWh);
     m_v_env_hvac_kwh_drive = MyMetrics.InitFloat("xte.v.e.hvac.kwh.drive", SM_STALE_MID, 0.0f, kWh);  // Per-trip driving cabin/HVAC energy
@@ -670,6 +671,7 @@ void OvmsVehicleToyotaETNGA::SetChargeType(int chargeType)
 void OvmsVehicleToyotaETNGA::SetChargerInputPower(float power)
 {
     ESP_LOGD(TAG, "Charger Input Power: %f", power);
+    m_v_charge_grid_power->SetValue(power);
 
     float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
     int now = esp_log_timestamp();
