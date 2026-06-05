@@ -39,6 +39,14 @@ static std::string etnga_report_dir()
     return "/store/charge-reports";
 }
 
+// Friendly name of the active vehicle ("Subaru Solterra" / "Toyota bZ4X") for page titles;
+// falls back to the platform name if unavailable.
+static std::string etnga_vehicle_name()
+{
+    const char* n = MyVehicleFactory.ActiveVehicleName();
+    return (n && *n) ? std::string(n) : std::string("Toyota e-TNGA");
+}
+
 // WebInit: register the e-TNGA pages in the vehicle menu.
 // Shared by all e-TNGA vehicles (Subaru Solterra, Toyota bZ4X).
 void OvmsVehicleToyotaETNGA::WebInit()
@@ -88,7 +96,8 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
             MyConfig.SetParamValueFloat("xte", "tpms.temp.alert",     t_alert);
 
             c.head(200);
-            c.alert("success", "<p class=\"lead\">Toyota e-TNGA configuration saved.</p>");
+            std::string saved = "<p class=\"lead\">" + etnga_vehicle_name() + " configuration saved.</p>";
+            c.alert("success", saved.c_str());
         } else {
             error = "<p class=\"lead\">Error:</p><ul class=\"errorlist\">" + error + "</ul>";
             c.head(400);
@@ -104,7 +113,8 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
     float t_warn  = MyConfig.GetParamValueFloat("xte", "tpms.temp.warn",       90.0f);
     float t_alert = MyConfig.GetParamValueFloat("xte", "tpms.temp.alert",     100.0f);
 
-    c.panel_start("primary", "Toyota e-TNGA configuration");
+    std::string cfgtitle = etnga_vehicle_name() + " configuration";
+    c.panel_start("primary", cfgtitle.c_str());
     c.form_start(p.uri);
 
     c.fieldset_start("TPMS alert thresholds");
@@ -144,7 +154,10 @@ void OvmsVehicleToyotaETNGA::WebDispChgMetrics(PageEntry_t& p, PageContext_t& c)
         ".night h6.metric-head { color: unset; }\n"
         "</style>\n"
         "<div class=\"panel panel-primary\">"
-          "<div class=\"panel-heading\">Toyota e-TNGA charging metrics</div>"
+          "<div class=\"panel-heading\">");
+    c.print(etnga_vehicle_name() + " charging metrics");
+    c.print(
+          "</div>"
           "<div class=\"panel-body\">"
             "<div class=\"receiver\">"
 
@@ -193,7 +206,8 @@ void OvmsVehicleToyotaETNGA::WebDispChgMetrics(PageEntry_t& p, PageContext_t& c)
 void OvmsVehicleToyotaETNGA::WebChargeReports(PageEntry_t& p, PageContext_t& c)
 {
     c.head(200);
-    c.panel_start("primary", "Charge session reports");
+    std::string rtitle = etnga_vehicle_name() + " charge reports";
+    c.panel_start("primary", rtitle.c_str());
 
     std::vector<std::string> files;
     DIR* dir = opendir(etnga_report_dir().c_str());
