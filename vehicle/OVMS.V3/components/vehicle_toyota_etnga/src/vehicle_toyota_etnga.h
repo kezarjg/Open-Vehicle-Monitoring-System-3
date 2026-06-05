@@ -13,6 +13,9 @@
 
 #include <string>
 #include "vehicle.h"
+#ifdef CONFIG_OVMS_COMP_WEBSERVER
+#include "ovms_webserver.h"
+#endif
 
 // Control states
 enum ControlState {
@@ -44,6 +47,14 @@ public:
     void IncomingPollReply(const OvmsPoller::poll_job_t &job, uint8_t* data, uint8_t length) override;
 
     void IncomingFrameCan2(CAN_frame_t* p_frame) override;
+
+#ifdef CONFIG_OVMS_COMP_WEBSERVER
+    // Webserver subsystem (implementation: etnga_web.cpp)
+    void WebInit();
+    void WebDeInit();
+    static void WebCfgFeatures(PageEntry_t& p, PageContext_t& c);
+    static void WebDispChgMetrics(PageEntry_t& p, PageContext_t& c);
+#endif // CONFIG_OVMS_COMP_WEBSERVER
 
 protected:
     std::string m_rxbuf;

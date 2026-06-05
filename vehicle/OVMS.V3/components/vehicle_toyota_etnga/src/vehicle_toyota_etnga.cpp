@@ -116,11 +116,18 @@ OvmsVehicleToyotaETNGA::OvmsVehicleToyotaETNGA()
     // Set polling PID list
     PollSetPidList(m_can2, obdii_polls);
     PollSetThrottling(0);
+
+#ifdef CONFIG_OVMS_COMP_WEBSERVER
+    WebInit();
+#endif
 }
 
 OvmsVehicleToyotaETNGA::~OvmsVehicleToyotaETNGA()
 {
     ESP_LOGI(TAG, "Shutdown Toyota eTNGA platform module");
+#ifdef CONFIG_OVMS_COMP_WEBSERVER
+    WebDeInit();
+#endif
 }
 
 void OvmsVehicleToyotaETNGA::NotifyVehicleOn()
