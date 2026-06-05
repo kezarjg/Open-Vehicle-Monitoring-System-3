@@ -28,8 +28,9 @@ Two parallel states
      - PID ``0x10D1`` on the Plug-In Control ECU
      - ``CS_NONE=0``, ``CS_DRIVING=1``, ``CS_CHARGING=3``
 
-``PollState`` selects which PIDs are polled — see the ``{S, A, D, C}``
-columns in the ``obdii_polls[]`` table in ``vehicle_toyota_etnga.cpp``.
+``PollState`` selects which PIDs are polled — see the seven-column
+``obdii_polls[]`` table in ``vehicle_toyota_etnga.cpp`` (documented in
+:doc:`index` under "PID Polling Logic").
 ``ControlState`` is the vehicle's own self-report and is the primary trigger
 for the ``AWAKE → DRIVING`` edge.
 
@@ -48,14 +49,16 @@ window.
 Tick loop
 =========
 
-``Ticker1()`` runs once per second and does two things:
+``Ticker1()`` runs once per second and does three things:
 
 1. ``ResetStaleMetrics()`` manually clears ``controlstate``,
    ``ms_v_env_awake``, ``ms_v_door_chargeport``, ``ms_v_charge_pilot``,
    and ``ms_v_bat_power`` if they have gone stale but still hold a
    non-default value.  This is the only way ``ms_v_env_awake`` ever drops
    back to ``false``.
-2. Dispatches to the appropriate handler —
+2. While in the ``DRIVING`` state, computes ``v.b.consumption``
+   (trip-average Wh/km) from net trip energy divided by trip distance.
+3. Dispatches to the appropriate handler —
    ``HandleSleepState()``, ``HandleAwakeState()``,
    ``HandleDrivingState()``, ``HandleChargeHandshakeState()``,
    ``HandleChargeWaitState()``, ``HandleChargeAcState()``, or
@@ -81,7 +84,7 @@ Transition diagram
               │     ▲                              │       │
    CAN traffic│     │ env_awake stale (~120 s)      │       │
    OR 12V >   │     │ OR 5-min / 15-min watchdog    │       │
-   ref+0.2 V  │     │ (arms 10 s cooldown)          │       │
+   ref+0.2 V  │     │ (arms escalating cooldown)    │       │
               ▼     │                              │       │
           ┌─────────────────┐                      │       │
           │      AWAKE      │◄──────────────────┐  │       │
@@ -204,7 +207,7 @@ All edges live in ``etnga_poll_states.cpp``.
    * - ``AWAKE → SLEEP`` (forced, door watch)
      - ``monotonic - m_v_env_awaketime > 300`` AND charge door never opened
      - 5-minute watchdog when awake with no ``CS_DRIVING`` and charge
-       door not opened.  Arms the 10-second cooldown latch.
+       door not opened.  Arms the escalating cooldown latch.
    * - ``AWAKE → SLEEP`` (forced, cable watch)
      - ``monotonic - m_cable_watch_start > 900`` (armed but no cable plug-in)
      - 15-minute watchdog: charge door was seen open (``m_armed_for_charge``
@@ -244,7 +247,7 @@ All edges live in ``etnga_poll_states.cpp``.
    * - ``CHARGE_WAIT → SLEEP``
      - ``ms_v_env_awake == false``
      - Bus went dead during scheduled wait (OBC slept or gateway isolated
-       OBD).  Arms the 10-second cooldown latch.
+       OBD).  Arms the escalating cooldown latch.
    * - ``CHARGE_AC → CHARGE_WAIT``
      - ``ac_op == 0x00`` (Stop) OR PISW ``== 0x00``
      - Phase ended cleanly or cable pulled.  Sets
@@ -253,6 +256,12 @@ All edges live in ``etnga_poll_states.cpp``.
      - ``hlc == 0xFF`` (Unconnected) OR PISW ``== 0x00``
      - DC phase ended or cable pulled.  Sets
        ``ms_v_charge_state = "stopped"``.
+
+Web UI pages
+============
+
+The e-TNGA module registers five vehicle-menu web pages at startup; see the
+:doc:`index` "Web UI" section for the full URL list and descriptions.
 
 Charge state strings (``ms_v_charge_state``)
 ============================================
@@ -293,7 +302,10 @@ Charge session (in-RAM)
 =======================
 
 A ``ChargeSessionState`` struct (member ``m_charge_session``) tracks the
-current plug-in event entirely in RAM — there is no flash persistence:
+current plug-in event.  The session **state** lives only in RAM and is not
+flash-persisted; however, a per-sample CSV is streamed to disk throughout
+the session and a summary HTML report is written at session close, so data
+is durable even if the in-RAM state is lost to a hard reset.
 
 .. list-table::
    :header-rows: 1
@@ -306,7 +318,44 @@ current plug-in event entirely in RAM — there is no flash persistence:
    * - ``start_monotonic``
      - ``ms_m_monotonic`` value at session open (seconds since boot)
    * - ``start_soc``
-     - ``ms_v_bat_soc`` integer value at session open
+     - ``ms_v_bat_soc`` integer value at session open (−1 if unknown)
+   * - ``start_utc``
+     - UTC wall-clock at session open (0 if clock not synced)
+   * - ``is_dc``
+     - ``true`` if the session included a DC fast-charge phase
+   * - ``peak_power``
+     - Highest ``ms_v_charge_power`` seen during the session (kW)
+   * - ``temp_seen`` / ``temp_min`` / ``temp_max``
+     - Battery temperature range (°C) observed during charging
+   * - ``has_loc`` / ``start_lat`` / ``start_lon``
+     - GPS coordinates at session open (from ``ms_v_pos_latitude/longitude``,
+       captured only if GPS lock was active)
+   * - ``amb_seen`` / ``amb_min`` / ``amb_max``
+     - Ambient temperature range (°C) observed during charging
+   * - ``delivered_ah``
+     - Charge-side coulomb count (Ah) integrated from ``ms_v_bat_current``
+       during active charging phases; used for the implied-capacity estimate
+   * - ``last_sample_monotonic``
+     - Monotonic timestamp of the last per-tick aggregation (used for Ah dt
+       and CSV streaming)
+   * - ``events``
+     - Event log: vector of (monotonic seconds, label string) pairs
+       appended via ``LogChargeEvent()`` at each state transition
+   * - ``svg``
+     - Downsampled chart buffer: vector of ``Sample{t_s, kw, soc}`` at
+       the current ``svg_interval_s`` cadence (≤300 points; interval
+       doubles and buffer is decimated when the cap is exceeded)
+   * - ``svg_interval_s``
+     - Current SVG sampling interval (seconds); starts at 20 s, doubles
+       on decimation
+   * - ``last_svg_monotonic``
+     - Monotonic timestamp of the last SVG sample
+   * - ``base``
+     - File basename ``<dir>/<timestamp>`` (no extension); ``.html`` and
+       ``.csv`` are appended for the two output files
+   * - ``csv_started``
+     - ``true`` after the CSV header has been written; subsequent calls
+       append rather than truncate
 
 **Session open:** ``TransitionToChargeHandshakeState()`` opens the
 session (sets ``in_session = true``) on first entry.  If the driver
@@ -333,12 +382,11 @@ would silently break the wake-reconcile path.
 Charge curve & station metrics
 ==============================
 
-Tasks 1–4 of the ``v3-charge-statemachine`` feature added eleven custom
-``xte.v.c.*`` metrics and began populating two standard OVMS metrics
-during charging.  They are decoded by ``IncomingPlugInControlSystem()``
-in ``etnga_poll_processor.cpp`` (with scale/decode math in
-``etnga_metrics.cpp``) as the poller runs in the ``CHARGE_AC`` and
-``CHARGE_DC`` states.
+The module maintains 18 custom ``xte.v.c.*`` metrics and populates
+several standard OVMS metrics during charging.  They are decoded by
+``IncomingPlugInControlSystem()`` in ``etnga_poll_processor.cpp`` (with
+scale/decode math in ``etnga_metrics.cpp``) as the poller runs in the
+``CHARGE_AC`` and ``CHARGE_DC`` states.
 
 DC / universal custom metrics
 ------------------------------
@@ -452,7 +500,9 @@ is distinct from ``xte.v.c.acop`` (``0x1684``), which drives the
 Charge-report supporting channels
 ----------------------------------
 
-These four metrics feed the in-module charge report (work item D).
+These four metrics feed the in-module charge report (see :doc:`index`
+"Charge session report").  ``GenerateChargeReport()`` is implemented and
+is called at session end from ``TransitionToAwakeState()``.
 ``xte.v.c.myroom`` is polled only in the ``CHARGE_AC`` and ``CHARGE_DC``
 states; ``xte.v.e.hvac.power`` is polled in those charge states (from the
 OBC, ``0x745``) **and** in ``DRIVING`` (from the hybrid control ECU,
@@ -508,8 +558,9 @@ OBC, ``0x745``) **and** in ``DRIVING`` (from the hybrid control ECU,
 
 .. note::
 
-   **Limiting-side attribution (work item D, not yet implemented).**
-   When the report attributes who capped the charge rate, compare the
+   **Limiting-side attribution (pending).**  The charge report is
+   implemented; the remaining open item is correctly attributing which
+   side (car vs. station) capped the charge rate.  When doing so, compare the
    car's permission ``0x16A1`` against the station's **declared max**
    ``0x166A`` and take the lower as the binding cap.  Do **not** fold the
    station's instantaneous V×I output (``0x166B`` × ``0x166C``) in as a
@@ -524,29 +575,45 @@ Cooldown latch
 ==============
 
 To prevent flapping after the forced-sleep watchdogs,
-``HandleAwakeState`` sets ``m_allow_wake = false`` and records
-``m_sleep_entry_time`` before transitioning to ``SLEEP``.  While the
-latch is held:
+``TransitionToSleepState`` sets ``m_allow_wake = false`` and records
+``m_sleep_entry_time`` before calling ``SetPollState(SLEEP)``.  While
+the latch is held:
 
 * ``IncomingFrameCan2`` does **not** call ``SetAwake(true)``, so trailing
   post-shutdown CAN traffic cannot bounce the driver straight back to
   ``AWAKE``.
-* After 10 seconds, ``HandleSleepState`` clears the latch and CAN frames
-  can wake the driver again.
+* After the current cooldown window elapses, ``HandleSleepState`` clears
+  the latch and CAN frames can wake the driver again.
+
+The cooldown window is **not** a fixed 10 seconds — it uses an escalating
+backoff schedule defined in ``SLEEP_COOLDOWN_SECS[]``::
+
+    {10, 30, 60, 120, 300}   // seconds
+
+Each consecutive no-activity sleep (watchdog-triggered, not a real
+drive/charge event) advances to the next entry and stays there.  A real
+activity event — drive start, charge start, charge-door open, or 12 V
+bump — calls ``ResetSleepBackoff()`` which returns the index to 0 so the
+next sleep uses the shortest (10 s) window again.
 
 The 12 V-based wake path is **not** gated by ``m_allow_wake`` — high aux
-voltage will pull the driver out of ``SLEEP`` even mid-cooldown.
+voltage will pull the driver out of ``SLEEP`` even mid-cooldown, and also
+resets the backoff index.
 
-``CHARGE_WAIT → SLEEP`` also arms the cooldown latch (same 10-second
-window) to prevent immediate re-wake from bus noise after the OBC sleeps.
+``CHARGE_WAIT → SLEEP`` also arms the cooldown latch (using the current
+backoff window) to prevent immediate re-wake from bus noise after the OBC
+sleeps.
 
 Boot
 ====
 
-The constructor calls ``TransitionToSleepState()`` and
-``PollSetThrottling(0)``.  The driver always starts in ``SLEEP`` and
-waits for CAN activity or a 12 V bump before doing anything else.
-``TransitionToSleepState()`` also clears ``m_armed_for_charge``.
+The constructor calls ``SetPollState(PollState::SLEEP)`` **directly**
+(not via ``TransitionToSleepState()``) and ``PollSetThrottling(0)``.
+This is intentional: ``TransitionToSleepState()`` would arm the cooldown
+latch and advance the backoff index, neither of which is wanted at boot.
+``m_armed_for_charge`` is set to ``false`` directly for the same reason.
+The driver always starts in ``SLEEP`` and waits for CAN activity or a
+12 V bump before doing anything else.
 
 Notes and quirks
 ================
@@ -581,10 +648,12 @@ Notes and quirks
   states clean up via ``SetChargingStatus(false)`` and ``SetChargeState``
   only.  Charge metrics added in the future may need explicit clearing on
   exit.
-* **No flash persistence for charge sessions.** ``m_charge_session`` lives
-  only in RAM.  A hard reset or power cycle mid-session will lose the
-  session-open state; the wake-reconcile will not fire because
-  ``in_session`` will be ``false`` after boot.
+* **No flash persistence for charge session state.** ``m_charge_session``
+  lives only in RAM.  A hard reset or power cycle mid-session will lose
+  the in-RAM session state; the wake-reconcile will not fire because
+  ``in_session`` will be ``false`` after boot.  However, the per-sample
+  CSV is streamed to disk continuously, so partial session data (up to
+  the reset point) is preserved even if no HTML report is generated.
 
 TPMS
 ====

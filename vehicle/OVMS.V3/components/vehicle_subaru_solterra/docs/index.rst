@@ -38,3 +38,20 @@ Function                    Support Status
 =========================== ==============
 BMS v+t Display             Yes
 =========================== ==============
+
+Config namespace
+----------------
+
+The Solterra inherits the ``xte`` config namespace from the e-TNGA base.  All
+configuration parameters (e.g. TPMS alert thresholds) use the ``[xte]`` instance::
+
+    config set xte tpms.pressure.warn 240
+
+Web UI
+------
+
+All e-TNGA web UI pages are available on the Solterra; see the
+:doc:`e-TNGA index </components/vehicle_toyota_etnga/docs/index>` for the
+full list.  Notably, ``/bms/cellmon`` is fully populated for the Solterra
+because it declares the BMS pack arrangement — per-cell voltage and
+temperature history, deviation flags, and pack statistics are all enabled.
