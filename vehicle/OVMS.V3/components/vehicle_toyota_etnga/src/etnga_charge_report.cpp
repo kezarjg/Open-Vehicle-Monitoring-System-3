@@ -214,6 +214,53 @@ static void PruneChargeReports(const char* tag)
     }
 }
 
+// Render a self-contained inline SVG line chart of delivered power (+ light SOC overlay) vs time.
+std::string OvmsVehicleToyotaETNGA::RenderPowerSvg()
+{
+    const std::vector<ChargeSessionState::Sample>& s = m_charge_session.svg;
+    if (s.size() < 2)
+        return "<p>(not enough samples for a chart)</p>";
+
+    const int W = 640, H = 240, PADL = 44, PADB = 24, PADT = 10, PADR = 10;
+    const int PW = W - PADL - PADR, PH = H - PADT - PADB;
+    int tmax = s.back().t_s > 0 ? s.back().t_s : 1;
+    float kwmax = 1.0f;
+    for (size_t i = 0; i < s.size(); i++)
+        if (s[i].kw > kwmax) kwmax = s[i].kw;
+
+    std::string out;
+    char b[160];
+    snprintf(b, sizeof(b), "<svg viewBox=\"0 0 %d %d\" style=\"width:100%%;max-width:%dpx;height:auto\" xmlns=\"http://www.w3.org/2000/svg\">\n", W, H, W);
+    out += b;
+    out += "<rect width=\"100%\" height=\"100%\" fill=\"#fff\"/>\n";
+    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, PADT, PADL, H-PADB); out += b;
+    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, H-PADB, W-PADR, H-PADB); out += b;
+    snprintf(b, sizeof(b), "<text x=\"4\" y=\"%d\" font-size=\"10\" fill=\"#666\">%.0f kW</text>\n", PADT+8, kwmax); out += b;
+
+    // SOC overlay (light)
+    out += "<polyline fill=\"none\" stroke=\"#9cf\" stroke-width=\"1\" points=\"";
+    for (size_t i = 0; i < s.size(); i++) {
+        float x = PADL + (float)PW * s[i].t_s / tmax;
+        float y = PADT + (float)PH * (1.0f - s[i].soc / 100.0f);
+        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out += b;
+    }
+    out += "\"/>\n";
+
+    // delivered power
+    out += "<polyline fill=\"none\" stroke=\"#06c\" stroke-width=\"2\" points=\"";
+    for (size_t i = 0; i < s.size(); i++) {
+        float x = PADL + (float)PW * s[i].t_s / tmax;
+        float y = PADT + (float)PH * (1.0f - s[i].kw / kwmax);
+        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out += b;
+    }
+    out += "\"/>\n";
+
+    snprintf(b, sizeof(b), "<text x=\"50\" y=\"%d\" font-size=\"10\" fill=\"#06c\">power (kW)</text><text x=\"140\" y=\"%d\" font-size=\"10\" fill=\"#9cf\">SOC %%</text>\n", H-6, H-6);
+    out += b;
+    out += "</svg>\n";
+    return out;
+}
+
 // Write the session-end report. No-op if no meaningful energy was delivered (plug-in then unplug).
 void OvmsVehicleToyotaETNGA::GenerateChargeReport()
 {

@@ -158,6 +158,7 @@ private:
 
     // Charge session report (etnga_charge_report.cpp)
     void UpdateChargeSessionStats();   // live aggregation while charging (peak power, temp range, type)
+    std::string RenderPowerSvg();      // inline SVG power(+SOC)-vs-time chart from m_charge_session.svg
     void GenerateChargeReport();       // write the session-end HTML report to /store/charge-reports/
     void LogChargeEvent(const char* label);            // append a timestamped event
     void AppendChargeCsvRow();                          // stream one CSV row (opens+header on first call)
