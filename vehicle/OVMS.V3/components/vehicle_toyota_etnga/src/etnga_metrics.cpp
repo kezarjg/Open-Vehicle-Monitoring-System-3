@@ -395,6 +395,10 @@ void OvmsVehicleToyotaETNGA::SetBatteryChargingPower(float power)
 {
     ESP_LOGD(TAG, "Battery Charging Power: %f", power);
 
+    // Delivered charge power (valid in AC and DC; 0x161D only answers on AC). This is the
+    // authoritative "power delivered to the battery" used for peak/avg, the chart and the CSV.
+    StandardMetrics.ms_v_charge_power->SetValue(power);
+
     float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
 
     if (lastChargerEnergyLogTime != 0)
@@ -666,7 +670,6 @@ void OvmsVehicleToyotaETNGA::SetChargeType(int chargeType)
 void OvmsVehicleToyotaETNGA::SetChargerInputPower(float power)
 {
     ESP_LOGD(TAG, "Charger Input Power: %f", power);
-    StandardMetrics.ms_v_charge_power->SetValue(power);
 
     float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
     int now = esp_log_timestamp();
