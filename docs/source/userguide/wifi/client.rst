@@ -76,3 +76,46 @@ set the SSID of this network in the configuration item ``auto wifi.ssid.client``
   add the SSID of this network just after the mode::
 
     wifi mode client "My Wifi Network"
+
+
+----------------------
+WiFi Priority Networks
+----------------------
+
+When using scan mode (multiple known SSIDs, no fixed client SSID), you can optionally tell the
+module to prefer networks in a specific order and automatically upgrade to a more-preferred one
+when it comes into range.
+
+**What it does:** At connect time the module joins the highest-priority known network that is in
+range. While connected to a lower-priority network it periodically rescans and switches to any
+higher-priority network whose signal is at or above the good-signal threshold
+(``network wifi.sq.good``). A brief disconnect occurs on each upgrade. No scanning is done while
+on the highest-priority network.
+
+**Enabling priority networks:**
+
+Enable the feature and define the ordered list of SSIDs::
+
+  OVMS# config set network wifi.priority.enable yes
+  OVMS# config set network wifi.priority "home,hotspot,cafe"
+
+Each SSID in the list must still have its password configured as usual::
+
+  OVMS# config set wifi.ssid home <passphrase>
+  OVMS# config set wifi.ssid hotspot <passphrase>
+
+Optionally tune the upgrade-scan interval (default 60 seconds, minimum 10)::
+
+  OVMS# config set network wifi.priority.interval 30
+
+**Behaviour summary:**
+
+- At connection time, the module joins the highest-priority in-range known network.
+- While on a lower-priority network, the module scans every ``wifi.priority.interval`` seconds
+  and switches to any higher-priority network that is in range with signal >=
+  ``network wifi.sq.good``. Expect a brief disconnect on switch.
+- No background scanning is done while already on the top-priority network.
+- The feature is active only in scan mode (``auto wifi.ssid.client`` empty) with ``client`` or
+  ``apclient`` WiFi mode.
+- Networks with hidden SSIDs cannot participate in priority ordering.
+- ``wifi status`` shows the current network's priority rank.

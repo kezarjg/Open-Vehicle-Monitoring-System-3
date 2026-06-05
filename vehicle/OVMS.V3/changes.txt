@@ -1,6 +1,18 @@
 Open Vehicle Monitor System v3 - Change log
 
 ????-??-?? ???  ???????  OTA release
+- WiFi: optional priority network list. When enabled, the module prefers known WiFi networks in a
+    user-defined order and, while connected to a lower-priority network, periodically scans and
+    upgrades to a higher-priority one when it is in range with good signal (>= network wifi.sq.good).
+    Active only in scan mode (no fixed client SSID) in client or apclient mode. Default off.
+    Hidden SSIDs cannot participate.
+  New configs:
+    [network] wifi.priority.enable         -- [bool] enable WiFi priority network list (default: no)
+    [network] wifi.priority                -- comma-separated SSIDs, highest priority first
+                                              (e.g. home,hotspot,cafe); each SSID still needs its
+                                              password configured under wifi.ssid
+    [network] wifi.priority.interval       -- upgrade-scan period in seconds while on a non-top
+                                              network (default: 60, minimum: 10)
 - hw3.1: Fix random crash (abort in esp_sha_read_digest_state) during TLS handshakes by disabling
     mbedTLS hardware SHA acceleration (CONFIG_MBEDTLS_HARDWARE_SHA). The shared ESP32 SHA engine
     could return an all-zero digest state when mbedtls_sha256_clone() snapshotted it mid-handshake,
