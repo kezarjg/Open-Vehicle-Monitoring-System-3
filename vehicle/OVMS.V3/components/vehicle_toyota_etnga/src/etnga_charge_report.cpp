@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <stdio.h>
+#include <math.h>
 #include <fstream>
 #include <string>
 #include <utility>
@@ -89,12 +90,15 @@ void OvmsVehicleToyotaETNGA::LogChargeEvent(const char* label)
         std::make_pair(StandardMetrics.ms_m_monotonic->AsInt(), label));
 }
 
-// Live aggregation while charging: peak power, battery-temp range, and the current phase type.
+// Live aggregation while charging: peak power, battery-temp range, ambient range,
+// delivered-Ah, per-tick CSV row, and downsampled SVG buffer.
 // Called every tick from HandleChargeAcState / HandleChargeDcState.
 void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
 {
     if (!m_charge_session.in_session)
         return;
+
+    int now = StandardMetrics.ms_m_monotonic->AsInt();
 
     float p = StandardMetrics.ms_v_charge_power->AsFloat();
     if (p > m_charge_session.peak_power)
@@ -104,13 +108,82 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
     if (!m_charge_session.temp_seen) {
         m_charge_session.temp_min = m_charge_session.temp_max = t;
         m_charge_session.temp_seen = true;
-    } else if (t < m_charge_session.temp_min) {
-        m_charge_session.temp_min = t;
-    } else if (t > m_charge_session.temp_max) {
-        m_charge_session.temp_max = t;
-    }
+    } else if (t < m_charge_session.temp_min) m_charge_session.temp_min = t;
+    else if (t > m_charge_session.temp_max) m_charge_session.temp_max = t;
+
+    float amb = StandardMetrics.ms_v_env_temp->AsFloat();
+    if (!m_charge_session.amb_seen) {
+        m_charge_session.amb_min = m_charge_session.amb_max = amb;
+        m_charge_session.amb_seen = true;
+    } else if (amb < m_charge_session.amb_min) m_charge_session.amb_min = amb;
+    else if (amb > m_charge_session.amb_max) m_charge_session.amb_max = amb;
 
     m_charge_session.is_dc = (static_cast<PollState>(m_poll_state) == PollState::CHARGE_DC);
+
+    // Delivered-Ah (charge-side coulomb): integrate pack current over dt.
+    if (m_charge_session.last_sample_monotonic != 0) {
+        float dt_h = (now - m_charge_session.last_sample_monotonic) / 3600.0f;
+        m_charge_session.delivered_ah += fabsf(StandardMetrics.ms_v_bat_current->AsFloat()) * dt_h;
+    }
+    m_charge_session.last_sample_monotonic = now;
+
+    // Stream a CSV row every tick (~1 s while charging).
+    AppendChargeCsvRow();
+
+    // Feed the downsampled SVG buffer at svg_interval_s.
+    if (m_charge_session.last_svg_monotonic == 0 ||
+        now - m_charge_session.last_svg_monotonic >= m_charge_session.svg_interval_s) {
+        ChargeSessionState::Sample s;
+        s.t_s = now - m_charge_session.start_monotonic;
+        s.kw  = p;
+        s.soc = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
+        m_charge_session.svg.push_back(s);
+        m_charge_session.last_svg_monotonic = now;
+        // Cap ~300 points: when exceeded, double the interval and decimate (keep every other).
+        if (m_charge_session.svg.size() > 300) {
+            std::vector<ChargeSessionState::Sample> dec;
+            for (size_t i = 0; i < m_charge_session.svg.size(); i += 2)
+                dec.push_back(m_charge_session.svg[i]);
+            m_charge_session.svg.swap(dec);
+            m_charge_session.svg_interval_s *= 2;
+        }
+    }
+}
+
+void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
+{
+    if (m_charge_session.base.empty())
+        return;
+    std::string path = m_charge_session.base + ".csv";
+    std::ofstream f(path, m_charge_session.csv_started
+        ? (std::ios::out | std::ios::app)
+        : (std::ios::out | std::ios::trunc));
+    if (!f) return;
+
+    if (!m_charge_session.csv_started) {
+        f << "elapsed_s,soc_pct,delivered_kw,pack_v,pack_a,batt_temp_c,ambient_c,state,"
+             "station_max_kw,station_max_a,station_max_v,car_perm_kw,target_a,grid_kw,present_v,present_a\n";
+        m_charge_session.csv_started = true;
+    }
+
+    int elapsed = StandardMetrics.ms_m_monotonic->AsInt() - m_charge_session.start_monotonic;
+    char row[256];
+    snprintf(row, sizeof(row),
+        "%d,%.0f,%.3f,%.1f,%.1f,%.1f,%.1f,%s,"
+        "%.2f,%.0f,%.0f,%.2f,%.0f,%.3f,%.0f,%.0f\n",
+        elapsed,
+        StandardMetrics.ms_v_bat_soc->AsFloat(),
+        StandardMetrics.ms_v_charge_power->AsFloat(),
+        StandardMetrics.ms_v_bat_voltage->AsFloat(),
+        StandardMetrics.ms_v_bat_current->AsFloat(),
+        StandardMetrics.ms_v_bat_temp->AsFloat(),
+        StandardMetrics.ms_v_env_temp->AsFloat(),
+        (m_charge_session.is_dc ? "DC" : "AC"),
+        m_v_charge_sta_max_p->AsFloat(), m_v_charge_sta_max_i->AsFloat(), m_v_charge_sta_max_v->AsFloat(),
+        m_v_charge_perm->AsFloat(), m_v_charge_tgti->AsFloat(),
+        m_v_charge_grid_power->AsFloat(),
+        StandardMetrics.ms_v_charge_voltage->AsFloat(), StandardMetrics.ms_v_charge_current->AsFloat());
+    f << row;
 }
 
 // Retain only the newest CHARGE_REPORT_MAX .html reports (timestamp filenames sort chronologically).

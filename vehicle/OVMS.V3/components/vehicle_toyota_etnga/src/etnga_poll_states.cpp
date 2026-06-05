@@ -8,6 +8,8 @@
    Licensed under the MIT License. See the LICENSE file for details.
 */
 
+#include <time.h>
+#include <sys/stat.h>
 #include "ovms_log.h"
 #include "vehicle_toyota_etnga.h"
 
@@ -336,6 +338,19 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
         m_charge_session.svg_interval_s = 20;
         m_charge_session.last_sample_monotonic = 0;
         m_charge_session.last_svg_monotonic = 0;
+        // basename = "<dir>/<UTC timestamp>" (no extension); files are <base>.html / <base>.csv
+        {
+            char ts[40];
+            int utc = m_charge_session.start_utc;
+            if (utc > 1000000000) {
+                time_t st = (time_t) utc; struct tm tmv; gmtime_r(&st, &tmv);
+                strftime(ts, sizeof(ts), "%Y%m%dT%H%M%SZ", &tmv);
+            } else {
+                snprintf(ts, sizeof(ts), "charge-%d", m_charge_session.start_monotonic);
+            }
+            mkdir(ChargeReportDir().c_str(), 0755);
+            m_charge_session.base = ChargeReportDir() + "/" + ts;
+        }
         LogChargeEvent("Plugged in — handshake");
         ESP_LOGI(TAG, "Charge session opened (SOC %d%%)", m_charge_session.start_soc);
     }
