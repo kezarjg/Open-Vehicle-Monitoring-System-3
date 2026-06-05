@@ -28,6 +28,11 @@ Open Vehicle Monitor System v3 - Change log
     poll (0x106E) now runs at 1 Hz so the cabin-energy integral matches the battery integrator.
     New metric:
       xte.v.e.hvac.kwh.drive            -- Cabin/HVAC energy used during the current trip (kWh)
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): at the end of each charging session the module
+    now writes a self-contained HTML charge report to /store/charge-reports/<timestamp>.html
+    (SOC delta, energy delivered + from grid, peak/avg power, battery-temp range, AC/DC, outcome).
+    The newest 50 reports are kept. This first version covers single-phase, live-telemetry
+    sessions; multi-phase, sleep-survival and limiting-side attribution are planned follow-ups.
 
 2026-05-17 MB   3.3.006  OTA release
 - VW e-Up: extended battery health / aging info (with web UI integration): total battery age,

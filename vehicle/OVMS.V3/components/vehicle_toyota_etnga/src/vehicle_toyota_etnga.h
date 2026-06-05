@@ -71,9 +71,15 @@ protected:
     int  m_charge_state_entry = 0;     // monotonic s of last charge-state entry (handshake 60s timer)
 
     struct ChargeSessionState {
-        bool in_session = false;
-        int  start_monotonic = 0;
-        int  start_soc = -1;
+        bool  in_session = false;
+        int   start_monotonic = 0;
+        int   start_soc = -1;
+        int   start_utc = 0;          // wallclock (epoch s) at session open — report timestamp/filename
+        bool  is_dc = false;          // last observed charge phase type (DC fast vs AC)
+        float peak_power = 0.0f;      // max charge power seen (kW)
+        bool  temp_seen = false;      // whether temp_min/max have been initialised
+        float temp_min = 0.0f;        // battery temperature range over the session (degC)
+        float temp_max = 0.0f;
     };
     ChargeSessionState m_charge_session;
 
@@ -126,6 +132,10 @@ private:
 
     void InitializeMetrics();  // Initializes the metrics specific to this vehicle module
     void ResetStaleMetrics();  // Checks if state transition metrics are stale (and resets them)
+
+    // Charge session report (etnga_charge_report.cpp)
+    void UpdateChargeSessionStats();   // live aggregation while charging (peak power, temp range, type)
+    void GenerateChargeReport();       // write the session-end HTML report to /store/charge-reports/
 
     // Incoming message handling functions
     void IncomingAirConditionerSystem(uint16_t pid);
