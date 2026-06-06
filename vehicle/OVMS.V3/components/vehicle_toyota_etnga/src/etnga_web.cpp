@@ -156,10 +156,17 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
     c.done();
 }
 
-// WebDispChgMetrics: live charging dashboard. Values auto-update via the
-// framework's data-metric mechanism (script.js polls /api/status).
+// WebDispChgMetrics: live charging monitor. Auto-selects an AC or DC layout from the active
+// session (idle when not charging). Metric panels auto-update via the framework data-metric
+// mechanism; the chart + state history are seeded from the in-memory session buffers and updated
+// live on msg:metrics. The whole body is wrapped in a ".receiver" element (id "chgmon") so the
+// framework delivers metric updates to it.
 void OvmsVehicleToyotaETNGA::WebDispChgMetrics(PageEntry_t& p, PageContext_t& c)
 {
+    OvmsVehicleToyotaETNGA* v = (OvmsVehicleToyotaETNGA*) MyVehicleFactory.ActiveVehicle();
+    bool in_session = (v && v->m_charge_session.in_session);
+    bool dc = (in_session && v->m_charge_session.is_dc);
+
     c.head(200);
     PAGE_HOOK("body.pre");
 
@@ -167,54 +174,135 @@ void OvmsVehicleToyotaETNGA::WebDispChgMetrics(PageEntry_t& p, PageContext_t& c)
         "<style>\n"
         "h6.metric-head { margin-bottom: 0; color: #676767; font-size: 15px; }\n"
         ".night h6.metric-head { color: unset; }\n"
-        "</style>\n"
-        "<div class=\"panel panel-primary\">"
+        "#chghist td, #chghist th { padding: .1rem .5rem; font-size: 13px; }\n"
+        "</style>\n");
+
+    if (!in_session) {
+        c.print(
+            "<div class=\"panel panel-primary\">"
+              "<div class=\"panel-heading\">");
+        c.print(etnga_vehicle_name() + " charging monitor");
+        c.print(
+              "</div>"
+              "<div class=\"panel-body\">"
+                "<p>No active charge session.</p>"
+                "<p><a class=\"btn btn-default\" href=\"/xte/reports\">View saved charge reports</a></p>"
+              "</div>"
+            "</div>");
+        PAGE_HOOK("body.post");
+        c.done();
+        return;
+    }
+
+    c.print(
+        "<div class=\"panel panel-primary receiver\" id=\"chgmon\">"
           "<div class=\"panel-heading\">");
-    c.print(etnga_vehicle_name() + " charging monitor");
+    c.print(etnga_vehicle_name() + (dc ? " — DC fast charging" : " — AC charging"));
     c.print(
           "</div>"
-          "<div class=\"panel-body\">"
-            "<div class=\"receiver\">"
+          "<div class=\"panel-body\">");
 
-              "<div class=\"clearfix\">"
-                "<div class=\"metric progress\" data-metric=\"v.b.soc\" data-prec=\"1\">"
-                  "<div class=\"progress-bar value-low text-left\" role=\"progressbar\" aria-valuenow=\"0\" aria-valuemin=\"0\" aria-valuemax=\"100\" style=\"width:0%\">"
-                    "<div><span class=\"label\">SoC</span><span class=\"value\">?</span><span class=\"unit\">%</span></div>"
-                  "</div>"
-                "</div>"
-              "</div>"
+    if (dc) WebChgRenderDc(c, v);
+    else    WebChgRenderAc(c, v);
 
-              "<div class=\"clearfix\">"
-                "<h6 class=\"metric-head\">Battery</h6>"
-                "<div class=\"metric number\" data-metric=\"v.b.power\" data-prec=\"3\"><span class=\"label\">Power</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
-                "<div class=\"metric number\" data-metric=\"v.b.voltage\" data-prec=\"1\"><span class=\"label\">Voltage</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
-                "<div class=\"metric number\" data-metric=\"v.b.current\" data-prec=\"1\"><span class=\"label\">Current</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
-                "<div class=\"metric number\" data-metric=\"v.b.temp\" data-prec=\"1\"><span class=\"label\">Temp</span><span class=\"value\">?</span><span class=\"unit\">&deg;C</span></div>"
-              "</div>"
+    WebChgChartJs(c, v, dc);
+    WebChgStateHistoryJs(c, v, dc);
 
-              "<div class=\"clearfix\">"
-                "<h6 class=\"metric-head\">Charger</h6>"
-                "<div class=\"metric text\" data-metric=\"v.c.state\"><span class=\"label\">State</span><span class=\"value\">?</span></div>"
-                "<div class=\"metric text\" data-metric=\"v.c.type\"><span class=\"label\">Type</span><span class=\"value\">?</span></div>"
-                "<div class=\"metric number\" data-metric=\"v.c.power\" data-prec=\"3\"><span class=\"label\">Power</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
-                "<div class=\"metric number\" data-metric=\"v.c.voltage\" data-prec=\"1\"><span class=\"label\">Voltage</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
-                "<div class=\"metric number\" data-metric=\"v.c.current\" data-prec=\"1\"><span class=\"label\">Current</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
-              "</div>"
-
-              "<div class=\"clearfix\">"
-                "<h6 class=\"metric-head\">Session energy</h6>"
-                "<div class=\"metric number\" data-metric=\"v.c.kwh\" data-prec=\"2\"><span class=\"label\">Charged</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
-                "<div class=\"metric number\" data-metric=\"v.c.kwh.grid\" data-prec=\"2\"><span class=\"label\">From grid</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
-                "<div class=\"metric number\" data-metric=\"xte.v.e.hvac.kwh\" data-prec=\"3\"><span class=\"label\">Cabin (My Room)</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
-              "</div>"
-
-            "</div>"
+    c.print(
           "</div>"
         "</div>");
 
     PAGE_HOOK("body.post");
     c.done();
 }
+
+// AC charging metric panels (data-metric widgets auto-update). No station-max (DC-only PID).
+void OvmsVehicleToyotaETNGA::WebChgRenderAc(PageContext_t& c, OvmsVehicleToyotaETNGA* v)
+{
+    c.print(
+        "<div class=\"clearfix\">"
+          "<div class=\"metric progress\" data-metric=\"v.b.soc\" data-prec=\"1\">"
+            "<div class=\"progress-bar value-low text-left\" role=\"progressbar\" aria-valuenow=\"0\" aria-valuemin=\"0\" aria-valuemax=\"100\" style=\"width:0%\">"
+              "<div><span class=\"label\">SoC</span><span class=\"value\">?</span><span class=\"unit\">%</span></div>"
+            "</div>"
+          "</div>"
+        "</div>"
+
+        "<div class=\"clearfix\">"
+          "<h6 class=\"metric-head\">Charger (AC)</h6>"
+          "<div class=\"metric text\" data-metric=\"v.c.state\"><span class=\"label\">State</span><span class=\"value\">?</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.c.power\" data-prec=\"3\"><span class=\"label\">Delivered</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
+          "<div class=\"metric number\" data-metric=\"xte.v.c.gridpower\" data-prec=\"3\"><span class=\"label\">Grid input</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.c.voltage\" data-prec=\"1\"><span class=\"label\">Voltage</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.c.current\" data-prec=\"1\"><span class=\"label\">Current</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
+        "</div>"
+
+        "<div class=\"clearfix\">"
+          "<h6 class=\"metric-head\">Battery</h6>"
+          "<div class=\"metric number\" data-metric=\"v.b.power\" data-prec=\"3\"><span class=\"label\">Power</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.b.voltage\" data-prec=\"1\"><span class=\"label\">Voltage</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.b.current\" data-prec=\"1\"><span class=\"label\">Current</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.b.temp\" data-prec=\"1\"><span class=\"label\">Temp</span><span class=\"value\">?</span><span class=\"unit\">&deg;C</span></div>"
+        "</div>"
+
+        "<div class=\"clearfix\">"
+          "<h6 class=\"metric-head\">Session energy</h6>"
+          "<div class=\"metric number\" data-metric=\"v.c.kwh\" data-prec=\"2\"><span class=\"label\">Charged</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.c.kwh.grid\" data-prec=\"2\"><span class=\"label\">From grid</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
+          "<div class=\"metric number\" data-metric=\"xte.v.e.hvac.kwh\" data-prec=\"3\"><span class=\"label\">Cabin (My Room)</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
+        "</div>");
+}
+
+// DC fast-charging metric panels. Adds station + car-permitted; live HLC state shown as text
+// (decoded client-side in WebChgStateHistoryJs's label map via a dedicated span updated there).
+void OvmsVehicleToyotaETNGA::WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaETNGA* v)
+{
+    c.print(
+        "<div class=\"clearfix\">"
+          "<div class=\"metric progress\" data-metric=\"v.b.soc\" data-prec=\"1\">"
+            "<div class=\"progress-bar value-low text-left\" role=\"progressbar\" aria-valuenow=\"0\" aria-valuemin=\"0\" aria-valuemax=\"100\" style=\"width:0%\">"
+              "<div><span class=\"label\">SoC</span><span class=\"value\">?</span><span class=\"unit\">%</span></div>"
+            "</div>"
+          "</div>"
+        "</div>"
+
+        "<div class=\"clearfix\">"
+          "<h6 class=\"metric-head\">Handshake</h6>"
+          "<div class=\"metric text\"><span class=\"label\">HLC state</span><span class=\"value\" id=\"hlcstate\">?</span></div>"
+        "</div>"
+
+        "<div class=\"clearfix\">"
+          "<h6 class=\"metric-head\">Station</h6>"
+          "<div class=\"metric number\" data-metric=\"xte.v.c.stamaxp\" data-prec=\"1\"><span class=\"label\">Max power</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
+          "<div class=\"metric number\" data-metric=\"xte.v.c.stamaxv\" data-prec=\"0\"><span class=\"label\">Max V</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
+          "<div class=\"metric number\" data-metric=\"xte.v.c.stamaxi\" data-prec=\"0\"><span class=\"label\">Max A</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.c.voltage\" data-prec=\"1\"><span class=\"label\">Present V</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.c.current\" data-prec=\"1\"><span class=\"label\">Present A</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
+        "</div>"
+
+        "<div class=\"clearfix\">"
+          "<h6 class=\"metric-head\">Car</h6>"
+          "<div class=\"metric number\" data-metric=\"v.c.power\" data-prec=\"3\"><span class=\"label\">Delivered</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
+          "<div class=\"metric number\" data-metric=\"xte.v.c.perm\" data-prec=\"2\"><span class=\"label\">Permitted</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
+          "<div class=\"metric number\" data-metric=\"xte.v.c.tgti\" data-prec=\"0\"><span class=\"label\">Target</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
+        "</div>"
+
+        "<div class=\"clearfix\">"
+          "<h6 class=\"metric-head\">Battery</h6>"
+          "<div class=\"metric number\" data-metric=\"v.b.power\" data-prec=\"3\"><span class=\"label\">Power</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.b.voltage\" data-prec=\"1\"><span class=\"label\">Voltage</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.b.current\" data-prec=\"1\"><span class=\"label\">Current</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.b.temp\" data-prec=\"1\"><span class=\"label\">Temp</span><span class=\"value\">?</span><span class=\"unit\">&deg;C</span></div>"
+        "</div>"
+
+        "<div class=\"clearfix\">"
+          "<h6 class=\"metric-head\">Session energy</h6>"
+          "<div class=\"metric number\" data-metric=\"v.c.kwh\" data-prec=\"2\"><span class=\"label\">Charged</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
+        "</div>");
+}
+
+void OvmsVehicleToyotaETNGA::WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc) {}
+void OvmsVehicleToyotaETNGA::WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc) {}
 
 // WebChargeReports: index of saved charge-session reports (newest first).
 // Each entry links to WebChargeReport, which streams the stored HTML file.

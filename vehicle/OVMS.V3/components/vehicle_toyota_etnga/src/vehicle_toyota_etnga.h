@@ -56,6 +56,10 @@ public:
     void WebDeInit();
     static void WebCfgFeatures(PageEntry_t& p, PageContext_t& c);
     static void WebDispChgMetrics(PageEntry_t& p, PageContext_t& c);
+    static void WebChgRenderAc(PageContext_t& c, OvmsVehicleToyotaETNGA* v);   // AC charging panels
+    static void WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaETNGA* v);   // DC charging panels
+    static void WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc);          // live chart
+    static void WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc);   // live state history
     static void WebChargeReports(PageEntry_t& p, PageContext_t& c);   // index of saved charge reports
     static void WebChargeReport(PageEntry_t& p, PageContext_t& c);    // stream one report (raw HTML)
 #endif // CONFIG_OVMS_COMP_WEBSERVER
