@@ -366,7 +366,62 @@ void OvmsVehicleToyotaETNGA::WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaET
         "</script>\n",
         dc ? 1 : 0, init.c_str(), elapsed);
 }
-void OvmsVehicleToyotaETNGA::WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc) {}
+// Emit the state-history table, a backfill literal of the in-memory event log, and JS that seeds
+// the table then appends a row whenever the watched state metric changes (xte.v.c.hlc on DC,
+// xte.v.c.acop on AC). On DC it also keeps the #hlcstate header span current. Labels come from
+// inline maps so no extra string metric is needed.
+void OvmsVehicleToyotaETNGA::WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc)
+{
+    // Backfill literal from the event log: [relative_seconds, "label"].
+    std::string evt = "[";
+    const std::vector<std::pair<int,const char*>>& ev = v->m_charge_session.events;
+    int start = v->m_charge_session.start_monotonic;
+    char b[160];
+    for (size_t i = 0; i < ev.size(); i++) {
+        int rel = ev[i].first - start; if (rel < 0) rel = 0;
+        snprintf(b, sizeof(b), "%s[%d,\"%s\"]", (i ? "," : ""), rel, ev[i].second);
+        evt += b;
+    }
+    evt += "]";
+
+    int elapsed = StandardMetrics.ms_m_monotonic->AsInt() - start;
+    if (elapsed < 0) elapsed = 0;
+    int curstate = dc ? v->m_v_charge_hlc->AsInt() : v->m_v_charge_ac_op->AsInt();
+
+    c.print(
+        "<h6 class=\"metric-head\">Charging state history</h6>\n"
+        "<table id=\"chghist\" class=\"table table-condensed\"><thead><tr><th>Time</th><th>State</th></tr></thead><tbody></tbody></table>\n");
+
+    c.printf(
+        "<script>\n"
+        "(function(){\n"
+        "  var DC=%d;\n"
+        "  var EVT=%s;\n"
+        "  var loadT=Date.now()/1000, baseT=%d, lastState=%d;\n"
+        "  var HLC={0:'SLAC',1:'SDP',2:'App-protocol negotiation',3:'Session setup',4:'Service discovery',"
+        "5:'Service detail',6:'Payment service selection',7:'Certificate installation',8:'Certificate update',"
+        "9:'Payment details',10:'Authorization',11:'Charge-parameter discovery',12:'Cable check',13:'Precharge',"
+        "14:'Power delivery (start)',15:'Current demand',16:'Power delivery (stop)',17:'Welding detection',"
+        "18:'Session stop',255:'Unconnected'};\n"
+        "  var ACOP={1:'Startup',2:'Running',3:'Finishing'};\n"
+        "  function fmt(sec){var m=Math.floor(sec/60),s=Math.floor(sec%%60);return m+':'+(s<10?'0':'')+s;}\n"
+        "  function row(sec,label){$('#chghist tbody').append('<tr><td>'+fmt(sec)+'</td><td>'+label+'</td></tr>');}\n"
+        "  for(var i=0;i<EVT.length;i++) row(EVT[i][0],EVT[i][1]);\n"
+        "  if(DC){var hn=HLC[lastState]; if(hn) $('#hlcstate').text(hn);}\n"
+        "  function onUpd(){\n"
+        "    var m=DC?metrics['xte.v.c.hlc']:metrics['xte.v.c.acop'];\n"
+        "    if(m==null) return; m=parseInt(m);\n"
+        "    if(DC){var hn=HLC[m]; if(hn) $('#hlcstate').text(hn);}\n"
+        "    if(m===lastState) return; lastState=m;\n"
+        "    var label=DC?('HLC: '+(HLC[m]||('state 0x'+m.toString(16)))):(ACOP[m]?('AC: '+ACOP[m]):null);\n"
+        "    if(label==null) return;\n"
+        "    row(baseT+(Date.now()/1000-loadT),label);\n"
+        "  }\n"
+        "  $('#chgmon').on('msg:metrics',onUpd);\n"
+        "})();\n"
+        "</script>\n",
+        dc ? 1 : 0, evt.c_str(), elapsed, curstate);
+}
 
 // WebChargeReports: index of saved charge-session reports (newest first).
 // Each entry links to WebChargeReport, which streams the stored HTML file.
