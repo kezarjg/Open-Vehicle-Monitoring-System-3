@@ -56,6 +56,10 @@ public:
     void WebDeInit();
     static void WebCfgFeatures(PageEntry_t& p, PageContext_t& c);
     static void WebDispChgMetrics(PageEntry_t& p, PageContext_t& c);
+    static void WebChgRenderAc(PageContext_t& c, OvmsVehicleToyotaETNGA* v);   // AC charging panels
+    static void WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaETNGA* v);   // DC charging panels
+    static void WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc);          // live chart
+    static void WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc);   // live state history
     static void WebChargeReports(PageEntry_t& p, PageContext_t& c);   // index of saved charge reports
     static void WebChargeReport(PageEntry_t& p, PageContext_t& c);    // stream one report (raw HTML)
 #endif // CONFIG_OVMS_COMP_WEBSERVER
@@ -95,6 +99,7 @@ protected:
         // v2: event log (monotonic seconds, static label string)
         std::vector<std::pair<int,const char*>> events;
         int   last_hlc = -1;               // last 0x1666 HLC state logged as an event (change detection)
+        int   last_acop = -1;              // last 0x1684 AC-Op state logged as an event (change detection)
         // v2: downsampled chart buffer (per sample: delivered kW, SOC, station-offered + car-permitted kW)
         struct Sample { int t_s; float kw; int soc; float sta_max; float car_perm; };
         std::vector<Sample> svg;
@@ -166,6 +171,7 @@ private:
     std::string ChargeReportDir();                      // "/sd/charge-reports" if SD mounted else "/store/..."
     static const char* ChargeOutcomeLabel(int code);    // 0x1688 enum -> human text
     static const char* HlcStateLabel(int code);         // 0x1666 DC HLC state enum -> human text ("" if unknown)
+    static const char* AcOpStatusLabel(int code);       // 0x1684 AC-Op state enum -> human text ("" for Stop/unknown)
     std::string LookupLocationName(float lat, float lon); // matching OVMS named-location (geofence), or ""
 
     // Incoming message handling functions

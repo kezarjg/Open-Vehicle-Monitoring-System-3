@@ -1,161 +1,159 @@
-/*
-   Project:       Open Vehicle Monitor System
-   Module:        Vehicle Toyota e-TNGA platform — web UI
-   Date:          5th June 2026
+# e-TNGA Charging Monitor (AC/DC views + live chart + state history) Implementation Plan
 
-   (C) 2026       Jerry Kezar <solterra@kezarnet.com>
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-   Licensed under the MIT License. See the LICENSE file for details.
-*/
+**Goal:** Rework the e-TNGA "Charging monitor" web page (`/xte/charge`) into auto-selected AC vs DC vs idle views with a live Highcharts power/SOC chart and a live "charging state history", and add AC-Op (0x1684) transition logging so AC sessions get a state history in the report too (DC already has HLC 0x1666 from #95).
 
-#include <sdkconfig.h>
-#ifdef CONFIG_OVMS_COMP_WEBSERVER
+**Architecture:** All work is in the e-TNGA component. The static page handler reads the active vehicle instance (`MyVehicleFactory.ActiveVehicle()` cast to `OvmsVehicleToyotaETNGA*`) and, at render time, embeds the in-memory session sample buffer (`m_charge_session.svg`) and event log (`m_charge_session.events`) as JS literals (no new HTTP route). Highcharts (bundled, lazy-loaded) draws the backfilled curve, then appends points/rows live on the framework's `msg:metrics` WebSocket event.
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <string>
-#include <vector>
-#include <algorithm>
-#include <utility>
+**Tech Stack:** C++ (ESP-IDF 3.3, GCC), OVMS web framework (`PageContext_t`, `data-metric` widgets, `msg:metrics`), Highcharts 6.0.7, jQuery 1.12.4.
 
-#include "ovms_config.h"
-#include "ovms_metrics.h"
-#include "ovms_webserver.h"
-#include "ovms_utils.h"
-#include "metrics_standard.h"
+**Testing reality:** No host unit tests exist; firmware builds only on GitHub CI. Each task is a self-contained compilable increment + commit. The build gate is CI after the code tasks (Task 6); behavior is validated on-vehicle after deploy (Task 7).
 
-#include "vehicle_toyota_etnga.h"
+**Worktree:** `/home/devuser/wt-etnga-report-fixes`, branch `feature/etnga-charge-report-fixes` (off `origin/master`). All paths below are relative to that worktree.
 
-// A charge-report storage location: a short label (used in links/UI) and its directory.
-struct etnga_report_loc { const char* label; const char* dir; };
+---
 
-// Report locations to scan, in precedence order (first wins on a same-name collision):
-// the SD card (only when mounted) then internal flash. The write side picks one of
-// these (see OvmsVehicleToyotaETNGA::ChargeReportDir()); reading both keeps reports
-// visible after the SD card is added or removed. Kept local to avoid a non-static
-// call from these static handlers.
-static std::vector<etnga_report_loc> etnga_report_locs()
+## File Structure
+
+- `vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/vehicle_toyota_etnga.h`
+  — add `last_acop` to `ChargeSessionState`; declare `AcOpStatusLabel` and the four new static web helpers.
+- `vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_charge_report.cpp`
+  — add `AcOpStatusLabel(int)` decoder (next to `HlcStateLabel`).
+- `vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_metrics.cpp`
+  — `SetAcOpStatus`: log AC-Op transitions as session events (mirror of `SetHlcState`).
+- `vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_web.cpp`
+  — restructure `WebDispChgMetrics` into a dispatcher; add `WebChgRenderAc`, `WebChgRenderDc`,
+    `WebChgChartJs`, `WebChgStateHistoryJs`.
+- `vehicle/OVMS.V3/changes.txt` — user-facing entry.
+
+---
+
+## Task 1: AC-Op (0x1684) state decoder + transition logging
+
+Gives AC sessions a state history in the report (symmetric with DC's HLC), and provides the label
+map the monitor reuses.
+
+**Files:**
+- Modify: `vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/vehicle_toyota_etnga.h`
+- Modify: `vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_charge_report.cpp`
+- Modify: `vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_metrics.cpp`
+
+- [ ] **Step 1: Add `last_acop` field to `ChargeSessionState`**
+
+In `vehicle_toyota_etnga.h`, find:
+
+```cpp
+        int   last_hlc = -1;               // last 0x1666 HLC state logged as an event (change detection)
+```
+
+Add immediately after it:
+
+```cpp
+        int   last_acop = -1;              // last 0x1684 AC-Op state logged as an event (change detection)
+```
+
+- [ ] **Step 2: Declare `AcOpStatusLabel` in the header**
+
+In `vehicle_toyota_etnga.h`, find:
+
+```cpp
+    static const char* HlcStateLabel(int code);         // 0x1666 DC HLC state enum -> human text ("" if unknown)
+```
+
+Add immediately after it:
+
+```cpp
+    static const char* AcOpStatusLabel(int code);       // 0x1684 AC-Op state enum -> human text ("" for Stop/unknown)
+```
+
+- [ ] **Step 3: Implement `AcOpStatusLabel` in `etnga_charge_report.cpp`**
+
+Find the end of `HlcStateLabel` (the closing brace after the `0xFF`/`default` switch). Immediately
+after that function's closing `}`, add:
+
+```cpp
+// Map a 0x1684 "AC Charging Operation Status" enum (confirmed 4-state: Stop/Startup/Running/
+// Finishing, per solterra-can) to a human-readable label. Returns "" for Stop(0)/unknown so the
+// caller skips it — that keeps DC sessions (where AC-Op stays Stop) free of spurious AC entries;
+// the final stop is already covered by the outcome / "Charging paused" / "Unplugged" events.
+const char* OvmsVehicleToyotaETNGA::AcOpStatusLabel(int code)
 {
-    std::vector<etnga_report_loc> locs;
-    struct stat st;
-    if (stat("/sd", &st) == 0 && S_ISDIR(st.st_mode))
-        locs.push_back({ "sd", "/sd/charge-reports" });
-    locs.push_back({ "store", "/store/charge-reports" });
-    return locs;
-}
-
-// Map a location label back to its directory, or "" if the label is unknown.
-static std::string etnga_report_dir_for(const std::string& loc)
-{
-    if (loc == "sd")    return "/sd/charge-reports";
-    if (loc == "store") return "/store/charge-reports";
-    return "";
-}
-
-// Friendly name of the active vehicle ("Subaru Solterra" / "Toyota bZ4X") for page titles;
-// falls back to the platform name if unavailable.
-static std::string etnga_vehicle_name()
-{
-    const char* n = MyVehicleFactory.ActiveVehicleName();
-    return (n && *n) ? std::string(n) : std::string("Toyota e-TNGA");
-}
-
-// WebInit: register the e-TNGA pages in the vehicle menu.
-// Shared by all e-TNGA vehicles (Subaru Solterra, Toyota bZ4X).
-void OvmsVehicleToyotaETNGA::WebInit()
-{
-    MyWebServer.RegisterPage("/bms/cellmon", "BMS cell monitor", OvmsWebServer::HandleBmsCellMonitor, PageMenu_Vehicle, PageAuth_Cookie);
-    MyWebServer.RegisterPage("/xte/charge", "Charging monitor", WebDispChgMetrics, PageMenu_Vehicle, PageAuth_Cookie);
-    MyWebServer.RegisterPage("/xte/reports", "Charge reports", WebChargeReports, PageMenu_Vehicle, PageAuth_Cookie);
-    MyWebServer.RegisterPage("/xte/report", "Charge report", WebChargeReport, PageMenu_None, PageAuth_Cookie);
-    MyWebServer.RegisterPage("/xte/config", "Configuration", WebCfgFeatures, PageMenu_Vehicle, PageAuth_Cookie);
-}
-
-void OvmsVehicleToyotaETNGA::WebDeInit()
-{
-    MyWebServer.DeregisterPage("/bms/cellmon");
-    MyWebServer.DeregisterPage("/xte/charge");
-    MyWebServer.DeregisterPage("/xte/reports");
-    MyWebServer.DeregisterPage("/xte/report");
-    MyWebServer.DeregisterPage("/xte/config");
-}
-
-// WebCfgFeatures: configure the e-TNGA TPMS alert thresholds (config namespace "xte").
-// These are otherwise only settable from the shell `config` command.
-void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
-{
-    std::string error;
-    char buf[32];
-
-    if (c.method == "POST") {
-        float p_warn  = atof(c.getvar("tpms_p_warn").c_str());
-        float p_alert = atof(c.getvar("tpms_p_alert").c_str());
-        float t_warn  = atof(c.getvar("tpms_t_warn").c_str());
-        float t_alert = atof(c.getvar("tpms_t_alert").c_str());
-
-        // Validate: pressures positive; alert at/below warn (low pressure is worse),
-        // temperature alert at/above warn (high temperature is worse).
-        if (p_warn <= 0 || p_alert <= 0)
-            error += "<li>Tyre pressure thresholds must be greater than zero.</li>";
-        if (p_alert > p_warn)
-            error += "<li>Pressure alert should be at or below the warning threshold (lower pressure is worse).</li>";
-        if (t_alert < t_warn)
-            error += "<li>Temperature alert should be at or above the warning threshold (higher temperature is worse).</li>";
-
-        if (error == "") {
-            MyConfig.SetParamValueFloat("xte", "tpms.pressure.warn",  p_warn);
-            MyConfig.SetParamValueFloat("xte", "tpms.pressure.alert", p_alert);
-            MyConfig.SetParamValueFloat("xte", "tpms.temp.warn",      t_warn);
-            MyConfig.SetParamValueFloat("xte", "tpms.temp.alert",     t_alert);
-
-            c.head(200);
-            std::string saved = "<p class=\"lead\">" + etnga_vehicle_name() + " configuration saved.</p>";
-            c.alert("success", saved.c_str());
-        } else {
-            error = "<p class=\"lead\">Error:</p><ul class=\"errorlist\">" + error + "</ul>";
-            c.head(400);
-            c.alert("danger", error.c_str());
-        }
-    } else {
-        c.head(200);
+    switch (code & 0xFF) {
+        case 0x01: return "AC: Startup";
+        case 0x02: return "AC: Running";
+        case 0x03: return "AC: Finishing";
+        default:   return "";   // 0x00 Stop / unknown -> skipped
     }
-
-    // Read current config (defaults mirror etnga_tpms.cpp):
-    float p_warn  = MyConfig.GetParamValueFloat("xte", "tpms.pressure.warn",  240.0f);
-    float p_alert = MyConfig.GetParamValueFloat("xte", "tpms.pressure.alert", 220.0f);
-    float t_warn  = MyConfig.GetParamValueFloat("xte", "tpms.temp.warn",       90.0f);
-    float t_alert = MyConfig.GetParamValueFloat("xte", "tpms.temp.alert",     100.0f);
-
-    std::string cfgtitle = etnga_vehicle_name() + " configuration";
-    c.panel_start("primary", cfgtitle.c_str());
-    c.form_start(p.uri);
-
-    c.fieldset_start("TPMS alert thresholds");
-
-    snprintf(buf, sizeof(buf), "%.0f", p_warn);
-    c.input("number", "Pressure warning", "tpms_p_warn", buf, "Default: 240",
-        "<p>Warn when a tyre drops to this pressure.</p>", "min=\"0\" step=\"1\"", "kPa");
-    snprintf(buf, sizeof(buf), "%.0f", p_alert);
-    c.input("number", "Pressure alert", "tpms_p_alert", buf, "Default: 220",
-        "<p>Alert when a tyre drops to this pressure (at or below the warning level).</p>", "min=\"0\" step=\"1\"", "kPa");
-    snprintf(buf, sizeof(buf), "%.0f", t_warn);
-    c.input("number", "Temperature warning", "tpms_t_warn", buf, "Default: 90",
-        "<p>Warn when a tyre reaches this temperature.</p>", "step=\"1\"", "&deg;C");
-    snprintf(buf, sizeof(buf), "%.0f", t_alert);
-    c.input("number", "Temperature alert", "tpms_t_alert", buf, "Default: 100",
-        "<p>Alert when a tyre reaches this temperature (at or above the warning level).</p>", "step=\"1\"", "&deg;C");
-
-    c.fieldset_end();
-
-    c.print("<hr>");
-    c.input_button("default", "Save");
-    c.form_end();
-    c.panel_end();
-    c.done();
 }
+```
 
+- [ ] **Step 4: Log AC-Op transitions in `SetAcOpStatus`**
+
+In `etnga_metrics.cpp`, find:
+
+```cpp
+void OvmsVehicleToyotaETNGA::SetAcOpStatus(int v) { m_v_charge_ac_op->SetValue(v); }
+```
+
+Replace it with:
+
+```cpp
+void OvmsVehicleToyotaETNGA::SetAcOpStatus(int v)
+{
+    m_v_charge_ac_op->SetValue(v);
+    // Log each new 0x1684 AC-Op state as a session event (mirrors SetHlcState for DC).
+    // Stop/unknown return "" from AcOpStatusLabel and are skipped.
+    if (m_charge_session.in_session && v != m_charge_session.last_acop) {
+        m_charge_session.last_acop = v;
+        const char* lbl = AcOpStatusLabel(v);
+        if (lbl && lbl[0])
+            LogChargeEvent(lbl);
+    }
+}
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd /home/devuser/wt-etnga-report-fixes
+git add vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/vehicle_toyota_etnga.h \
+        vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_charge_report.cpp \
+        vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_metrics.cpp
+git commit -m "etnga: log 0x1684 AC-Op state transitions to the charge session event log"
+```
+
+---
+
+## Task 2: Restructure `WebDispChgMetrics` into AC/DC/idle dispatcher + metric panels
+
+**Files:**
+- Modify: `vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/vehicle_toyota_etnga.h`
+- Modify: `vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_web.cpp`
+
+- [ ] **Step 1: Declare the new static web helpers**
+
+In `vehicle_toyota_etnga.h`, find:
+
+```cpp
+    static void WebDispChgMetrics(PageEntry_t& p, PageContext_t& c);
+```
+
+Add immediately after it:
+
+```cpp
+    static void WebChgRenderAc(PageContext_t& c, OvmsVehicleToyotaETNGA* v);   // AC charging panels
+    static void WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaETNGA* v);   // DC charging panels
+    static void WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc);          // live chart
+    static void WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc);   // live state history
+```
+
+- [ ] **Step 2: Replace `WebDispChgMetrics` with the dispatcher + idle view**
+
+In `etnga_web.cpp`, replace the entire current `WebDispChgMetrics` function (from its leading comment
+`// WebDispChgMetrics: live charging dashboard...` through its closing `}`) with:
+
+```cpp
 // WebDispChgMetrics: live charging monitor. Auto-selects an AC or DC layout from the active
 // session (idle when not charging). Metric panels auto-update via the framework data-metric
 // mechanism; the chart + state history are seeded from the in-memory session buffers and updated
@@ -215,7 +213,13 @@ void OvmsVehicleToyotaETNGA::WebDispChgMetrics(PageEntry_t& p, PageContext_t& c)
     PAGE_HOOK("body.post");
     c.done();
 }
+```
 
+- [ ] **Step 3: Add the AC panel renderer**
+
+In `etnga_web.cpp`, immediately after the `WebDispChgMetrics` function you just wrote, add:
+
+```cpp
 // AC charging metric panels (data-metric widgets auto-update). No station-max (DC-only PID).
 void OvmsVehicleToyotaETNGA::WebChgRenderAc(PageContext_t& c, OvmsVehicleToyotaETNGA* v)
 {
@@ -252,7 +256,13 @@ void OvmsVehicleToyotaETNGA::WebChgRenderAc(PageContext_t& c, OvmsVehicleToyotaE
           "<div class=\"metric number\" data-metric=\"xte.v.e.hvac.kwh\" data-prec=\"3\"><span class=\"label\">Cabin (My Room)</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
         "</div>");
 }
+```
 
+- [ ] **Step 4: Add the DC panel renderer**
+
+Immediately after `WebChgRenderAc`, add:
+
+```cpp
 // DC fast-charging metric panels. Adds station + car-permitted; live HLC state shown as text
 // (decoded client-side in WebChgStateHistoryJs's label map via a dedicated span updated there).
 void OvmsVehicleToyotaETNGA::WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaETNGA* v)
@@ -300,7 +310,44 @@ void OvmsVehicleToyotaETNGA::WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaE
           "<div class=\"metric number\" data-metric=\"v.c.kwh\" data-prec=\"2\"><span class=\"label\">Charged</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
         "</div>");
 }
+```
 
+- [ ] **Step 5: Add temporary empty stubs for the JS helpers (so it compiles before Tasks 3–4)**
+
+Immediately after `WebChgRenderDc`, add temporary stubs (replaced in Tasks 3 and 4):
+
+```cpp
+void OvmsVehicleToyotaETNGA::WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc) {}
+void OvmsVehicleToyotaETNGA::WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc) {}
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/devuser/wt-etnga-report-fixes
+git add vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/vehicle_toyota_etnga.h \
+        vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_web.cpp
+git commit -m "etnga web: AC/DC/idle charging-monitor dispatcher + per-type metric panels"
+```
+
+---
+
+## Task 3: Live chart (`WebChgChartJs`)
+
+**Files:**
+- Modify: `vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_web.cpp`
+
+- [ ] **Step 1: Replace the `WebChgChartJs` stub with the real implementation**
+
+Replace:
+
+```cpp
+void OvmsVehicleToyotaETNGA::WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc) {}
+```
+
+with:
+
+```cpp
 // Emit the chart container, an inline JS literal backfill of the in-memory sample buffer, and the
 // Highcharts init + live-append wiring. Series mirror the report: delivered power, car-permitted
 // (|0x16A1|), station-max (DC only), and SOC on a fixed 0-100 right axis. Power axis fixed per type.
@@ -366,6 +413,37 @@ void OvmsVehicleToyotaETNGA::WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaET
         "</script>\n",
         dc ? 1 : 0, init.c_str(), elapsed);
 }
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+cd /home/devuser/wt-etnga-report-fixes
+git add vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_web.cpp
+git commit -m "etnga web: live Highcharts power/SOC chart on the charging monitor (backfill + live append)"
+```
+
+Note for the implementer: `c.printf` format uses `%%` for a literal `%` (the SOC axis titles and the
+`SOC %` series name). The `%d`/`%s`/`%d` args are `dc`, `init`, `elapsed` in that order.
+
+---
+
+## Task 4: Live charging state history (`WebChgStateHistoryJs`)
+
+**Files:**
+- Modify: `vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_web.cpp`
+
+- [ ] **Step 1: Replace the `WebChgStateHistoryJs` stub with the real implementation**
+
+Replace:
+
+```cpp
+void OvmsVehicleToyotaETNGA::WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc) {}
+```
+
+with:
+
+```cpp
 // Emit the state-history table, a backfill literal of the in-memory event log, and JS that seeds
 // the table then appends a row whenever the watched state metric changes (xte.v.c.hlc on DC,
 // xte.v.c.acop on AC). On DC it also keeps the #hlcstate header span current. Labels come from
@@ -422,105 +500,141 @@ void OvmsVehicleToyotaETNGA::WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleT
         "</script>\n",
         dc ? 1 : 0, evt.c_str(), elapsed, curstate);
 }
+```
 
-// WebChargeReports: index of saved charge-session reports (newest first).
-// Each entry links to WebChargeReport, which streams the stored HTML file.
-void OvmsVehicleToyotaETNGA::WebChargeReports(PageEntry_t& p, PageContext_t& c)
-{
-    c.head(200);
-    std::string rtitle = etnga_vehicle_name() + " charge reports";
-    c.panel_start("primary", rtitle.c_str());
+- [ ] **Step 2: Commit**
 
-    // Collect .html reports from every storage location. A given session writes to
-    // exactly one location, so on the near-impossible event that the same timestamp
-    // filename exists in both, the first location scanned (SD) wins.
-    std::vector<std::pair<std::string,const char*>> files;   // (filename, location label)
-    std::vector<etnga_report_loc> locs = etnga_report_locs();
-    for (size_t l = 0; l < locs.size(); l++) {
-        DIR* dir = opendir(locs[l].dir);
-        if (!dir)
-            continue;
-        struct dirent* ent;
-        while ((ent = readdir(dir)) != NULL) {
-            std::string name = ent->d_name;
-            if (name.size() <= 5 || name.compare(name.size() - 5, 5, ".html") != 0)
-                continue;
-            bool seen = false;
-            for (size_t i = 0; i < files.size(); i++)
-                if (files[i].first == name) { seen = true; break; }
-            if (!seen)
-                files.push_back(std::make_pair(name, locs[l].label));
-        }
-        closedir(dir);
-    }
+```bash
+cd /home/devuser/wt-etnga-report-fixes
+git add vehicle/OVMS.V3/components/vehicle_toyota_etnga/src/etnga_web.cpp
+git commit -m "etnga web: live charging state history (HLC on DC / AC-Op on AC) with backfill"
+```
 
-    if (files.empty()) {
-        c.print("<p>No charge reports yet. A report is written at the end of each charging session.</p>");
-    } else {
-        // Newest first: timestamp-prefixed filenames sort chronologically regardless of location.
-        std::sort(files.rbegin(), files.rend());
-        c.print("<ul class=\"list-unstyled\">");
-        for (size_t i = 0; i < files.size(); i++) {
-            const char* loc = files[i].second;
-            std::string html = c.encode_html(files[i].first);
-            std::string stem = files[i].first.substr(0, files[i].first.size() - 5);   // strip ".html"
-            std::string csv  = c.encode_html(stem + ".csv");
-            c.printf("<li><a href=\"/xte/report?file=%s&amp;loc=%s\" target=\"_blank\">%s</a> "
-                     "&nbsp;<a href=\"/xte/report?file=%s&amp;loc=%s\">csv</a> "
-                     "<span class=\"text-muted\">[%s]</span></li>",
-                     html.c_str(), loc, html.c_str(), csv.c_str(), loc, loc);
-        }
-        c.print("</ul>");
-    }
+Note for the implementer: in `c.printf`, every literal `%` must be doubled — `%%60` (modulo) and the
+`%%` are intentional. Format args are `dc`, `evt`, `elapsed`, `curstate` in order.
 
-    c.panel_end();
-    c.done();
-}
+---
 
-// WebChargeReport: stream one saved report as raw HTML or CSV download, via ?file=<name>.
-void OvmsVehicleToyotaETNGA::WebChargeReport(PageEntry_t& p, PageContext_t& c)
-{
-    std::string file = c.getvar("file");
+## Task 5: changes.txt entry
 
-    // Validate: a .html or .csv basename only — reject path traversal.
-    bool is_html = (file.size() > 5 && file.compare(file.size()-5, 5, ".html") == 0);
-    bool is_csv  = (file.size() > 4 && file.compare(file.size()-4, 4, ".csv")  == 0);
-    bool valid = (is_html || is_csv)
-                 && file.find('/') == std::string::npos
-                 && file.find("..") == std::string::npos;
-    if (!valid) {
-        c.head(400, "Content-Type: text/plain; charset=utf-8");
-        c.print("Invalid report name\n");
-        c.done();
-        return;
-    }
+**Files:**
+- Modify: `vehicle/OVMS.V3/changes.txt`
 
-    // Locate the file. Prefer the location named by ?loc=; fall back to scanning every
-    // location (older links, or a loc that no longer holds the file) so reports stay
-    // reachable across SD insert/remove.
-    extram::string content;
-    bool loaded = false;
-    std::string locdir = etnga_report_dir_for(c.getvar("loc"));
-    if (!locdir.empty())
-        loaded = (load_file(locdir + "/" + file, content) == 0);
-    if (!loaded) {
-        std::vector<etnga_report_loc> locs = etnga_report_locs();
-        for (size_t l = 0; l < locs.size() && !loaded; l++)
-            loaded = (load_file(std::string(locs[l].dir) + "/" + file, content) == 0);
-    }
-    if (!loaded) {
-        c.head(404, "Content-Type: text/plain; charset=utf-8");
-        c.print("Report not found\n");
-        c.done();
-        return;
-    }
+- [ ] **Step 1: Add the entry under the pending OTA-release section**
 
-    if (is_csv)
-        c.head(200, "Content-Type: text/csv; charset=utf-8\r\nContent-Disposition: attachment");
-    else
-        c.head(200, "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-cache");
-    c.print(content);
-    c.done();
-}
+In `vehicle/OVMS.V3/changes.txt`, find the line beginning:
 
-#endif // CONFIG_OVMS_COMP_WEBSERVER
+```
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): charge report refinements
+```
+
+Immediately BEFORE that line, insert:
+
+```
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the Charging monitor web page now shows distinct
+    AC and DC layouts (auto-selected from the active session), a live power/SOC chart that backfills
+    the whole session and updates in real time (delivered power, car-permitted limit, and — on DC —
+    station-offered max, matching the report chart), and a live "charging state history" of the DC
+    HLC handshake states (0x1666) or the AC operation states (0x1684). The AC operation-state
+    transitions are also recorded in the saved charge report's event log (DC HLC states already were).
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+cd /home/devuser/wt-etnga-report-fixes
+git add vehicle/OVMS.V3/changes.txt
+git commit -m "changes: e-TNGA charging-monitor AC/DC views + live chart + state history"
+```
+
+---
+
+## Task 6: Build verification (GitHub CI)
+
+There is no local build. Push the branch and let CI compile it; treat green CI as the compile gate.
+
+- [ ] **Step 1: Push the branch**
+
+```bash
+cd /home/devuser/wt-etnga-report-fixes
+git push origin feature/etnga-charge-report-fixes
+```
+
+- [ ] **Step 2: Watch the CI run to completion**
+
+```bash
+runid=$(gh run list --repo kezarjg/Open-Vehicle-Monitoring-System-3 --branch feature/etnga-charge-report-fixes --limit 1 --json databaseId -q '.[0].databaseId')
+gh run watch "$runid" --repo kezarjg/Open-Vehicle-Monitoring-System-3 --exit-status --interval 20
+```
+
+Expected: exit code 0 (`conclusion: success`). If the build fails, read the log
+(`gh run view "$runid" --log-failed`), fix the C++/format-string error, commit, and re-push.
+
+Common failure to check first: `c.printf` percent-escaping (every literal `%` must be `%%`), and the
+`window.assets.charts_js` reference (must be the global set by the framework, not a macro).
+
+---
+
+## Task 7: On-vehicle validation (after merge + deploy)
+
+Validation requires a real charge. Merge and deploy using the established flow, then validate on the
+next sessions.
+
+- [ ] **Step 1: Open a PR (if not already), merge on green CI, build master, deploy**
+
+Use the same procedure as PR #94/#95: `gh pr create`/`gh pr merge --merge`; watch the master CI run;
+`gh run download <master-run> -n ovms3-firmware`; stage on os-k3s; `ota flash http`; `module reset`;
+poll `ota status` until the new commit is `Running partition`. (See memory `howto_ovms_fast_deploy`.)
+
+- [ ] **Step 2: Validate on a DC fast charge**
+
+Open `/xte/charge` during a DC session. Confirm: DC layout (Station + Car panels, no grid); the chart
+backfills the session so far and then extends live; power axis tops at 150; station-max + car-permitted
+dashed traces and the SOC line render; the "Charging state history" lists HLC states and grows live;
+the `HLC state` header span tracks the current state. After unplug, the saved report shows the same
+HLC states in its event log.
+
+- [ ] **Step 3: Validate on an AC charge**
+
+Open `/xte/charge` during an AC session. Confirm: AC layout (Charger/grid + efficiency-relevant
+energy panels, no station-max); chart shows delivered + car-permitted + SOC with the power axis topping
+at 11; the state history lists `AC: Startup/Running/Finishing` live. After unplug, the saved report's
+event log contains the `AC: …` transitions.
+
+- [ ] **Step 4: Validate the idle view**
+
+While parked, `/xte/charge` shows "No active charge session." and a working link to `/xte/reports`.
+
+- [ ] **Step 5: Validate mid-session open (backfill)**
+
+Open the page well into a charge; confirm the chart shows the full curve from t=0 (backfill) and the
+state history shows prior transitions, then both continue live.
+
+---
+
+## Self-Review
+
+**Spec coverage:**
+- AC/DC/idle auto-selected views → Task 2 (dispatcher + idle + AC/DC renderers). ✓
+- Live chart mirroring report series, fixed axes, backfill + live append → Task 3. ✓
+- State history live (HLC/DC, AC-Op/AC) in the monitor → Task 4; in the report → Task 1. ✓
+- No new routes / metrics / CAN changes → confirmed (backfill embedded; reads existing metrics). ✓
+- Edge cases (null/wrong vehicle → idle; empty buffers → start empty; charts.js failure → panels still
+  work) → handled in Tasks 2–4 code. ✓
+- changes.txt → Task 5. ✓
+- Build via CI, on-vehicle validation → Tasks 6–7. ✓
+
+Note: the spec mentioned a "charge type changed — reload" hint; this is intentionally dropped from
+the plan as YAGNI (the page is opened during a known session; a manual refresh re-selects the view).
+This is a deliberate scope reduction, not a gap.
+
+**Placeholder scan:** Task 2 introduces temporary stubs for `WebChgChartJs`/`WebChgStateHistoryJs`,
+explicitly replaced in Tasks 3–4 — these keep each task compilable and are not residual placeholders.
+No other TODO/TBD content.
+
+**Type/name consistency:** Helper names (`WebChgRenderAc/Dc`, `WebChgChartJs`, `WebChgStateHistoryJs`),
+the receiver id `chgmon`, the chart div `chgchart`, the history table `chghist`, and the DC header span
+`hlcstate` are used consistently across the dispatcher and the helper definitions. Metric names match
+the codebase (`xte.v.c.stamaxp/stamaxv/stamaxi`, `xte.v.c.perm`, `xte.v.c.tgti`, `xte.v.c.hlc`,
+`xte.v.c.acop`, `xte.v.c.gridpower`, `xte.v.e.hvac.kwh`). `AcOpStatusLabel` and `last_acop` defined in
+Task 1 are used by `SetAcOpStatus` (Task 1) and the history seeding (Task 4).
