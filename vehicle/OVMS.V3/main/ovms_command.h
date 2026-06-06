@@ -52,11 +52,12 @@
 #define COMMAND_RESULT_VERBOSE    65535
 
 class OvmsWriter;
+class OvmsCommandTask;
 class OvmsCommand;
 class OvmsCommandMap;
-class OvmsCommandTask;
 class LogBuffers;
 typedef bool (*InsertCallback)(OvmsWriter* writer, void* userData, char);
+typedef void (*TerminationCallback)(OvmsWriter* writer, void* userData);
 
 class OvmsWriter
   {
@@ -82,14 +83,20 @@ class OvmsWriter
     virtual void ProcessChar(char c) {}
 
   public:
-    // Lifecycle of a follow-mode (OCS_RunLoop) command task bound to this writer.
-    // At most one such task can be active at a time (console input is captured by
-    // the command's Ctrl-C Terminator while it runs). TerminateCommandTask() must
-    // be called by a console before it frees any transport it owns, so the task
-    // can no longer dereference this writer after it is destroyed.
-    void RegisterCommandTask(OvmsCommandTask* task);
-    void DeregisterCommandTask(OvmsCommandTask* task);
-    void TerminateCommandTask();
+    // Termination handler registry, parallel to the insert callback registry.
+    // An interactive command that has taken over the session input (by
+    // registering an insert callback) may also register a termination handler.
+    // A console invokes RunTerminationCallback() during teardown — before it
+    // frees any transport it owns — so the command can release resources or stop
+    // background tasks while this writer is still valid. At most one handler is
+    // active at a time (input is owned by a single interactive command). The
+    // handler must block until cleanup is complete (e.g. a follow-mode task must
+    // be joined) so the writer is safe to free once it returns.
+    void RegisterTerminationCallback(TerminationCallback cb, void* ctx);
+    void DeregisterTerminationCallback(TerminationCallback cb);
+    void RunTerminationCallback();
+    bool HasTerminationCallback(TerminationCallback cb) { return m_termination == cb; }
+    OvmsCommandTask* GetFollowModeTask();   // bound follow-mode task, or NULL
 
   public:
     // Used to notify the writer of a migration of a file within the VFS
@@ -109,7 +116,8 @@ class OvmsWriter
     InsertCallback m_insert;
     void* m_userData;
     bool m_monitoring;
-    OvmsCommandTask* m_curtask;          // active follow-mode command task, or NULL
+    volatile TerminationCallback m_termination;   // active interactive-command teardown handler, or NULL (read cross-task)
+    void* m_termData;
   };
 
 template <typename T>
@@ -338,6 +346,7 @@ class OvmsCommandTask : public TaskBase
     virtual OvmsCommandState_t Prepare();
     bool Run();
     static bool Terminator(OvmsWriter* writer, void* userdata, char ch);
+    static void TerminationHandler(OvmsWriter* writer, void* userdata);
     bool IsRunning() { return m_state == OCS_RunLoop; }
     bool IsTerminated() { return m_state == OCS_StopRequested; }
     void RequestStop() { m_state = OCS_StopRequested; }
@@ -348,7 +357,7 @@ class OvmsCommandTask : public TaskBase
     OvmsCommand* cmd;
     int argc;
     char** argv;
-    OvmsCommandState_t m_state;
+    volatile OvmsCommandState_t m_state;
   };
 
 class OvmsCommandApp : public OvmsWriter

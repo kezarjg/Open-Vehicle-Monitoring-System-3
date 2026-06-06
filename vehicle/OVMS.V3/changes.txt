@@ -11,11 +11,6 @@ Open Vehicle Monitor System v3 - Change log
     could return an all-zero digest state when mbedtls_sha256_clone() snapshotted it mid-handshake,
     tripping the IDF fault-injection abort(). SHA now runs in software (AES/MPI hardware accel kept);
     matches the hw3.0 preset, which already had hardware SHA disabled. Rebuild + reflash required.
-- Console: Fix crash (LoadProhibited use-after-free) when an SSH or Telnet session running a
-    command in follow mode (e.g. "vfs tail <file>") was closed or dropped without Ctrl-C. The
-    follow-mode command task kept running and wrote to its now-freed session writer. The writer
-    now tracks its active follow-mode task, and console teardown stops and joins it before
-    freeing the connection. Affects any follow-mode command (OvmsCommandTask), not just vfs tail.
 - smart EQ:
     As soon as the 12V trickle charge begins, a timestamp is generated and stored in `m_12v_trickle_charge_times`.
     The counted value is set in `xsq.12v.trickle.count`.
