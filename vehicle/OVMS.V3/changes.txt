@@ -20,7 +20,9 @@ Open Vehicle Monitor System v3 - Change log
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): added web UI pages in the Vehicle menu —
     BMS cell monitor, a live charging-metrics dashboard, a configuration page that exposes
     the TPMS alert thresholds (previously settable only via the `config` command), and a
-    charge-reports browser that lists and opens the stored /store/charge-reports/ HTML reports.
+    charge-reports browser that lists and opens the stored HTML reports. The browser now scans
+    both the SD card (/sd/charge-reports) and internal flash (/store/charge-reports), tagging
+    each entry with its source, so reports stay visible after an SD card is added or removed.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): populate more standard metrics that were
     previously unset — climate flags v.e.cooling / v.e.heating, fan speed v.e.cabinfan,
     consumption v.b.consumption, and the trip/lifetime accumulators v.b.coulomb.used/.recd
