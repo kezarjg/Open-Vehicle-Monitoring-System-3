@@ -201,7 +201,18 @@ bool OvmsVehicleToyotaETNGA::CalculateChargingDoorStatus(const std::string& data
 int OvmsVehicleToyotaETNGA::CalculateAcOpStatus(const std::string& data) { return GetRxBInt8(data, 0); }
 void OvmsVehicleToyotaETNGA::SetAcOpStatus(int v) { m_v_charge_ac_op->SetValue(v); }
 int OvmsVehicleToyotaETNGA::CalculateHlcState(const std::string& data) { return GetRxBByte(data, 0); }
-void OvmsVehicleToyotaETNGA::SetHlcState(int v) { m_v_charge_hlc->SetValue(v); }
+void OvmsVehicleToyotaETNGA::SetHlcState(int v)
+{
+    m_v_charge_hlc->SetValue(v);
+    // Log each new 0x1666 HLC (DC handshake) state as a session event. Unknown codes
+    // return "" and are skipped (avoids logging a non-static formatted string).
+    if (m_charge_session.in_session && v != m_charge_session.last_hlc) {
+        m_charge_session.last_hlc = v;
+        const char* lbl = HlcStateLabel(v);
+        if (lbl && lbl[0])
+            LogChargeEvent(lbl);
+    }
+}
 int OvmsVehicleToyotaETNGA::CalculatePISWRaw(const std::string& data) { return GetRxBInt8(data, 0); }
 void OvmsVehicleToyotaETNGA::SetPISWRaw(int v) { m_v_charge_pisw_raw->SetValue(v); }
 

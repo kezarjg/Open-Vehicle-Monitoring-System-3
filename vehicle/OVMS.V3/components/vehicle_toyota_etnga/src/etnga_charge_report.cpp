@@ -27,8 +27,12 @@
 #include <vector>
 #include <algorithm>
 
+#include <sdkconfig.h>
 #include "ovms_log.h"
 #include "metrics_standard.h"
+#ifdef CONFIG_OVMS_COMP_LOCATION
+#include "ovms_location.h"
+#endif
 #include "vehicle_toyota_etnga.h"
 
 #define CHARGE_REPORT_DIR  "/store/charge-reports"
@@ -80,6 +84,53 @@ const char* OvmsVehicleToyotaETNGA::ChargeOutcomeLabel(int code)
     }
 }
 
+// Map a 0x1666 "DC HLC state" enum code (ISO 15118 high-level-communication state machine)
+// to a human-readable label. Codes sourced from solterra-can (2026-05 DC-charge captures;
+// 6 empirically confirmed, the rest inferred from the CCS state sequence).
+// Returns "" for unknown codes so the caller skips logging them.
+const char* OvmsVehicleToyotaETNGA::HlcStateLabel(int code)
+{
+    switch (code & 0xFF) {
+        case 0x00: return "HLC: SLAC";
+        case 0x01: return "HLC: SDP";
+        case 0x02: return "HLC: App-protocol negotiation";
+        case 0x03: return "HLC: Session setup";
+        case 0x04: return "HLC: Service discovery";
+        case 0x05: return "HLC: Service detail";
+        case 0x06: return "HLC: Payment service selection";
+        case 0x07: return "HLC: Certificate installation";
+        case 0x08: return "HLC: Certificate update";
+        case 0x09: return "HLC: Payment details";
+        case 0x0A: return "HLC: Authorization";
+        case 0x0B: return "HLC: Charge-parameter discovery";
+        case 0x0C: return "HLC: Cable check";
+        case 0x0D: return "HLC: Precharge";
+        case 0x0E: return "HLC: Power delivery (start)";
+        case 0x0F: return "HLC: Current demand";
+        case 0x10: return "HLC: Power delivery (stop)";
+        case 0x11: return "HLC: Welding detection";
+        case 0x12: return "HLC: Session stop";
+        case 0xFF: return "HLC: Unconnected";
+        default:   return "";
+    }
+}
+
+// Return the name of the first defined OVMS location (geofence) that contains (lat,lon),
+// or "" if none match. Used to show a friendly place name in the report alongside coords.
+std::string OvmsVehicleToyotaETNGA::LookupLocationName(float lat, float lon)
+{
+#ifdef CONFIG_OVMS_COMP_LOCATION
+    for (LocationMap::iterator it = MyLocations.m_locations.begin();
+         it != MyLocations.m_locations.end(); ++it) {
+        if (it->second && it->second->IsInLocation(lat, lon))
+            return it->first;
+    }
+#else
+    (void)lat; (void)lon;
+#endif
+    return "";
+}
+
 // Append a monotonic-timestamped event to the session event log.
 // No-op outside a session (guard matches the in_session flag set in TransitionToChargeHandshakeState).
 void OvmsVehicleToyotaETNGA::LogChargeEvent(const char* label)
@@ -111,12 +162,16 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
     } else if (t < m_charge_session.temp_min) m_charge_session.temp_min = t;
     else if (t > m_charge_session.temp_max) m_charge_session.temp_max = t;
 
-    float amb = StandardMetrics.ms_v_env_temp->AsFloat();
-    if (!m_charge_session.amb_seen) {
-        m_charge_session.amb_min = m_charge_session.amb_max = amb;
-        m_charge_session.amb_seen = true;
-    } else if (amb < m_charge_session.amb_min) m_charge_session.amb_min = amb;
-    else if (amb > m_charge_session.amb_max) m_charge_session.amb_max = amb;
+    // Only fold in ambient when a fresh reading exists (env temp is undefined when parked
+    // until the in-charge 0x1F46 poll answers) — prevents a bogus 0 C dragging the range.
+    if (StandardMetrics.ms_v_env_temp->IsDefined()) {
+        float amb = StandardMetrics.ms_v_env_temp->AsFloat();
+        if (!m_charge_session.amb_seen) {
+            m_charge_session.amb_min = m_charge_session.amb_max = amb;
+            m_charge_session.amb_seen = true;
+        } else if (amb < m_charge_session.amb_min) m_charge_session.amb_min = amb;
+        else if (amb > m_charge_session.amb_max) m_charge_session.amb_max = amb;
+    }
 
     m_charge_session.is_dc = (static_cast<PollState>(m_poll_state) == PollState::CHARGE_DC);
 
@@ -139,6 +194,8 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
         s.t_s = now - m_charge_session.start_monotonic;
         s.kw  = p;
         s.soc = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
+        s.sta_max  = m_v_charge_sta_max_p->AsFloat();        // station-offered max kW (0x166A, DC only; 0 on AC)
+        s.car_perm = fabsf(m_v_charge_perm->AsFloat());      // car-permitted kW (0x16A1 is signed: |.| is the charge limit)
         m_charge_session.svg.push_back(s);
         m_charge_session.last_svg_monotonic = now;
         // Cap ~300 points: when exceeded, double the interval and decimate (keep every other).
@@ -225,49 +282,96 @@ static void PruneChargeReports(const char* tag, const std::string& dir)
     }
 }
 
-// Render a self-contained inline SVG line chart of delivered power (+ light SOC overlay) vs time.
+// Render a self-contained inline SVG chart vs time, with standardized axes:
+//   - left axis: delivered power (kW), fixed full-scale per charge type (AC 0-11, DC 0-150)
+//   - right axis: SOC, fixed 0-100 %
+//   - traces: delivered power, station-offered max (DC only) and car-permitted limit (the
+//     0x16A1 taper curve), plus the SOC overlay. All powers plot as magnitudes (0x16A1 is
+//     signed: negative = charging), so the three power traces share one positive axis.
 std::string OvmsVehicleToyotaETNGA::RenderPowerSvg()
 {
     const std::vector<ChargeSessionState::Sample>& s = m_charge_session.svg;
     if (s.size() < 2)
         return "<p>(not enough samples for a chart)</p>";
 
-    const int W = 640, H = 240, PADL = 44, PADB = 24, PADT = 10, PADR = 10;
+    const bool  dc    = m_charge_session.is_dc;
+    const float pmax  = dc ? 150.0f : 11.0f;   // fixed power-axis full scale (kW)
+    const float pstep = dc ? 25.0f  : 2.0f;    // power gridline / tick spacing (kW)
+
+    const int W = 640, H = 260, PADL = 44, PADB = 28, PADT = 12, PADR = 44;
     const int PW = W - PADL - PADR, PH = H - PADT - PADB;
     int tmax = s.back().t_s > 0 ? s.back().t_s : 1;
-    float kwmax = 1.0f;
-    for (size_t i = 0; i < s.size(); i++)
-        if (s[i].kw > kwmax) kwmax = s[i].kw;
 
     std::string out;
-    char b[160];
+    char b[256];
     snprintf(b, sizeof(b), "<svg viewBox=\"0 0 %d %d\" style=\"width:100%%;max-width:%dpx;height:auto\" xmlns=\"http://www.w3.org/2000/svg\">\n", W, H, W);
     out += b;
     out += "<rect width=\"100%\" height=\"100%\" fill=\"#fff\"/>\n";
-    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, PADT, PADL, H-PADB); out += b;
-    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, H-PADB, W-PADR, H-PADB); out += b;
-    snprintf(b, sizeof(b), "<text x=\"4\" y=\"%d\" font-size=\"10\" fill=\"#666\">%.0f kW</text>\n", PADT+8, kwmax); out += b;
 
-    // SOC overlay (light)
-    out += "<polyline fill=\"none\" stroke=\"#9cf\" stroke-width=\"1\" points=\"";
+    // Horizontal gridlines + left power-axis (kW) labels.
+    for (float kw = 0.0f; kw <= pmax + 0.01f; kw += pstep) {
+        float y = PADT + (float)PH * (1.0f - kw / pmax);
+        snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%.1f\" x2=\"%d\" y2=\"%.1f\" stroke=\"#eee\"/>\n", PADL, y, W-PADR, y); out += b;
+        snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%.1f\" font-size=\"10\" fill=\"#06c\" text-anchor=\"end\">%g</text>\n", PADL-3, y+3, kw); out += b;
+    }
+    // Right SOC-axis (%) labels, fixed 0-100.
+    for (int soc = 0; soc <= 100; soc += 25) {
+        float y = PADT + (float)PH * (1.0f - soc / 100.0f);
+        snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%.1f\" font-size=\"10\" fill=\"#39c\">%d</text>\n", W-PADR+3, y+3, soc); out += b;
+    }
+    // Axis lines (left power, right SOC, bottom time).
+    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, PADT, PADL, H-PADB); out += b;
+    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", W-PADR, PADT, W-PADR, H-PADB); out += b;
+    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, H-PADB, W-PADR, H-PADB); out += b;
+
+    // SOC overlay (right axis, 0-100).
+    out += "<polyline fill=\"none\" stroke=\"#39c\" stroke-width=\"1\" stroke-dasharray=\"1 3\" points=\"";
     for (size_t i = 0; i < s.size(); i++) {
         float x = PADL + (float)PW * s[i].t_s / tmax;
-        float y = PADT + (float)PH * (1.0f - s[i].soc / 100.0f);
+        float soc = s[i].soc < 0 ? 0.0f : (s[i].soc > 100 ? 100.0f : (float)s[i].soc);
+        float y = PADT + (float)PH * (1.0f - soc / 100.0f);
         snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out += b;
     }
     out += "\"/>\n";
 
-    // delivered power
+    // Station-offered max (DC only — 0x166A is not polled on AC).
+    if (dc) {
+        out += "<polyline fill=\"none\" stroke=\"#e80\" stroke-width=\"1\" stroke-dasharray=\"5 3\" points=\"";
+        for (size_t i = 0; i < s.size(); i++) {
+            float x = PADL + (float)PW * s[i].t_s / tmax;
+            float v = s[i].sta_max; if (v < 0) v = 0; if (v > pmax) v = pmax;
+            float y = PADT + (float)PH * (1.0f - v / pmax);
+            snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out += b;
+        }
+        out += "\"/>\n";
+    }
+
+    // Car-permitted limit (the BMS taper curve).
+    out += "<polyline fill=\"none\" stroke=\"#0a0\" stroke-width=\"1\" stroke-dasharray=\"5 3\" points=\"";
+    for (size_t i = 0; i < s.size(); i++) {
+        float x = PADL + (float)PW * s[i].t_s / tmax;
+        float v = s[i].car_perm; if (v < 0) v = 0; if (v > pmax) v = pmax;
+        float y = PADT + (float)PH * (1.0f - v / pmax);
+        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out += b;
+    }
+    out += "\"/>\n";
+
+    // Delivered power (primary trace).
     out += "<polyline fill=\"none\" stroke=\"#06c\" stroke-width=\"2\" points=\"";
     for (size_t i = 0; i < s.size(); i++) {
         float x = PADL + (float)PW * s[i].t_s / tmax;
-        float y = PADT + (float)PH * (1.0f - s[i].kw / kwmax);
+        float v = s[i].kw; if (v < 0) v = 0; if (v > pmax) v = pmax;
+        float y = PADT + (float)PH * (1.0f - v / pmax);
         snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out += b;
     }
     out += "\"/>\n";
 
-    snprintf(b, sizeof(b), "<text x=\"50\" y=\"%d\" font-size=\"10\" fill=\"#06c\">power (kW)</text><text x=\"140\" y=\"%d\" font-size=\"10\" fill=\"#9cf\">SOC %%</text>\n", H-6, H-6);
-    out += b;
+    // Legend (bottom).
+    int ly = H - 6;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#06c\">delivered kW</text>\n", PADL+6, ly); out += b;
+    if (dc) { snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#e80\">station max</text>\n", PADL+96, ly); out += b; }
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#0a0\">car permitted</text>\n", PADL+186, ly); out += b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#39c\">SOC %%</text>\n", PADL+282, ly); out += b;
     out += "</svg>\n";
     return out;
 }
@@ -320,8 +424,11 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     snprintf(b, sizeof(b), "%dh %02dm %02ds", dh, dm, ds);
     f << "<dt>Duration</dt><dd>" << b << "</dd>\n";
     if (m_charge_session.has_loc) {
+        std::string locname = LookupLocationName(m_charge_session.start_lat, m_charge_session.start_lon);
         snprintf(b, sizeof(b), "%.5f, %.5f", m_charge_session.start_lat, m_charge_session.start_lon);
-        f << "<dt>Location</dt><dd>" << b
+        f << "<dt>Location</dt><dd>";
+        if (!locname.empty()) f << locname << " &mdash; ";
+        f << b
           << " (<a target=\"_blank\" href=\"https://www.openstreetmap.org/?mlat="
           << m_charge_session.start_lat << "&mlon=" << m_charge_session.start_lon
           << "#map=17/" << m_charge_session.start_lat << "/" << m_charge_session.start_lon << "\">map</a>)</dd>\n";
@@ -333,7 +440,12 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     f << "<dt>Type</dt><dd>" << (m_charge_session.is_dc ? "DC fast" : "AC") << "</dd>\n";
     snprintf(b, sizeof(b), "%d%% &rarr; %d%% (+%d%%)", start_soc, end_soc, start_soc>=0?end_soc-start_soc:0);
     f << "<dt>SOC</dt><dd>" << b << "</dd>\n";
-    snprintf(b, sizeof(b), "%.2f kWh delivered, %.2f kWh from grid", energy_kwh, grid_kwh);
+    // "From grid" is an AC-charge concept (the 0x161D grid-input poll only answers on AC);
+    // on DC the energy meter is the station's, so show delivered only.
+    if (m_charge_session.is_dc)
+        snprintf(b, sizeof(b), "%.2f kWh delivered", energy_kwh);
+    else
+        snprintf(b, sizeof(b), "%.2f kWh delivered, %.2f kWh from grid", energy_kwh, grid_kwh);
     f << "<dt>Energy</dt><dd>" << b << "</dd>\n";
     snprintf(b, sizeof(b), "%.1f kW peak / %.2f kW avg", m_charge_session.peak_power, avg_kw);
     f << "<dt>Power</dt><dd>" << b << "</dd>\n";
@@ -359,7 +471,7 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     f << "</table>\n";
 
     f << "<h2 class=\"est\">Estimates</h2>\n<dl class=\"est\">\n";
-    if (grid_kwh > 0.01f) {
+    if (!m_charge_session.is_dc && grid_kwh > 0.01f) {   // efficiency needs grid energy (AC only)
         snprintf(b, sizeof(b), "%.0f%% (%.2f kWh loss)", energy_kwh/grid_kwh*100.0f, grid_kwh-energy_kwh);
         f << "<dt>Charging efficiency</dt><dd>" << b << "</dd>\n";
     }

@@ -53,7 +53,7 @@ static const OvmsPoller::poll_pid_t obdii_polls[] = {
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_BLOWER_LEVEL,              { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x2801 blower level 1-7: DRIVING only (=> v.e.cabinfan %)
 
     // Charging polls — state-machine DIDs
-  { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_AMBIENT_TEMPERATURE_EV,   { 0,  0, 0,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1F46: not polled by sim in any charge state; 0 until confirmed useful
+  { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_AMBIENT_TEMPERATURE_EV,   { 0,  0, 0, 30, 30, 30, 30}, 0, ISOTP_STD }, // 0x1F46 ambient via HCS (awake during charge): HS/WAIT/AC/DC @30s — the A/C 0x1002 ambient is DRIVING-only (HVAC ECU sleeps while charging), so the charge report had no ambient source
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_PISW_STATUS,              { 0,  5, 0,  1, 30, 10, 10}, 0, ISOTP_STD }, // 0x1669 PISW: AWAKE=5 (Task 5); HS=1,WAIT=30,AC=10,DC=10 (sim)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGING_VOLTAGE_TYPE,    { 0,  0, 0,  5,  0,  0,  0}, 0, ISOTP_STD }, // 0x161C VTYPE: HS=5s only (sim: HANDSHAKE=5, absent elsewhere)
 

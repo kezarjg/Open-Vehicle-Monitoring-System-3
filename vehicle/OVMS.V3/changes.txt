@@ -6,6 +6,15 @@ Open Vehicle Monitor System v3 - Change log
     efficiency/implied-capacity estimates) plus a fine-grained per-sample CSV (delivered/offered/
     allowed power, pack + battery-temp over time) to /sd/charge-reports/ (fallback /store). Also
     fixes peak charging power on DC (was sourced from the AC-only grid-input poll).
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): charge report refinements — the power chart now
+    uses a fixed, standardized scale per charge type (AC 0-11 kW, DC 0-150 kW) with a fixed 0-100%
+    SOC axis, and overlays the station-offered max (DC) and car-permitted (BMS taper) traces
+    alongside delivered power. The report shows the matching named OVMS location (geofence) when
+    one is defined, decodes the DC HLC handshake states (0x1666) into the session event log, and
+    no longer reports a bogus "0 -> 0 C" ambient range. Ambient temperature is now polled during
+    charging (HCS 0x1F46 — the A/C ambient sensor's ECU sleeps while charging), and "kWh from grid"
+    / charging-efficiency are shown for AC sessions only (not meaningful on DC). The "Charging
+    metrics" vehicle-menu page is renamed "Charging monitor".
 - hw3.1: Fix random crash (abort in esp_sha_read_digest_state) during TLS handshakes by disabling
     mbedTLS hardware SHA acceleration (CONFIG_MBEDTLS_HARDWARE_SHA). The shared ESP32 SHA engine
     could return an all-zero digest state when mbedtls_sha256_clone() snapshotted it mid-handshake,
