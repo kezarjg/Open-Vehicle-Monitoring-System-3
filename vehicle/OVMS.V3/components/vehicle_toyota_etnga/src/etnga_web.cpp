@@ -67,7 +67,7 @@ static std::string etnga_vehicle_name()
 void OvmsVehicleToyotaETNGA::WebInit()
 {
     MyWebServer.RegisterPage("/bms/cellmon", "BMS cell monitor", OvmsWebServer::HandleBmsCellMonitor, PageMenu_Vehicle, PageAuth_Cookie);
-    MyWebServer.RegisterPage("/xte/charge", "Charging metrics", WebDispChgMetrics, PageMenu_Vehicle, PageAuth_Cookie);
+    MyWebServer.RegisterPage("/xte/charge", "Charging monitor", WebDispChgMetrics, PageMenu_Vehicle, PageAuth_Cookie);
     MyWebServer.RegisterPage("/xte/reports", "Charge reports", WebChargeReports, PageMenu_Vehicle, PageAuth_Cookie);
     MyWebServer.RegisterPage("/xte/report", "Charge report", WebChargeReport, PageMenu_None, PageAuth_Cookie);
     MyWebServer.RegisterPage("/xte/config", "Configuration", WebCfgFeatures, PageMenu_Vehicle, PageAuth_Cookie);
@@ -170,7 +170,7 @@ void OvmsVehicleToyotaETNGA::WebDispChgMetrics(PageEntry_t& p, PageContext_t& c)
         "</style>\n"
         "<div class=\"panel panel-primary\">"
           "<div class=\"panel-heading\">");
-    c.print(etnga_vehicle_name() + " charging metrics");
+    c.print(etnga_vehicle_name() + " charging monitor");
     c.print(
           "</div>"
           "<div class=\"panel-body\">"

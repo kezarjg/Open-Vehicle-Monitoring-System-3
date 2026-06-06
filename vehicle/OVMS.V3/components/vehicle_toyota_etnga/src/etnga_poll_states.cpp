@@ -332,9 +332,14 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
             m_charge_session.start_lat = StandardMetrics.ms_v_pos_latitude->AsFloat();
             m_charge_session.start_lon = StandardMetrics.ms_v_pos_longitude->AsFloat();
         }
-        float amb = StandardMetrics.ms_v_env_temp->AsFloat();
-        m_charge_session.amb_seen = true;
-        m_charge_session.amb_min = m_charge_session.amb_max = amb;
+        // Seed the ambient range only from a fresh reading. env temp is Clear()ed when the
+        // car parks, so seeding unconditionally produced a bogus "0 -> 0 C". The in-charge
+        // 0x1F46 poll (enabled in the poll list) fills the range as readings arrive.
+        if (StandardMetrics.ms_v_env_temp->IsDefined()) {
+            float amb = StandardMetrics.ms_v_env_temp->AsFloat();
+            m_charge_session.amb_seen = true;
+            m_charge_session.amb_min = m_charge_session.amb_max = amb;
+        }
         m_charge_session.svg_interval_s = 20;
         m_charge_session.last_sample_monotonic = 0;
         m_charge_session.last_svg_monotonic = 0;
