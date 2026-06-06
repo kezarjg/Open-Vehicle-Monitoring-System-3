@@ -50,6 +50,17 @@ Open Vehicle Monitor System v3 - Change log
     (SOC delta, energy delivered + from grid, peak/avg power, battery-temp range, AC/DC, outcome).
     The newest 50 reports are kept. This first version covers single-phase, live-telemetry
     sessions; multi-phase, sleep-survival and limiting-side attribution are planned follow-ups.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): new driver-input metrics while driving —
+    accelerator position, drive mode (Eco/Normal/Power), foot-brake pedal, and the electric
+    parking brake. Adds the Brake/EPB ECU (0x7B0) as a new poll target. AWD/X-MODE status is
+    exposed as a custom metric.
+  Populated standard metrics:
+    v.e.throttle                          -- Accelerator pedal position [%]
+    v.e.drivemode                         -- Drive mode select (0=Normal,1=Power,6=Eco)
+    v.e.footbrake                         -- Brake pedal position [%] (mapped from pedal stroke)
+    v.e.handbrake                         -- Electric parking brake applied
+  New metric:
+    xte.v.e.awd                           -- AWD / X-MODE status (0=Normal,2=Snow/Dirt,3=Deep Snow/Mud)
 
 2026-05-17 MB   3.3.006  OTA release
 - VW e-Up: extended battery health / aging info (with web UI integration): total battery age,

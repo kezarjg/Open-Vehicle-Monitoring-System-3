@@ -46,11 +46,19 @@ static const OvmsPoller::poll_pid_t obdii_polls[] = {
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_SHIFT_POSITION,            { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1061 gear: DRIVING only
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_ODOMETER,                  { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1FA6 odometer: DRIVING only
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_AC_CONSUMPTION,            { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x106E HVAC power (hybrid control): DRIVING @1s (matches battery V/I for the cabin-energy integrator)
+  { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_THROTTLE,                  { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1060 b1 accelerator position: DRIVING@1s (v.e.throttle)
+  { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_DRIVE_MODE_SELECT,         { 0,  0, 5,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1004 b1 drive mode (Eco/Normal/Power): DRIVING@5s (v.e.drivemode)
+  { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_AWD_MODE,                  { 0,  0, 5,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1087 b2 AWD/X-MODE status: DRIVING@5s (xte.v.e.awd)
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_AMBIENT_TEMPERATURE,       { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1002 ambient temp: DRIVING only
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_CABIN_TEMPERATURE,         { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1001 cabin temp: DRIVING only
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_HVAC_SETPOINT,             { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1036 HVAC setpoint: DRIVING only
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_HEATER_POWER,              { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1086 HV heater power: DRIVING only (>0 => v.e.heating)
   { AIR_CONDITIONER_TX,        AIR_CONDITIONER_RX,        VEHICLE_POLL_TYPE_READDATA, PID_BLOWER_LEVEL,              { 0,  0, 10, 0,  0,  0,  0}, 0, ISOTP_STD }, // 0x2801 blower level 1-7: DRIVING only (=> v.e.cabinfan %)
+
+    // Chassis / driver inputs — Brake/EPB ECU (0x7B0), direct-poll standard ISO-TP (new target 2026-06-06)
+    // EPB stays alive in the parked body tail, so park-brake is polled in AWAKE too; foot-brake is DRIVING-only.
+  { BRAKE_EPB_TX,              BRAKE_EPB_RX,              VEHICLE_POLL_TYPE_READDATA, PID_BRAKE_PEDAL_STROKE,        { 0,  0, 1,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x104C b1 brake pedal stroke: DRIVING@1s (v.e.footbrake)
+  { BRAKE_EPB_TX,              BRAKE_EPB_RX,              VEHICLE_POLL_TYPE_READDATA, PID_EPB_STATUS,                { 0,  5, 5,  0,  0,  0,  0}, 0, ISOTP_STD }, // 0x1045 b1 EPB actuator status: AWAKE+DRIVING@5s (v.e.handbrake)
 
     // Charging polls — state-machine DIDs
   { HYBRID_CONTROL_SYSTEM_TX,  HYBRID_CONTROL_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_AMBIENT_TEMPERATURE_EV,   { 0,  0, 0, 30, 30, 30, 30}, 0, ISOTP_STD }, // 0x1F46 ambient via HCS (awake during charge): HS/WAIT/AC/DC @30s — the A/C 0x1002 ambient is DRIVING-only (HVAC ECU sleeps while charging), so the charge report had no ambient source
@@ -59,8 +67,8 @@ static const OvmsPoller::poll_pid_t obdii_polls[] = {
 
 //  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGING_CONTROL_INFORMATION, { 0, 0, 0, 1, 1, 1, 1}, 0, ISOTP_STD }, // 0x1689 deferred
 
-  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_AC_CHARGING_OP_STATUS,    { 0,  0, 0,  1, 30,  1,  1}, 0, ISOTP_STD }, // 0x1684 AC op: HS=1,WAIT=30,AC=1,DC=1 (sim)
-  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_HLC_STATE,                { 0,  0, 0,  1, 30,  0,  1}, 0, ISOTP_STD }, // 0x1666 HLC: HS=1,WAIT=30,AC=0 (not needed),DC=1 (sim)
+  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_AC_CHARGING_OP_STATUS,    { 0,  0, 0,  1,  1,  1,  1}, 0, ISOTP_STD }, // 0x1684 AC op: HS=1,WAIT=1 (catch AC engage promptly),AC=1,DC=1
+  { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_HLC_STATE,                { 0,  0, 0,  1,  1,  0,  1}, 0, ISOTP_STD }, // 0x1666 HLC: HS=1,WAIT=1 (catch DC engage promptly),AC=0 (not needed),DC=1
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_MIN_PERMISSION_POWER,     { 0,  0, 0,  0,  0,  1,  1}, 0, ISOTP_STD }, // 0x16A1 perm power (curve): AC+DC=1s (sim DID_PERM_PWR)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_TARGET_CHARGING_CURRENT,  { 0,  0, 0,  0,  0,  1,  1}, 0, ISOTP_STD }, // 0x166D target current: AC+DC=1s (sim DID_TGT_CUR)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_CHARGING_POWER,   { 0,  0, 0,  0,  0,  1,  1}, 0, ISOTP_STD }, // 0x10D4 batt power: AC+DC=1s (sim); handler gated on charge-in-progress

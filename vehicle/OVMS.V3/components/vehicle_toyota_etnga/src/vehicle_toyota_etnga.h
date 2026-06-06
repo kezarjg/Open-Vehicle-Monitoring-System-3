@@ -146,6 +146,7 @@ protected:
     OvmsMetricFloat* m_v_bat_temp_heater;
     OvmsMetricInt* m_v_env_awaketime;
     OvmsMetricFloat* m_v_pos_trip_start;
+    OvmsMetricInt* m_v_e_awd;   // 0x1087 b2 AWD / X-MODE status (custom; no standard OVMS metric)
     
     void NotifyVehicleOn();
     void NotifyChargeStart();
@@ -180,6 +181,7 @@ private:
     void IncomingHybridBatterySystem(uint16_t pid);
     void IncomingHybridControlSystem(uint16_t pid);
     void IncomingPlugInControlSystem(uint16_t pid);
+    void IncomingBrakeEpb(uint16_t pid);
     void IncomingTPMS(uint16_t pid);
     void UpdateTPMSAlert();
     bool TPMSCornerMapValid();
@@ -227,6 +229,11 @@ private:
     bool CalculateReadyStatus(const std::string& data);
     int CalculateShiftPosition(const std::string& data);
     float CalculateVehicleSpeed(const std::string& data);
+    float CalculateThrottle(const std::string& data);
+    int   CalculateDriveMode(const std::string& data);
+    int   CalculateAwdMode(const std::string& data);
+    float CalculateFootBrake(const std::string& data);
+    bool  CalculateParkBrake(const std::string& data);
 
     // Metric setter functions
     void SetAcOpStatus(int v);
@@ -278,6 +285,11 @@ private:
     void SetHvacPower(float kw);
     void SetChargeOutcome(int v);
     void SetChargeStopReq(int v);
+    void SetThrottle(float pct);
+    void SetDriveMode(int mode);
+    void SetAwdMode(int mode);
+    void SetFootBrake(float pct);
+    void SetParkBrake(bool applied);
 
     void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
     void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);
@@ -321,6 +333,8 @@ enum CANAddress
     PLUG_IN_CONTROL_SYSTEM_TX = 0x745,
     PLUG_IN_CONTROL_SYSTEM_RX = 0x74D,
     HPCM_HYBRIDPTCTR_RX = 0x7EA,
+    BRAKE_EPB_TX = 0x7B0,    // Brake/EPB ECU (ABS/VSC/TRC + Electric Parking Brake) — direct-poll, standard ISO-TP
+    BRAKE_EPB_RX = 0x7B8,
     TPMS_GW_TX = 0x7502A,    // (0x750 << 8) | 0x2A  -> MsgID 0x750, sub 0x2A (ISOTP_EXTADR mixed addressing)
     TPMS_GW_RX = 0x7582A,    // (0x758 << 8) | 0x2A  -> MsgID 0x758, sub 0x2A
 };
@@ -385,6 +399,16 @@ enum CANPID
     PID_TPMS_PRESSURES = 0x1005,  // gateway 0x2A: 5x u16 [status][raw]; psi = raw*0.25 - 7.35
     PID_TPMS_TEMPS = 0x1004,      // gateway 0x2A: 5x u8;  C = raw - 40
     PID_TPMS_CORNERS = 0x2021,    // gateway 0x2A: 5x u8 corner enum (0 none/1 FL/2 FR/3 RL/4 RR)
+
+    // 2026-06-06 pins — EV ECU (0x7D2) driver-input signals
+    PID_THROTTLE = 0x1060,          // b1: accelerator position, u8 x0.5 %/LSB (0x00-0xC8 -> 0-100%)
+    PID_DRIVE_MODE_SELECT = 0x1004, // b1: Eco/Normal/Power enum. NOTE: same numeric value as PID_TPMS_TEMPS,
+                                    //     but dispatched on a different ECU (0x7DA vs TPMS gateway) so no conflict.
+    PID_AWD_MODE = 0x1087,          // b2: X-MODE/AWD status enum
+
+    // 2026-06-06 pins — Brake/EPB ECU (0x7B0) direct-poll
+    PID_BRAKE_PEDAL_STROKE = 0x104C, // b1: brake pedal stroke, u8 ~1 mm/LSB (0 rest .. ~67 full)
+    PID_EPB_STATUS = 0x1045,         // b1 = RH actuator status enum; handbrake applied = 0x00 (Park Applied)
 
 };
 
