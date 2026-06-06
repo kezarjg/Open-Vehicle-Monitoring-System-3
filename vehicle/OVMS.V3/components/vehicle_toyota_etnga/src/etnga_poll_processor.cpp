@@ -55,6 +55,10 @@ void OvmsVehicleToyotaETNGA::IncomingPollReply(const OvmsPoller::poll_job_t &job
             IncomingTPMS(job.pid);
             break;
 
+        case BRAKE_EPB_RX:
+            IncomingBrakeEpb(job.pid);
+            break;
+
         default:
             ESP_LOGW(TAG, "Unknown module: %03" PRIx32, job.moduleid_rec);
             return;
@@ -160,10 +164,44 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
             break;
         }
 
+        case PID_THROTTLE: {
+            SetThrottle(CalculateThrottle(m_rxbuf));
+            break;
+        }
+
+        case PID_DRIVE_MODE_SELECT: {
+            SetDriveMode(CalculateDriveMode(m_rxbuf));
+            break;
+        }
+
+        case PID_AWD_MODE: {
+            SetAwdMode(CalculateAwdMode(m_rxbuf));
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:
             // Handle unsupported PID
+            ESP_LOGW(TAG, "Unsupported PID: %04X", pid);
+            break;
+    }
+}
+
+void OvmsVehicleToyotaETNGA::IncomingBrakeEpb(uint16_t pid)
+{
+    switch (pid) {
+        case PID_BRAKE_PEDAL_STROKE: {
+            SetFootBrake(CalculateFootBrake(m_rxbuf));
+            break;
+        }
+
+        case PID_EPB_STATUS: {
+            SetParkBrake(CalculateParkBrake(m_rxbuf));
+            break;
+        }
+
+        default:
             ESP_LOGW(TAG, "Unsupported PID: %04X", pid);
             break;
     }
