@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <utility>
 
 #include "ovms_config.h"
 #include "ovms_metrics.h"
@@ -27,16 +28,30 @@
 
 #include "vehicle_toyota_etnga.h"
 
-#define CHARGE_REPORT_DIR "/store/charge-reports"
+// A charge-report storage location: a short label (used in links/UI) and its directory.
+struct etnga_report_loc { const char* label; const char* dir; };
 
-// Resolve the active report directory: SD card if mounted, else internal flash.
-// Mirrors OvmsVehicleToyotaETNGA::ChargeReportDir() (kept local to avoid a non-static call from these static handlers).
-static std::string etnga_report_dir()
+// Report locations to scan, in precedence order (first wins on a same-name collision):
+// the SD card (only when mounted) then internal flash. The write side picks one of
+// these (see OvmsVehicleToyotaETNGA::ChargeReportDir()); reading both keeps reports
+// visible after the SD card is added or removed. Kept local to avoid a non-static
+// call from these static handlers.
+static std::vector<etnga_report_loc> etnga_report_locs()
 {
+    std::vector<etnga_report_loc> locs;
     struct stat st;
     if (stat("/sd", &st) == 0 && S_ISDIR(st.st_mode))
-        return "/sd/charge-reports";
-    return "/store/charge-reports";
+        locs.push_back({ "sd", "/sd/charge-reports" });
+    locs.push_back({ "store", "/store/charge-reports" });
+    return locs;
+}
+
+// Map a location label back to its directory, or "" if the label is unknown.
+static std::string etnga_report_dir_for(const std::string& loc)
+{
+    if (loc == "sd")    return "/sd/charge-reports";
+    if (loc == "store") return "/store/charge-reports";
+    return "";
 }
 
 // Friendly name of the active vehicle ("Subaru Solterra" / "Toyota bZ4X") for page titles;
@@ -209,14 +224,25 @@ void OvmsVehicleToyotaETNGA::WebChargeReports(PageEntry_t& p, PageContext_t& c)
     std::string rtitle = etnga_vehicle_name() + " charge reports";
     c.panel_start("primary", rtitle.c_str());
 
-    std::vector<std::string> files;
-    DIR* dir = opendir(etnga_report_dir().c_str());
-    if (dir) {
+    // Collect .html reports from every storage location. A given session writes to
+    // exactly one location, so on the near-impossible event that the same timestamp
+    // filename exists in both, the first location scanned (SD) wins.
+    std::vector<std::pair<std::string,const char*>> files;   // (filename, location label)
+    std::vector<etnga_report_loc> locs = etnga_report_locs();
+    for (size_t l = 0; l < locs.size(); l++) {
+        DIR* dir = opendir(locs[l].dir);
+        if (!dir)
+            continue;
         struct dirent* ent;
         while ((ent = readdir(dir)) != NULL) {
             std::string name = ent->d_name;
-            if (name.size() > 5 && name.compare(name.size() - 5, 5, ".html") == 0)
-                files.push_back(name);
+            if (name.size() <= 5 || name.compare(name.size() - 5, 5, ".html") != 0)
+                continue;
+            bool seen = false;
+            for (size_t i = 0; i < files.size(); i++)
+                if (files[i].first == name) { seen = true; break; }
+            if (!seen)
+                files.push_back(std::make_pair(name, locs[l].label));
         }
         closedir(dir);
     }
@@ -224,14 +250,18 @@ void OvmsVehicleToyotaETNGA::WebChargeReports(PageEntry_t& p, PageContext_t& c)
     if (files.empty()) {
         c.print("<p>No charge reports yet. A report is written at the end of each charging session.</p>");
     } else {
-        std::sort(files.rbegin(), files.rend());   // newest first (timestamp filenames sort chronologically)
+        // Newest first: timestamp-prefixed filenames sort chronologically regardless of location.
+        std::sort(files.rbegin(), files.rend());
         c.print("<ul class=\"list-unstyled\">");
         for (size_t i = 0; i < files.size(); i++) {
-            std::string html = c.encode_html(files[i]);
-            std::string stem = files[i].substr(0, files[i].size() - 5);   // strip ".html"
+            const char* loc = files[i].second;
+            std::string html = c.encode_html(files[i].first);
+            std::string stem = files[i].first.substr(0, files[i].first.size() - 5);   // strip ".html"
             std::string csv  = c.encode_html(stem + ".csv");
-            c.printf("<li><a href=\"/xte/report?file=%s\" target=\"_blank\">%s</a> "
-                     "&nbsp;<a href=\"/xte/report?file=%s\">csv</a></li>", html.c_str(), html.c_str(), csv.c_str());
+            c.printf("<li><a href=\"/xte/report?file=%s&amp;loc=%s\" target=\"_blank\">%s</a> "
+                     "&nbsp;<a href=\"/xte/report?file=%s&amp;loc=%s\">csv</a> "
+                     "<span class=\"text-muted\">[%s]</span></li>",
+                     html.c_str(), loc, html.c_str(), csv.c_str(), loc, loc);
         }
         c.print("</ul>");
     }
@@ -258,9 +288,20 @@ void OvmsVehicleToyotaETNGA::WebChargeReport(PageEntry_t& p, PageContext_t& c)
         return;
     }
 
+    // Locate the file. Prefer the location named by ?loc=; fall back to scanning every
+    // location (older links, or a loc that no longer holds the file) so reports stay
+    // reachable across SD insert/remove.
     extram::string content;
-    std::string path = etnga_report_dir() + "/" + file;
-    if (load_file(path, content) != 0) {
+    bool loaded = false;
+    std::string locdir = etnga_report_dir_for(c.getvar("loc"));
+    if (!locdir.empty())
+        loaded = (load_file(locdir + "/" + file, content) == 0);
+    if (!loaded) {
+        std::vector<etnga_report_loc> locs = etnga_report_locs();
+        for (size_t l = 0; l < locs.size() && !loaded; l++)
+            loaded = (load_file(std::string(locs[l].dir) + "/" + file, content) == 0);
+    }
+    if (!loaded) {
         c.head(404, "Content-Type: text/plain; charset=utf-8");
         c.print("Report not found\n");
         c.done();
