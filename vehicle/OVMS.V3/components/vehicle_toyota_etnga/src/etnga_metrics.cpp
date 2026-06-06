@@ -199,7 +199,18 @@ bool OvmsVehicleToyotaETNGA::CalculateChargingDoorStatus(const std::string& data
 }
 
 int OvmsVehicleToyotaETNGA::CalculateAcOpStatus(const std::string& data) { return GetRxBInt8(data, 0); }
-void OvmsVehicleToyotaETNGA::SetAcOpStatus(int v) { m_v_charge_ac_op->SetValue(v); }
+void OvmsVehicleToyotaETNGA::SetAcOpStatus(int v)
+{
+    m_v_charge_ac_op->SetValue(v);
+    // Log each new 0x1684 AC-Op state as a session event (mirrors SetHlcState for DC).
+    // Stop/unknown return "" from AcOpStatusLabel and are skipped.
+    if (m_charge_session.in_session && v != m_charge_session.last_acop) {
+        m_charge_session.last_acop = v;
+        const char* lbl = AcOpStatusLabel(v);
+        if (lbl && lbl[0])
+            LogChargeEvent(lbl);
+    }
+}
 int OvmsVehicleToyotaETNGA::CalculateHlcState(const std::string& data) { return GetRxBByte(data, 0); }
 void OvmsVehicleToyotaETNGA::SetHlcState(int v)
 {

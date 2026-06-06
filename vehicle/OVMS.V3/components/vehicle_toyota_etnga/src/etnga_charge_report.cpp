@@ -115,6 +115,20 @@ const char* OvmsVehicleToyotaETNGA::HlcStateLabel(int code)
     }
 }
 
+// Map a 0x1684 "AC Charging Operation Status" enum (confirmed 4-state: Stop/Startup/Running/
+// Finishing, per solterra-can) to a human-readable label. Returns "" for Stop(0)/unknown so the
+// caller skips it — that keeps DC sessions (where AC-Op stays Stop) free of spurious AC entries;
+// the final stop is already covered by the outcome / "Charging paused" / "Unplugged" events.
+const char* OvmsVehicleToyotaETNGA::AcOpStatusLabel(int code)
+{
+    switch (code & 0xFF) {
+        case 0x01: return "AC: Startup";
+        case 0x02: return "AC: Running";
+        case 0x03: return "AC: Finishing";
+        default:   return "";   // 0x00 Stop / unknown -> skipped
+    }
+}
+
 // Return the name of the first defined OVMS location (geofence) that contains (lat,lon),
 // or "" if none match. Used to show a friendly place name in the report alongside coords.
 std::string OvmsVehicleToyotaETNGA::LookupLocationName(float lat, float lon)
