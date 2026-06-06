@@ -301,7 +301,71 @@ void OvmsVehicleToyotaETNGA::WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaE
         "</div>");
 }
 
-void OvmsVehicleToyotaETNGA::WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc) {}
+// Emit the chart container, an inline JS literal backfill of the in-memory sample buffer, and the
+// Highcharts init + live-append wiring. Series mirror the report: delivered power, car-permitted
+// (|0x16A1|), station-max (DC only), and SOC on a fixed 0-100 right axis. Power axis fixed per type.
+void OvmsVehicleToyotaETNGA::WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc)
+{
+    // Build the backfill literal from the session sample buffer: [t_s, kw, soc, sta_max, car_perm].
+    std::string init = "[";
+    const std::vector<ChargeSessionState::Sample>& s = v->m_charge_session.svg;
+    char b[96];
+    for (size_t i = 0; i < s.size(); i++) {
+        snprintf(b, sizeof(b), "%s[%d,%.3f,%d,%.2f,%.2f]",
+                 (i ? "," : ""), s[i].t_s, s[i].kw, s[i].soc, s[i].sta_max, s[i].car_perm);
+        init += b;
+    }
+    init += "]";
+
+    int elapsed = StandardMetrics.ms_m_monotonic->AsInt() - v->m_charge_session.start_monotonic;
+    if (elapsed < 0) elapsed = 0;
+
+    c.print("<h6 class=\"metric-head\">Power &amp; SOC</h6>\n"
+            "<div id=\"chgchart\" style=\"width:100%;height:300px\"></div>\n");
+
+    c.printf(
+        "<script>\n"
+        "(function(){\n"
+        "  var DC=%d, PMAX=DC?150:11;\n"
+        "  var INIT=%s;\n"
+        "  var loadT=Date.now()/1000, baseT=%d;\n"
+        "  var deliv=[],perm=[],sta=[],soc=[];\n"
+        "  for(var i=0;i<INIT.length;i++){var t=INIT[i][0]/60;\n"
+        "    deliv.push([t,INIT[i][1]]); soc.push([t,INIT[i][2]]);\n"
+        "    if(DC) sta.push([t,INIT[i][3]]); perm.push([t,Math.abs(INIT[i][4])]);}\n"
+        "  var chart=null;\n"
+        "  function mv(m){var x=metrics[m]; return (x==null)?null:parseFloat(x);}\n"
+        "  function build(){\n"
+        "    var series=[{name:'Delivered kW',data:deliv,color:'#0066cc',zIndex:3},\n"
+        "                {name:'Car permitted',data:perm,color:'#00aa00',dashStyle:'ShortDash'}];\n"
+        "    if(DC) series.push({name:'Station max',data:sta,color:'#ee8800',dashStyle:'ShortDash'});\n"
+        "    series.push({name:'SOC %%',data:soc,color:'#3399cc',yAxis:1});\n"
+        "    chart=Highcharts.chart('chgchart',{\n"
+        "      chart:{type:'line',animation:false},title:{text:null},credits:{enabled:false},\n"
+        "      xAxis:{title:{text:'minutes'}},\n"
+        "      yAxis:[{title:{text:'kW'},min:0,max:PMAX},\n"
+        "             {title:{text:'SOC %%'},min:0,max:100,opposite:true}],\n"
+        "      tooltip:{shared:true,valueDecimals:1},\n"
+        "      plotOptions:{series:{marker:{enabled:false}}},\n"
+        "      series:series});\n"
+        "  }\n"
+        "  function onUpd(){\n"
+        "    if(!chart) return;\n"
+        "    var t=baseT/60+(Date.now()/1000-loadT)/60;\n"
+        "    var d=mv('v.c.power'),sc=mv('v.b.soc'),pm=mv('xte.v.c.perm'),sm=mv('xte.v.c.stamaxp');\n"
+        "    var cap=600, sidx=DC?3:2;\n"
+        "    if(d!=null) chart.series[0].addPoint([t,d],false,chart.series[0].data.length>cap);\n"
+        "    chart.series[1].addPoint([t,pm==null?0:Math.abs(pm)],false,chart.series[1].data.length>cap);\n"
+        "    if(DC) chart.series[2].addPoint([t,sm==null?0:sm],false,chart.series[2].data.length>cap);\n"
+        "    chart.series[sidx].addPoint([t,sc],true,chart.series[sidx].data.length>cap);\n"
+        "  }\n"
+        "  function init(){build(); $('#chgmon').on('msg:metrics',onUpd);}\n"
+        "  if(window.Highcharts) init();\n"
+        "  else $.ajax({url:window.assets.charts_js,dataType:'script',cache:true,success:init});\n"
+        "})();\n"
+        "</script>\n",
+        dc ? 1 : 0, init.c_str(), elapsed);
+}
 void OvmsVehicleToyotaETNGA::WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc) {}
 
 // WebChargeReports: index of saved charge-session reports (newest first).
