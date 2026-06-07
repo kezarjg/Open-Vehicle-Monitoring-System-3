@@ -81,7 +81,7 @@ static const OvmsPoller::poll_pid_t obdii_polls[] = {
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_DC_CHARGER_MAX_CURRENT,    { 0,  0, 0,  0,  0,  0,  5}, 0, ISOTP_STD }, // 0x1679 station max current: DC=5s (sim DID_STA_MAX_A)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_DC_CHARGER_MAX_VOLTAGE,    { 0,  0, 0,  0,  0,  0,  5}, 0, ISOTP_STD }, // 0x1681 station max voltage: DC=5s (sim DID_STA_MAX_V)
 
-  // AC charger telemetry — AC-only (scale deferred pending sustained-AC capture)
+  // AC charger telemetry — AC-only (scaled per Techstream dictionary; 0x161E/0x1665 units inferred, confirm on sustained AC)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGER_STATE_CLUSTER,     { 0,  0, 0,  0,  0,  1,  0}, 0, ISOTP_STD }, // 0x1619 charger state cluster: AC=1s (sim DID_CHG_STATE; AC-only)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_CHARGER_OUTPUT_POWER,      { 0,  0, 0,  0,  0,  5,  0}, 0, ISOTP_STD }, // 0x161E charger output cluster: AC=5s (sim DID_CHG_OUT_P; AC-only)
   { PLUG_IN_CONTROL_SYSTEM_TX, PLUG_IN_CONTROL_SYSTEM_RX, VEHICLE_POLL_TYPE_READDATA, PID_AC_USABLE_POWER,           { 0,  0, 0,  0,  0,  5,  0}, 0, ISOTP_STD }, // 0x1665 A/C useable power: AC=5s (sim DID_AC_USABLE; AC-only)

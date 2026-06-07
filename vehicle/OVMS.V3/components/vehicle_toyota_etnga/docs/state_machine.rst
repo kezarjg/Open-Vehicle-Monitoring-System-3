@@ -475,27 +475,32 @@ is distinct from ``xte.v.c.acop`` (``0x1684``), which drives the
      - Charger operation status (see source for enum values).
    * - ``xte.v.c.acilim``
      - ``0x1619`` b4–5
-     - RAW
-     - AC charging current upper limit (raw integer; scale pending).
+     - A
+     - AC charging current upper limit.  Decoded as ``u16 BE
+       biased-32768 × 0.01 A/LSB``.
    * - ``xte.v.c.chgout``
      - ``0x161E`` b1–2
-     - RAW
-     - Charger output power (raw integer; scale pending).
+     - kW
+     - Charger output power.  Decoded as ``u16 BE × 5/1000 kW/LSB``
+       (unit inferred).
    * - ``xte.v.c.chgotgt``
      - ``0x161E`` b3–4
-     - RAW
-     - Target-from-charger power (raw integer; scale pending).
+     - kW
+     - Target-from-charger power.  Decoded as ``u16 BE × 5/1000
+       kW/LSB`` (unit inferred).
    * - ``xte.v.c.acusbl``
      - ``0x1665``
-     - RAW
-     - A/C useable power (raw integer; scale pending).
+     - kW
+     - A/C useable power.  Decoded as ``u8 × 0.01 kW/LSB`` (unit
+       inferred).
 
 .. note::
 
-   The four RAW AC channels (``xte.v.c.acilim``, ``xte.v.c.chgout``,
-   ``xte.v.c.chgotgt``, ``xte.v.c.acusbl``) store unscaled integer
-   values.  Their physical scales are deferred pending a sustained
-   AC-charge capture.
+   The four AC channels (``xte.v.c.acilim``, ``xte.v.c.chgout``,
+   ``xte.v.c.chgotgt``, ``xte.v.c.acusbl``) are now scaled per the
+   Techstream dictionary factors.  The ``0x161E`` and ``0x1665`` kW
+   units are inferred (by analogy to ``0x161D`` grid power) and pending
+   sustained AC-charge confirmation.
 
 Charge-report supporting channels
 ----------------------------------

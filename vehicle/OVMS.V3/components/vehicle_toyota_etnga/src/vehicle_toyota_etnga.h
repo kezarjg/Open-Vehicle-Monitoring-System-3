@@ -388,9 +388,9 @@ enum CANPID
     PID_DC_CHARGER_MAX_CURRENT = 0x1679,  // u16 BE x1 A; station advertised max current (CCS)
     PID_DC_CHARGER_MAX_VOLTAGE = 0x1681,  // u16 BE x1 V; station advertised max voltage (CCS)
 
-    PID_CHARGER_STATE_CLUSTER = 0x1619,   // AC-only: b1-2 target power (biased-32768 x0.01kW), b3 op status, b4-5 current limit (raw)
-    PID_CHARGER_OUTPUT_POWER = 0x161E,    // AC-only: b1-2 output (raw), b3-4 target-from-charger (raw)
-    PID_AC_USABLE_POWER = 0x1665,         // AC-only: u8 useable power (raw)
+    PID_CHARGER_STATE_CLUSTER = 0x1619,   // AC-only: b1-2 target power (biased-32768 x0.01 kW), b3 op status enum, b4-5 current limit (biased-32768 x0.01 A)
+    PID_CHARGER_OUTPUT_POWER = 0x161E,    // AC-only: b1-2 output (x5/1000 kW, unit inferred), b3-4 target-from-charger (x5/1000 kW, unit inferred)
+    PID_AC_USABLE_POWER = 0x1665,         // AC-only: u8 x0.01 kW (unit inferred)
 
     PID_AC_CONSUMPTION = 0x106E,    // A/C consumption power: u8 x0.05 kW/LSB (50 W/LSB) — cabin draw, OBC view
     PID_CHARGE_STOP_REQ = 0x1667,   // Charge Seq Stop Request from CCM: u8 enum (0x00 Normal / 0x06 HLC-error; partial)

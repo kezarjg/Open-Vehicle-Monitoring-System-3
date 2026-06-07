@@ -311,7 +311,7 @@ float OvmsVehicleToyotaETNGA::CalculateAcTargetPower(const std::string& data)
     return static_cast<float>(GetRxBUint16(data, 0) - 32768) / 100.0f;
 }
 int   OvmsVehicleToyotaETNGA::CalculateChargerOpStatus(const std::string& data)      { return GetRxBByte(data, 2); }                    // 0x1619 b3 enum: 0=Stand by,1=Ready,2=Stop,3=RoB Stop
-float OvmsVehicleToyotaETNGA::CalculateAcCurrentLimit(const std::string& data)       { return static_cast<float>(GetRxBUint16(data, 3) - 32768) * 0.01f; }  // 0x1619 b4-5: biased-32768 x0.01 A (mirrors AC target power)
+float OvmsVehicleToyotaETNGA::CalculateAcCurrentLimit(const std::string& data)       { return static_cast<float>(GetRxBUint16(data, 3) - 32768) / 100.0f; }  // 0x1619 b4-5: biased-32768 x0.01 A (mirrors AC target power)
 float OvmsVehicleToyotaETNGA::CalculateChargerOutput(const std::string& data)        { return GetRxBUint16(data, 0) * 5.0f / 1000.0f; }   // 0x161E b1-2: x5/1000 kW (unit inferred by analogy to 0x161D grid power; confirm on sustained AC)
 float OvmsVehicleToyotaETNGA::CalculateChargerOutputTarget(const std::string& data)  { return GetRxBUint16(data, 2) * 5.0f / 1000.0f; }   // 0x161E b3-4: x5/1000 kW (unit inferred; confirm on sustained AC)
 float OvmsVehicleToyotaETNGA::CalculateAcUsable(const std::string& data)             { return GetRxBByte(data, 0) * 0.01f; }              // 0x1665: x0.01 kW (PluginCtrlAC dict factor; unit inferred)
