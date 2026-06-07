@@ -24,11 +24,11 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     m_v_charge_sta_max_i = MyMetrics.InitFloat("xte.v.c.stamaxi", SM_STALE_MID, 0.0f, Amps);
     m_v_charge_sta_max_v = MyMetrics.InitFloat("xte.v.c.stamaxv", SM_STALE_MID, 0.0f, Volts);
     m_v_charge_ac_tgt_p  = MyMetrics.InitFloat("xte.v.c.actgtp", SM_STALE_MID, 0.0f, kW);
-    m_v_charge_chgr_op   = MyMetrics.InitInt("xte.v.c.chgrop", SM_STALE_MID);
-    m_v_charge_ac_ilim   = MyMetrics.InitInt("xte.v.c.acilim", SM_STALE_MID);
-    m_v_charge_out       = MyMetrics.InitInt("xte.v.c.chgout", SM_STALE_MID);
-    m_v_charge_out_tgt   = MyMetrics.InitInt("xte.v.c.chgotgt", SM_STALE_MID);
-    m_v_charge_ac_usable = MyMetrics.InitInt("xte.v.c.acusbl", SM_STALE_MID);
+    m_v_charge_chgr_op   = MyMetrics.InitInt("xte.v.c.chgrop", SM_STALE_MID);                     // enum: 0=Stand by,1=Ready,2=Stop,3=RoB Stop
+    m_v_charge_ac_ilim   = MyMetrics.InitFloat("xte.v.c.acilim", SM_STALE_MID, 0.0f, Amps);
+    m_v_charge_out       = MyMetrics.InitFloat("xte.v.c.chgout", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_out_tgt   = MyMetrics.InitFloat("xte.v.c.chgotgt", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_ac_usable = MyMetrics.InitFloat("xte.v.c.acusbl", SM_STALE_MID, 0.0f, kW);
     m_v_charge_myroom  = MyMetrics.InitBool("xte.v.c.myroom", SM_STALE_MID);
     m_v_charge_grid_power = MyMetrics.InitFloat("xte.v.c.gridpower", SM_STALE_MID, 0.0f, kW);
     m_v_env_hvac_power = MyMetrics.InitFloat("xte.v.e.hvac.power", SM_STALE_MID, 0.0f, kW);
@@ -310,11 +310,11 @@ float OvmsVehicleToyotaETNGA::CalculateAcTargetPower(const std::string& data)
     // 0x1619 b1-2: biased-32768 x0.01 kW (idle 0x8000 -> 0.00 kW)
     return static_cast<float>(GetRxBUint16(data, 0) - 32768) / 100.0f;
 }
-int OvmsVehicleToyotaETNGA::CalculateChargerOpStatus(const std::string& data)       { return GetRxBByte(data, 2); }    // 0x1619 b3 enum
-int OvmsVehicleToyotaETNGA::CalculateAcCurrentLimitRaw(const std::string& data)     { return GetRxBUint16(data, 3); }  // 0x1619 b4-5 raw, scale TBD
-int OvmsVehicleToyotaETNGA::CalculateChargerOutputRaw(const std::string& data)      { return GetRxBUint16(data, 0); }  // 0x161E b1-2 raw, scale TBD
-int OvmsVehicleToyotaETNGA::CalculateChargerOutputTargetRaw(const std::string& data){ return GetRxBUint16(data, 2); }  // 0x161E b3-4 raw, scale TBD
-int OvmsVehicleToyotaETNGA::CalculateAcUsableRaw(const std::string& data)           { return GetRxBByte(data, 0); }    // 0x1665 raw, scale TBD
+int   OvmsVehicleToyotaETNGA::CalculateChargerOpStatus(const std::string& data)      { return GetRxBByte(data, 2); }                    // 0x1619 b3 enum: 0=Stand by,1=Ready,2=Stop,3=RoB Stop
+float OvmsVehicleToyotaETNGA::CalculateAcCurrentLimit(const std::string& data)       { return static_cast<float>(GetRxBUint16(data, 3) - 32768) * 0.01f; }  // 0x1619 b4-5: biased-32768 x0.01 A (mirrors AC target power)
+float OvmsVehicleToyotaETNGA::CalculateChargerOutput(const std::string& data)        { return GetRxBUint16(data, 0) * 5.0f / 1000.0f; }   // 0x161E b1-2: x5/1000 kW (unit inferred by analogy to 0x161D grid power; confirm on sustained AC)
+float OvmsVehicleToyotaETNGA::CalculateChargerOutputTarget(const std::string& data)  { return GetRxBUint16(data, 2) * 5.0f / 1000.0f; }   // 0x161E b3-4: x5/1000 kW (unit inferred; confirm on sustained AC)
+float OvmsVehicleToyotaETNGA::CalculateAcUsable(const std::string& data)             { return GetRxBByte(data, 0) * 0.01f; }              // 0x1665: x0.01 kW (PluginCtrlAC dict factor; unit inferred)
 
 void OvmsVehicleToyotaETNGA::SetAcTargetPower(float kw)
 {
@@ -326,25 +326,25 @@ void OvmsVehicleToyotaETNGA::SetChargerOpStatus(int v)
     if (m_v_charge_chgr_op->SetValue(v))
         ESP_LOGD(TAG, "Charger Op Status changed: 0x%02X (%d)", v, v);
 }
-void OvmsVehicleToyotaETNGA::SetAcCurrentLimitRaw(int v)
+void OvmsVehicleToyotaETNGA::SetAcCurrentLimit(float v)
 {
     if (m_v_charge_ac_ilim->SetValue(v))
-        ESP_LOGD(TAG, "AC Current Limit (raw) changed: 0x%04X (%d)", v, v);
+        ESP_LOGD(TAG, "AC Current Limit changed: %.2f A", v);
 }
-void OvmsVehicleToyotaETNGA::SetChargerOutputRaw(int v)
+void OvmsVehicleToyotaETNGA::SetChargerOutput(float v)
 {
     if (m_v_charge_out->SetValue(v))
-        ESP_LOGD(TAG, "Charger Output (raw) changed: 0x%04X (%d)", v, v);
+        ESP_LOGD(TAG, "Charger Output changed: %.2f kW", v);
 }
-void OvmsVehicleToyotaETNGA::SetChargerOutputTargetRaw(int v)
+void OvmsVehicleToyotaETNGA::SetChargerOutputTarget(float v)
 {
     if (m_v_charge_out_tgt->SetValue(v))
-        ESP_LOGD(TAG, "Charger Output Target (raw) changed: 0x%04X (%d)", v, v);
+        ESP_LOGD(TAG, "Charger Output Target changed: %.2f kW", v);
 }
-void OvmsVehicleToyotaETNGA::SetAcUsableRaw(int v)
+void OvmsVehicleToyotaETNGA::SetAcUsable(float v)
 {
     if (m_v_charge_ac_usable->SetValue(v))
-        ESP_LOGD(TAG, "AC Usable Power (raw) changed: 0x%02X (%d)", v, v);
+        ESP_LOGD(TAG, "AC Usable Power changed: %.2f kW", v);
 }
 
 bool OvmsVehicleToyotaETNGA::CalculateMyRoom(const std::string& data)

@@ -126,10 +126,10 @@ protected:
     OvmsMetricFloat* m_v_charge_sta_max_v;  // 0x1681 station max voltage (V)
     OvmsMetricFloat* m_v_charge_ac_tgt_p;  // 0x1619 b1-2 AC target power (kW)
     OvmsMetricInt*   m_v_charge_chgr_op;   // 0x1619 b3 charger op status (enum) — distinct from m_v_charge_ac_op (0x1684)
-    OvmsMetricInt*   m_v_charge_ac_ilim;   // 0x1619 b4-5 current upper limit (raw, scale deferred)
-    OvmsMetricInt*   m_v_charge_out;       // 0x161E b1-2 charger output (raw, scale deferred)
-    OvmsMetricInt*   m_v_charge_out_tgt;   // 0x161E b3-4 target-from-charger (raw, scale deferred)
-    OvmsMetricInt*   m_v_charge_ac_usable; // 0x1665 useable power (raw, scale deferred)
+    OvmsMetricFloat* m_v_charge_ac_ilim;   // 0x1619 b4-5 AC current limit (A)
+    OvmsMetricFloat* m_v_charge_out;       // 0x161E b1-2 charger output (kW, unit inferred)
+    OvmsMetricFloat* m_v_charge_out_tgt;   // 0x161E b3-4 target-from-charger (kW, unit inferred)
+    OvmsMetricFloat* m_v_charge_ac_usable; // 0x1665 useable power (kW, unit inferred)
     OvmsMetricBool*  m_v_charge_myroom;   // 0x1692 byte 2 (idx 1) bit 0 = My Room active
     OvmsMetricFloat* m_v_charge_grid_power;  // 0x161D AC charger/grid input power (kW) — live, for CSV/efficiency
     OvmsMetricFloat* m_v_env_hvac_power;  // 0x106E HVAC/cabin power draw (kW): OBC view (0x745) while charging, hybrid-control view (0x7D2) while driving
@@ -213,10 +213,10 @@ private:
     float CalculateChargerInputPower(const std::string& data);
     float CalculateAcTargetPower(const std::string& data);
     int   CalculateChargerOpStatus(const std::string& data);
-    int   CalculateAcCurrentLimitRaw(const std::string& data);
-    int   CalculateChargerOutputRaw(const std::string& data);
-    int   CalculateChargerOutputTargetRaw(const std::string& data);
-    int   CalculateAcUsableRaw(const std::string& data);
+    float CalculateAcCurrentLimit(const std::string& data);
+    float CalculateChargerOutput(const std::string& data);
+    float CalculateChargerOutputTarget(const std::string& data);
+    float CalculateAcUsable(const std::string& data);
     bool  CalculateMyRoom(const std::string& data);
     float CalculateAcConsumption(const std::string& data);
     int   CalculateChargeOutcome(const std::string& data);
@@ -277,10 +277,10 @@ private:
     void SetStationMaxVoltage(float volts);
     void SetAcTargetPower(float kw);
     void SetChargerOpStatus(int v);
-    void SetAcCurrentLimitRaw(int v);
-    void SetChargerOutputRaw(int v);
-    void SetChargerOutputTargetRaw(int v);
-    void SetAcUsableRaw(int v);
+    void SetAcCurrentLimit(float v);
+    void SetChargerOutput(float v);
+    void SetChargerOutputTarget(float v);
+    void SetAcUsable(float v);
     void SetMyRoom(bool active);
     void SetHvacPower(float kw);
     void SetChargeOutcome(int v);
