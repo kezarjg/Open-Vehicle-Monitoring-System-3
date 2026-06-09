@@ -120,6 +120,9 @@ min/max/deviation/alerting automatically.
 - **User-facing changes** are recorded in `vehicle/OVMS.V3/changes.txt` (note the entry format:
   date/author header, `-` bullets, and a `New configs:` / `Config extension:` sub-block listing any
   added `[instance] param` keys). `knownissues.txt` and `todo.txt` track the rest.
+  Per maintainer guidance, `changes.txt` is for changes users need to act on or notice — new
+  features, config changes, behavior changes. **Do not add plain bug fixes** unless they require
+  the user to change something on their side.
 - **PRs are single-purpose** — one vehicle/feature/fix per PR; only mix vehicle + framework changes
   when they depend on each other (see README "A note on pull requests").
 - This is a hardware project: most changes can only be fully validated by building and flashing to a
