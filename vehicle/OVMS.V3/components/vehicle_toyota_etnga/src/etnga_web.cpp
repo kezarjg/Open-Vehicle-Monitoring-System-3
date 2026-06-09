@@ -283,7 +283,10 @@ void OvmsVehicleToyotaETNGA::WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaE
         "<div class=\"clearfix\">"
           "<h6 class=\"metric-head\">Car</h6>"
           "<div class=\"metric number\" data-metric=\"v.c.power\" data-prec=\"3\"><span class=\"label\">Delivered</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
-          "<div class=\"metric number\" data-metric=\"xte.v.c.perm\" data-prec=\"2\"><span class=\"label\">Permitted</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
+          // Permitted is the |0x16A1| charge limit; the metric is stored signed (negative while
+          // charging), so it's updated from JS as an absolute value (id=permkw) like the chart does,
+          // rather than bound raw via data-metric — keeps the on-screen number positive.
+          "<div class=\"metric number\"><span class=\"label\">Permitted</span><span class=\"value\" id=\"permkw\">?</span><span class=\"unit\">kW</span></div>"
           "<div class=\"metric number\" data-metric=\"xte.v.c.tgti\" data-prec=\"0\"><span class=\"label\">Target</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
         "</div>"
 
@@ -298,6 +301,8 @@ void OvmsVehicleToyotaETNGA::WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaE
         "<div class=\"clearfix\">"
           "<h6 class=\"metric-head\">Session energy</h6>"
           "<div class=\"metric number\" data-metric=\"v.c.kwh\" data-prec=\"2\"><span class=\"label\">Charged</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
+          // My-Room cabin energy integrates over both AC and DC sessions, so show it here too.
+          "<div class=\"metric number\" data-metric=\"xte.v.e.hvac.kwh\" data-prec=\"3\"><span class=\"label\">Cabin (My Room)</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
         "</div>");
 }
 
@@ -349,17 +354,20 @@ void OvmsVehicleToyotaETNGA::WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaET
         "      plotOptions:{series:{marker:{enabled:false}}},\n"
         "      series:series});\n"
         "  }\n"
+        "  var pm=null;\n"
+        "  function showPerm(){if(DC&&pm!=null)$('#permkw').text(Math.abs(pm).toFixed(2));}\n"
         "  function onUpd(){\n"
+        "    pm=mv('xte.v.c.perm'); showPerm();\n"   // update the Permitted panel field even before the chart builds
         "    if(!chart) return;\n"
         "    var t=baseT/60+(Date.now()/1000-loadT)/60;\n"
-        "    var d=mv('v.c.power'),sc=mv('v.b.soc'),pm=mv('xte.v.c.perm'),sm=mv('xte.v.c.stamaxp');\n"
+        "    var d=mv('v.c.power'),sc=mv('v.b.soc'),sm=mv('xte.v.c.stamaxp');\n"
         "    var cap=600, sidx=DC?3:2;\n"
         "    if(d!=null) chart.series[0].addPoint([t,d],false,chart.series[0].data.length>cap);\n"
         "    chart.series[1].addPoint([t,pm==null?0:Math.abs(pm)],false,chart.series[1].data.length>cap);\n"
         "    if(DC) chart.series[2].addPoint([t,sm==null?0:sm],false,chart.series[2].data.length>cap);\n"
         "    chart.series[sidx].addPoint([t,sc],true,chart.series[sidx].data.length>cap);\n"
         "  }\n"
-        "  function init(){build(); $('#chgmon').on('msg:metrics',onUpd);}\n"
+        "  function init(){build(); pm=mv('xte.v.c.perm'); showPerm(); $('#chgmon').on('msg:metrics',onUpd);}\n"
         "  if(window.Highcharts) init();\n"
         "  else $.ajax({url:window.assets.charts_js,dataType:'script',cache:true,success:init});\n"
         "})();\n"
