@@ -181,13 +181,20 @@ void modem::Task()
             break;
 
           case UART_FIFO_OVF:
+            // Bytes were lost, so the RX byte stream now has a hole and the MUX demultiplexer is
+            // out of sync. Drop the buffered partial frame and resync, so we don't keep parsing a
+            // corrupt stream (which can hand garbage channel numbers to GsmMux::ProcessFrame).
             uart_flush(m_uartnum);
+            m_buffer.EmptyAll();
+            if (m_mux) m_mux->Reset();
             m_err_uart_fifo_ovf++;
             ESP_LOGW(TAG, "UART hw fifo overflow");
             break;
 
           case UART_BUFFER_FULL:
             uart_flush(m_uartnum);
+            m_buffer.EmptyAll();
+            if (m_mux) m_mux->Reset();
             m_err_uart_buffer_full++;
             ESP_LOGW(TAG, "UART ring buffer full");
             break;

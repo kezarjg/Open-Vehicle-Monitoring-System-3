@@ -77,6 +77,7 @@ class GsmMux : public InternalRamAllocated
     void StopChannel(int channel);
     void Process(OvmsBuffer* buf);
     void ProcessFrame();
+    void Reset();
     size_t tx(int channel, uint8_t* data, ssize_t size);
     size_t tx(int channel, const char* data, ssize_t size = -1);
     bool IsChannelOpen(int channel);

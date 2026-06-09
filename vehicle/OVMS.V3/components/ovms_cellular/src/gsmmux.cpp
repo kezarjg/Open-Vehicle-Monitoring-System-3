@@ -237,6 +237,11 @@ void GsmMux::Shutdown()
 
 void GsmMux::StartChannel(int channel)
   {
+  if (channel < 0 || (size_t)channel >= m_channels.size())
+    {
+    ESP_LOGE(TAG, "StartChannel: channel %d out of range (have %u)", channel, (unsigned)m_channels.size());
+    return;
+    }
   int cn = (channel<<2)+GSM_EA+GSM_CR;
   uint8_t sabm[] =
     {
@@ -256,8 +261,20 @@ void GsmMux::StopChannel(int channel)
   ESP_LOGI(TAG, "StopChannel(%d)",channel);
   }
 
+void GsmMux::Reset()
+  {
+  // Resync the demultiplexer to the next start-of-frame, e.g. after a modem UART overflow /
+  // framing loss, so we stop parsing a corrupt byte stream (see openvehicles#350).
+  m_framepos = 0;
+  m_frameipos = 0;
+  m_framelen = 0;
+  m_framemorelen = false;
+  }
+
 bool GsmMux::IsChannelOpen(int channel)
   {
+  if (channel < 0 || (size_t)channel >= m_channels.size())
+    return false;
   GsmMuxChannel* chan = m_channels[channel];
   return (chan && chan->m_state == GsmMuxChannel::ChanOpen);
   }
@@ -363,7 +380,14 @@ void GsmMux::ProcessFrame()
     return;
     }
 
-  GsmMuxChannel* chan = m_channels[channel];
+  // GSM 07.10 carries the DLCI in 6 bits (channel 0..63), but we only allocate m_channelcount+1
+  // channels. A framing-error / UART-overflow flood can hand us a garbage frame that passes FCS
+  // with a channel beyond what we opened (e.g. CHAN=8/12/13); indexing m_channels[] with it reads
+  // out of bounds and yields a garbage, non-NULL pointer -> wild write -> heap corruption. So
+  // bounds-check the channel before indexing and drop anything out of range.
+  GsmMuxChannel* chan = NULL;
+  if (channel >= 0 && (size_t)channel < m_channels.size())
+    chan = m_channels[channel];
   if (chan)
     {
     m_lastgoodrxframe = monotonictime;
@@ -372,7 +396,8 @@ void GsmMux::ProcessFrame()
     }
   else
     {
-    ESP_LOGW(TAG, "Incoming message for unrecognised channel #%d",channel);
+    ESP_LOGW(TAG, "Incoming message for unrecognised/out-of-range channel #%d (have %u) - dropping",channel,(unsigned)m_channels.size());
+    m_framingerrors++;
     }
 
   m_framepos = 0;
