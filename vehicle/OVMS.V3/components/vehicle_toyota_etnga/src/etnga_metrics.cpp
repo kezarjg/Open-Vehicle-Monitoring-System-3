@@ -80,8 +80,13 @@ void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale variables
         SetAwake(false);
     }
 
-    // Check to make sure the 'charging door' signal has been updated recently
-    if (StandardMetrics.ms_v_door_chargeport->IsStale() && StandardMetrics.ms_v_door_chargeport->AsBool()) {
+    // Check to make sure the 'charging door' signal has been updated recently.
+    // The lid (0x1625) is only polled in AWAKE+DRIVING, so in the charge states it
+    // reads stale even though the cable is physically holding the door open — don't
+    // force it off there, or the UI/server shows the port closed mid-charge. The arm
+    // logic in HandleAwakeState has already latched by then, so holding "open" is safe.
+    if (StandardMetrics.ms_v_door_chargeport->IsStale() && StandardMetrics.ms_v_door_chargeport->AsBool() &&
+            static_cast<PollState>(m_poll_state) < PollState::CHARGE_HANDSHAKE) {
         ESP_LOGD(TAG, "Charging Door is stale. Manually setting to off");
         SetChargingDoorStatus(false);
     }
