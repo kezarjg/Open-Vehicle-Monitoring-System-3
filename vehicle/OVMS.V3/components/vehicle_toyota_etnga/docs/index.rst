@@ -34,6 +34,11 @@ Others                      VIN
 PID Polling Logic
 =================
 
+.. note::
+   TODO: the poll rates listed below do not match the current ``obdii_polls[]``
+   table in ``vehicle_toyota_etnga.cpp``. Confirm the intended rates against
+   the implementation before publishing.
+
 State transition variables should be polled frequently (10s) for the states they contribute to
 * PID_READY_SIGNAL                  { 0, 10, 10, 0}     
 * PID_CHARGING_LID                  { 0, 10, 0, 10}
