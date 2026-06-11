@@ -561,7 +561,9 @@ int OvmsVehicleToyotaETNGA::CalculateShiftPosition(const std::string& data)
 
 float OvmsVehicleToyotaETNGA::CalculateVehicleSpeed(const std::string& data)
 {
-    return static_cast<float>(GetRxBInt8(data, 0));
+    // 0x1F0D: u8, 1 km/h/LSB (max 210) — must decode unsigned or speeds above
+    // 127 km/h wrap negative.
+    return static_cast<float>(GetRxBByte(data, 0));
 }
 
 // Metric setter functions
@@ -624,7 +626,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryPower(float power)
     StandardMetrics.ms_v_bat_power->SetValue(power);
 
     float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
-    int now = esp_log_timestamp();
+    uint32_t now = esp_log_timestamp();
 
     if (lastBatteryEnergyLogTime != 0)
     {
@@ -870,7 +872,7 @@ void OvmsVehicleToyotaETNGA::SetChargerInputPower(float power)
     m_v_charge_grid_power->SetValue(power);
 
     float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
-    int now = esp_log_timestamp();
+    uint32_t now = esp_log_timestamp();
 
     if (lastGridEnergyLogTime != 0)
         {

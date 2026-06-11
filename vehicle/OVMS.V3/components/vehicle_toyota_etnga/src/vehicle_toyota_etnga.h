@@ -44,7 +44,7 @@ public:
     OvmsVehicleToyotaETNGA();
     ~OvmsVehicleToyotaETNGA();
 
-    void Ticker1(uint32_t ticker);
+    void Ticker1(uint32_t ticker) override;
 
     void IncomingPollReply(const OvmsPoller::poll_job_t &job, uint8_t* data, uint8_t length) override;
 
@@ -148,17 +148,20 @@ protected:
     OvmsMetricFloat* m_v_pos_trip_start;
     OvmsMetricInt* m_v_e_awd;   // 0x1087 b2 AWD / X-MODE status (custom; no standard OVMS metric)
     
-    void NotifyVehicleOn();
-    void NotifyChargeStart();
+    void NotifyVehicleOn() override;
+    void NotifyChargeStart() override;
 
 private:
     static constexpr const char* TAG = "v-toyota-etnga";
     static constexpr const char* CHARGING_TAG = "v-toyota-etnga-charging";
-    uint32_t lastBatteryEnergyLogTime;
-    uint32_t lastChargerEnergyLogTime;
-    uint32_t lastGridEnergyLogTime;
-    uint32_t lastHvacEnergyLogTime;
-    uint32_t lastHvacDriveEnergyLogTime;
+    // Energy-integrator timestamps (esp_log_timestamp ms; 0 = interval not started).
+    // Must be zero-initialized: the first poll reply can arrive before NotifyVehicleOn /
+    // NotifyChargeStart reset them, and a garbage dt would corrupt the persistent *_total metrics.
+    uint32_t lastBatteryEnergyLogTime = 0;
+    uint32_t lastChargerEnergyLogTime = 0;
+    uint32_t lastGridEnergyLogTime = 0;
+    uint32_t lastHvacEnergyLogTime = 0;
+    uint32_t lastHvacDriveEnergyLogTime = 0;
 
     void InitializeMetrics();  // Initializes the metrics specific to this vehicle module
     void ResetStaleMetrics();  // Checks if state transition metrics are stale (and resets them)
