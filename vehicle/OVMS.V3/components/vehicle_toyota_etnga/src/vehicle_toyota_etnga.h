@@ -107,7 +107,10 @@ protected:
         int   last_svg_monotonic = 0;
         // v2: file basename (resolved "<dir>/<timestamp>", no extension) + CSV state
         std::string base;
-        bool  csv_started = false;
+        bool  csv_started = false;        // header emitted (into csv_buf)
+        bool  csv_file_created = false;   // <base>.csv exists on disk (first flush truncates)
+        std::string csv_buf;              // rows pending flush (batched to limit flash write cycles)
+        int   last_csv_flush = 0;         // monotonic s of last flush
     };
     ChargeSessionState m_charge_session;
 
@@ -171,7 +174,8 @@ private:
     std::string RenderPowerSvg();      // inline SVG power(+SOC)-vs-time chart from m_charge_session.svg
     void GenerateChargeReport();       // write the session-end HTML report to /store/charge-reports/
     void LogChargeEvent(const char* label);            // append a timestamped event
-    void AppendChargeCsvRow();                          // stream one CSV row (opens+header on first call)
+    void AppendChargeCsvRow();                          // buffer one CSV row (header on first call)
+    void FlushChargeCsv();                              // write buffered CSV rows to <base>.csv
     std::string ChargeReportDir();                      // "/sd/charge-reports" if SD mounted else "/store/..."
     static const char* ChargeOutcomeLabel(int code);    // 0x1688 enum -> human text
     static const char* HlcStateLabel(int code);         // 0x1666 DC HLC state enum -> human text ("" if unknown)
@@ -419,7 +423,10 @@ enum CANPID
 
 inline uint8_t GetRxBByte(const std::string& rxbuf, size_t index)
 {
-    return static_cast<uint8_t>(rxbuf[index]);
+    // Bounds-checked: a short/garbled UDS reply must not read past the buffer.
+    // Handlers should still length-check multi-byte payloads before decoding
+    // (a zero-fill is memory-safe but not valid data).
+    return (index < rxbuf.size()) ? static_cast<uint8_t>(rxbuf[index]) : 0;
 }
 
 inline uint16_t GetRxBUint16(const std::string& rxbuf, size_t index)

@@ -732,6 +732,9 @@ void OvmsVehicleToyotaETNGA::SetBatteryCapacityAlt(const std::vector<float>& cap
 
 void OvmsVehicleToyotaETNGA::SetBatteryCellVoltageStatistics(const std::vector<float>& voltages)
 {
+    if (voltages.empty())
+        return;
+
     if (BmsGetCellArangementVoltage() > 0) {
         // BmsSetCellVoltage already populated pack vmin/vmax/vavg/vstddev.
         return;
@@ -771,6 +774,9 @@ void OvmsVehicleToyotaETNGA::SetBatteryTemperatures(const std::vector<float>& te
 
 void OvmsVehicleToyotaETNGA::SetBatteryTemperatureStatistics(const std::vector<float>& temperatures)
 {
+    if (temperatures.empty())
+        return;
+
     // Average is needed for ms_v_bat_temp regardless of code path.
     float sum = std::accumulate(temperatures.begin(), temperatures.end(), 0.0f);
     float averageTemperature = sum / temperatures.size();

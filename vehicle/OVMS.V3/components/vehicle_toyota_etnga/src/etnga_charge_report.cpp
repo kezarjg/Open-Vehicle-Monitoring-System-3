@@ -227,19 +227,16 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
 {
     if (m_charge_session.base.empty())
         return;
-    std::string path = m_charge_session.base + ".csv";
-    std::ofstream f(path, m_charge_session.csv_started
-        ? (std::ios::out | std::ios::app)
-        : (std::ios::out | std::ios::trunc));
-    if (!f) return;
 
     if (!m_charge_session.csv_started) {
-        f << "elapsed_s,soc_pct,delivered_kw,pack_v,pack_a,batt_temp_c,ambient_c,state,"
-             "station_max_kw,station_max_a,station_max_v,car_perm_kw,target_a,grid_kw,present_v,present_a\n";
+        m_charge_session.csv_buf =
+            "elapsed_s,soc_pct,delivered_kw,pack_v,pack_a,batt_temp_c,ambient_c,state,"
+            "station_max_kw,station_max_a,station_max_v,car_perm_kw,target_a,grid_kw,present_v,present_a\n";
         m_charge_session.csv_started = true;
     }
 
-    int elapsed = StandardMetrics.ms_m_monotonic->AsInt() - m_charge_session.start_monotonic;
+    int now = StandardMetrics.ms_m_monotonic->AsInt();
+    int elapsed = now - m_charge_session.start_monotonic;
     char row[256];
     snprintf(row, sizeof(row),
         "%d,%.0f,%.3f,%.1f,%.1f,%.1f,%.1f,%s,"
@@ -256,7 +253,29 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
         m_v_charge_perm->AsFloat(), m_v_charge_tgti->AsFloat(),
         m_v_charge_grid_power->AsFloat(),
         StandardMetrics.ms_v_charge_voltage->AsFloat(), StandardMetrics.ms_v_charge_current->AsFloat());
-    f << row;
+    m_charge_session.csv_buf += row;
+
+    // Flush at most every 30 s (or ~4 KB): a 1 Hz open/append/close per row would put
+    // thousands of write cycles on the internal flash when /store is the report target.
+    if (m_charge_session.last_csv_flush == 0)
+        m_charge_session.last_csv_flush = now;
+    if (now - m_charge_session.last_csv_flush >= 30 || m_charge_session.csv_buf.size() >= 4096)
+        FlushChargeCsv();
+}
+
+// Write the buffered CSV rows to <base>.csv (truncating on the first flush of a session).
+void OvmsVehicleToyotaETNGA::FlushChargeCsv()
+{
+    if (m_charge_session.csv_buf.empty() || m_charge_session.base.empty())
+        return;
+    std::ofstream f(m_charge_session.base + ".csv", m_charge_session.csv_file_created
+        ? (std::ios::out | std::ios::app)
+        : (std::ios::out | std::ios::trunc));
+    if (!f) return;
+    f << m_charge_session.csv_buf;
+    m_charge_session.csv_buf.clear();
+    m_charge_session.csv_file_created = true;
+    m_charge_session.last_csv_flush = StandardMetrics.ms_m_monotonic->AsInt();
 }
 
 // Retain only the newest CHARGE_REPORT_MAX sessions; delete both .html and .csv for each pruned stem.
@@ -395,10 +414,11 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     const float energy_kwh = StandardMetrics.ms_v_charge_kwh->AsFloat();
     if (energy_kwh < 0.05f || m_charge_session.base.empty()) {
         ESP_LOGD(TAG, "Charge report skipped (%.3f kWh)", energy_kwh);
-        if (m_charge_session.csv_started && !m_charge_session.base.empty())   // remove the streamed stub CSV
+        if (m_charge_session.csv_file_created)   // remove the streamed stub CSV (buffered rows are discarded with the session)
             unlink((m_charge_session.base + ".csv").c_str());
         return;
     }
+    FlushChargeCsv();   // complete the per-sample CSV before linking it from the report
     const float grid_kwh  = StandardMetrics.ms_v_charge_kwh_grid->AsFloat();
     const int   end_soc   = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
     const int   start_soc = m_charge_session.start_soc;

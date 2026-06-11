@@ -122,6 +122,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
         }
 
         case PID_BATTERY_VOLTAGE_AND_CURRENT: {
+            if (m_rxbuf.size() < 6) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             float batVoltage = CalculateBatteryVoltage(m_rxbuf);
             float batCurrent = CalculateBatteryCurrent(m_rxbuf);
             float batPower = CalculateBatteryPower(batVoltage, batCurrent);
@@ -146,6 +147,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
         }
 
         case PID_ODOMETER: {
+            if (m_rxbuf.size() < 4) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             float odometer = CalculateOdometer(m_rxbuf);
             SetOdometer(odometer);
             break;
@@ -306,12 +308,14 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
         }
 
         case PID_CHARGER_STATE_CLUSTER: {
+            if (m_rxbuf.size() < 5) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             SetAcTargetPower(CalculateAcTargetPower(m_rxbuf));
             SetChargerOpStatus(CalculateChargerOpStatus(m_rxbuf));
             SetAcCurrentLimit(CalculateAcCurrentLimit(m_rxbuf));
             break;
         }
         case PID_CHARGER_OUTPUT_POWER: {
+            if (m_rxbuf.size() < 4) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             SetChargerOutput(CalculateChargerOutput(m_rxbuf));
             SetChargerOutputTarget(CalculateChargerOutputTarget(m_rxbuf));
             break;
@@ -361,6 +365,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
         }
 
         case PID_BATTERY_TEMPERATURES: {
+            if (m_rxbuf.size() < 48) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             std::vector<float> temperatures = CalculateBatteryTemperatures(m_rxbuf);
             SetBatteryTemperatures(temperatures);
             SetBatteryTemperatureStatistics(temperatures);
@@ -368,6 +373,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
         }
 
         case PID_BATTERY_CELL_VOLTAGES: {
+            if (m_rxbuf.size() < 192) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             std::vector<float> voltages = CalculateBatteryCellVoltages(m_rxbuf);
             SetBatteryCellVoltages(voltages);
             SetBatteryCellVoltageStatistics(voltages);
@@ -375,6 +381,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
         }
 
         case PID_BATTERY_CAPACITY: {
+            if (m_rxbuf.size() < 16) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             std::vector<float> caps = CalculateBatteryCapacityArray(m_rxbuf);
             SetBatteryCapacityFull(caps);
             if (caps.size() >= 8)
@@ -384,6 +391,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
         }
 
         case PID_BATTERY_CAPACITY_ALT: {
+            if (m_rxbuf.size() < 16) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             std::vector<float> caps = CalculateBatteryCapacityArray(m_rxbuf);
             SetBatteryCapacityAlt(caps);
             if (caps.size() >= 8)
