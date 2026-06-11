@@ -35,7 +35,6 @@
 #endif
 #include "vehicle_toyota_etnga.h"
 
-#define CHARGE_REPORT_DIR  "/store/charge-reports"
 static const int CHARGE_REPORT_MAX = 50;   // retain at most this many reports
 
 // Prefer the SD card (GBs, removable) for reports+CSV; fall back to internal flash.

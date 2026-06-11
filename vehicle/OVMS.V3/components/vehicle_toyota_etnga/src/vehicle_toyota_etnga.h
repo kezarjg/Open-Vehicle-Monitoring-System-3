@@ -298,11 +298,17 @@ private:
     void SetFootBrake(float pct);
     void SetParkBrake(bool applied);
 
-    void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
-    void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);
-    void LogMetricChange(OvmsMetricInt* metric, int newValue, const std::string& label, const std::string& valueLabel);
-    void LogMetricChange(OvmsMetricString* metric, const std::string& newValue, const std::string& label);
-    
+    // const char* throughout: these run on every poll reply, and std::string
+    // parameters meant heap allocations per call even with logging filtered out.
+    void LogMetricChange(OvmsMetricBool* metric, bool newValue, const char* label, const char* valueLabel);
+    void LogMetricChange(OvmsMetricFloat* metric, float newValue, const char* label, const char* units);
+    void LogMetricChange(OvmsMetricInt* metric, int newValue, const char* label, const char* valueLabel);
+    void LogMetricChange(OvmsMetricString* metric, const std::string& newValue, const char* label);
+
+    // Hours since the last sample on an energy-integrator channel; updates the channel
+    // timestamp. Implementation: etnga_metrics.cpp.
+    float EnergyIntervalHours(uint32_t& lastSampleTime);
+
     // State transition functions
     void HandleSleepState();
     void HandleAwakeState();
@@ -323,9 +329,7 @@ private:
     void RequestVIN();
     void IncomingVINSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, CAN_frame_format_t format, const std::string &data);
     void IncomingVINFail(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, int errorcode);
-    void RequestChargeType();
-    void DiagnosticSession();
-    
+
 };
 
 // CAN bus addresses
@@ -471,36 +475,13 @@ inline bool GetRxBBit(const std::string& rxbuf, size_t byteIndex, size_t bitInde
 }
 
 inline const char* ConvertPollStateToString(int state) {
-    const char* pollStateText;
-
-    switch (state) {
-        case (PollState::SLEEP):
-            pollStateText = "SLEEP";
-            break;
-        case (PollState::AWAKE):
-            pollStateText = "AWAKE";
-            break;
-        case (PollState::DRIVING):
-            pollStateText = "DRIVING";
-            break;
-        case (PollState::CHARGE_HANDSHAKE):
-            pollStateText = "CHARGE_HANDSHAKE";
-            break;
-        case (PollState::CHARGE_WAIT):
-            pollStateText = "CHARGE_WAIT";
-            break;
-        case (PollState::CHARGE_AC):
-            pollStateText = "CHARGE_AC";
-            break;
-        case (PollState::CHARGE_DC):
-            pollStateText = "CHARGE_DC";
-            break;
-        default:
-            pollStateText = "UNKNOWN";
-            break;
-    }
-
-    return pollStateText;
+    // Indexed by PollState (SLEEP..CHARGE_DC).
+    static const char* const names[] = {
+        "SLEEP", "AWAKE", "DRIVING", "CHARGE_HANDSHAKE", "CHARGE_WAIT", "CHARGE_AC", "CHARGE_DC"
+    };
+    if (state < 0 || state >= (int)(sizeof(names) / sizeof(names[0])))
+        return "UNKNOWN";
+    return names[state];
 }
 
 #endif // __VEHICLE_TOYOTA_ETNGA_H__
