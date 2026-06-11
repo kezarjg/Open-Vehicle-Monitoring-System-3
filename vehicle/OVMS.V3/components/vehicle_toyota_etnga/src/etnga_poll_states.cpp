@@ -282,20 +282,13 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
     // arm state is reset by TransitionToSleepState / TransitionToDrivingState.
     SetPollState(PollState::AWAKE);
     m_v_env_awaketime->SetValue(monotonic);
-    // Set ms_v_charge_state based on the charge session outcome.
-    // AC/DC normally exit via CHARGE_WAIT; this branch is a safety net for any future direct AC/DC->AWAKE path.
-    if (oldState == PollState::CHARGE_AC || oldState == PollState::CHARGE_DC) {
-        StandardMetrics.ms_v_charge_state->SetValue("done");
+    // Leaving the charge sub-machine: close the session. ms_v_charge_state is "done" only
+    // when energy was being delivered (AC/DC — normally these exit via CHARGE_WAIT; the
+    // direct path is a safety net); HANDSHAKE/WAIT exits just clear it.
+    if (oldState >= PollState::CHARGE_HANDSHAKE) {
+        bool delivered = (oldState == PollState::CHARGE_AC || oldState == PollState::CHARGE_DC);
+        StandardMetrics.ms_v_charge_state->SetValue(delivered ? "done" : "");
         StandardMetrics.ms_v_charge_mode->SetValue("");   // clear AC/DC indicator on session end
-        if (m_charge_session.in_session) {
-            ESP_LOGI(TAG, "Charge session closed");
-            LogChargeEvent("Unplugged");
-            GenerateChargeReport();   // write the session-end HTML report (no-op if no energy delivered)
-        }
-        m_charge_session = ChargeSessionState{};   // reset (clears in_session)
-    } else if (oldState == PollState::CHARGE_HANDSHAKE || oldState == PollState::CHARGE_WAIT) {
-        StandardMetrics.ms_v_charge_state->SetValue("");
-        StandardMetrics.ms_v_charge_mode->SetValue("");
         if (m_charge_session.in_session) {
             ESP_LOGI(TAG, "Charge session closed");
             LogChargeEvent("Unplugged");

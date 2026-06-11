@@ -44,7 +44,7 @@ public:
     OvmsVehicleToyotaETNGA();
     ~OvmsVehicleToyotaETNGA();
 
-    void Ticker1(uint32_t ticker);
+    void Ticker1(uint32_t ticker) override;
 
     void IncomingPollReply(const OvmsPoller::poll_job_t &job, uint8_t* data, uint8_t length) override;
 
@@ -107,7 +107,10 @@ protected:
         int   last_svg_monotonic = 0;
         // v2: file basename (resolved "<dir>/<timestamp>", no extension) + CSV state
         std::string base;
-        bool  csv_started = false;
+        bool  csv_started = false;        // header emitted (into csv_buf)
+        bool  csv_file_created = false;   // <base>.csv exists on disk (first flush truncates)
+        std::string csv_buf;              // rows pending flush (batched to limit flash write cycles)
+        int   last_csv_flush = 0;         // monotonic s of last flush
     };
     ChargeSessionState m_charge_session;
 
@@ -148,17 +151,20 @@ protected:
     OvmsMetricFloat* m_v_pos_trip_start;
     OvmsMetricInt* m_v_e_awd;   // 0x1087 b2 AWD / X-MODE status (custom; no standard OVMS metric)
     
-    void NotifyVehicleOn();
-    void NotifyChargeStart();
+    void NotifyVehicleOn() override;
+    void NotifyChargeStart() override;
 
 private:
     static constexpr const char* TAG = "v-toyota-etnga";
     static constexpr const char* CHARGING_TAG = "v-toyota-etnga-charging";
-    uint32_t lastBatteryEnergyLogTime;
-    uint32_t lastChargerEnergyLogTime;
-    uint32_t lastGridEnergyLogTime;
-    uint32_t lastHvacEnergyLogTime;
-    uint32_t lastHvacDriveEnergyLogTime;
+    // Energy-integrator timestamps (esp_log_timestamp ms; 0 = interval not started).
+    // Must be zero-initialized: the first poll reply can arrive before NotifyVehicleOn /
+    // NotifyChargeStart reset them, and a garbage dt would corrupt the persistent *_total metrics.
+    uint32_t lastBatteryEnergyLogTime = 0;
+    uint32_t lastChargerEnergyLogTime = 0;
+    uint32_t lastGridEnergyLogTime = 0;
+    uint32_t lastHvacEnergyLogTime = 0;
+    uint32_t lastHvacDriveEnergyLogTime = 0;
 
     void InitializeMetrics();  // Initializes the metrics specific to this vehicle module
     void ResetStaleMetrics();  // Checks if state transition metrics are stale (and resets them)
@@ -168,7 +174,8 @@ private:
     std::string RenderPowerSvg();      // inline SVG power(+SOC)-vs-time chart from m_charge_session.svg
     void GenerateChargeReport();       // write the session-end HTML report to /store/charge-reports/
     void LogChargeEvent(const char* label);            // append a timestamped event
-    void AppendChargeCsvRow();                          // stream one CSV row (opens+header on first call)
+    void AppendChargeCsvRow();                          // buffer one CSV row (header on first call)
+    void FlushChargeCsv();                              // write buffered CSV rows to <base>.csv
     std::string ChargeReportDir();                      // "/sd/charge-reports" if SD mounted else "/store/..."
     static const char* ChargeOutcomeLabel(int code);    // 0x1688 enum -> human text
     static const char* HlcStateLabel(int code);         // 0x1666 DC HLC state enum -> human text ("" if unknown)
@@ -291,11 +298,17 @@ private:
     void SetFootBrake(float pct);
     void SetParkBrake(bool applied);
 
-    void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
-    void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);
-    void LogMetricChange(OvmsMetricInt* metric, int newValue, const std::string& label, const std::string& valueLabel);
-    void LogMetricChange(OvmsMetricString* metric, const std::string& newValue, const std::string& label);
-    
+    // const char* throughout: these run on every poll reply, and std::string
+    // parameters meant heap allocations per call even with logging filtered out.
+    void LogMetricChange(OvmsMetricBool* metric, bool newValue, const char* label, const char* valueLabel);
+    void LogMetricChange(OvmsMetricFloat* metric, float newValue, const char* label, const char* units);
+    void LogMetricChange(OvmsMetricInt* metric, int newValue, const char* label, const char* valueLabel);
+    void LogMetricChange(OvmsMetricString* metric, const std::string& newValue, const char* label);
+
+    // Hours since the last sample on an energy-integrator channel; updates the channel
+    // timestamp. Implementation: etnga_metrics.cpp.
+    float EnergyIntervalHours(uint32_t& lastSampleTime);
+
     // State transition functions
     void HandleSleepState();
     void HandleAwakeState();
@@ -316,9 +329,7 @@ private:
     void RequestVIN();
     void IncomingVINSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, CAN_frame_format_t format, const std::string &data);
     void IncomingVINFail(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, int errorcode);
-    void RequestChargeType();
-    void DiagnosticSession();
-    
+
 };
 
 // CAN bus addresses
@@ -416,7 +427,10 @@ enum CANPID
 
 inline uint8_t GetRxBByte(const std::string& rxbuf, size_t index)
 {
-    return static_cast<uint8_t>(rxbuf[index]);
+    // Bounds-checked: a short/garbled UDS reply must not read past the buffer.
+    // Handlers should still length-check multi-byte payloads before decoding
+    // (a zero-fill is memory-safe but not valid data).
+    return (index < rxbuf.size()) ? static_cast<uint8_t>(rxbuf[index]) : 0;
 }
 
 inline uint16_t GetRxBUint16(const std::string& rxbuf, size_t index)
@@ -461,36 +475,13 @@ inline bool GetRxBBit(const std::string& rxbuf, size_t byteIndex, size_t bitInde
 }
 
 inline const char* ConvertPollStateToString(int state) {
-    const char* pollStateText;
-
-    switch (state) {
-        case (PollState::SLEEP):
-            pollStateText = "SLEEP";
-            break;
-        case (PollState::AWAKE):
-            pollStateText = "AWAKE";
-            break;
-        case (PollState::DRIVING):
-            pollStateText = "DRIVING";
-            break;
-        case (PollState::CHARGE_HANDSHAKE):
-            pollStateText = "CHARGE_HANDSHAKE";
-            break;
-        case (PollState::CHARGE_WAIT):
-            pollStateText = "CHARGE_WAIT";
-            break;
-        case (PollState::CHARGE_AC):
-            pollStateText = "CHARGE_AC";
-            break;
-        case (PollState::CHARGE_DC):
-            pollStateText = "CHARGE_DC";
-            break;
-        default:
-            pollStateText = "UNKNOWN";
-            break;
-    }
-
-    return pollStateText;
+    // Indexed by PollState (SLEEP..CHARGE_DC).
+    static const char* const names[] = {
+        "SLEEP", "AWAKE", "DRIVING", "CHARGE_HANDSHAKE", "CHARGE_WAIT", "CHARGE_AC", "CHARGE_DC"
+    };
+    if (state < 0 || state >= (int)(sizeof(names) / sizeof(names[0])))
+        return "UNKNOWN";
+    return names[state];
 }
 
 #endif // __VEHICLE_TOYOTA_ETNGA_H__

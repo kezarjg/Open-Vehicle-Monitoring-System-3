@@ -142,6 +142,10 @@ OvmsVehicleToyotaETNGA::~OvmsVehicleToyotaETNGA()
 
 void OvmsVehicleToyotaETNGA::NotifyVehicleOn()
 {
+    // Standard framework behavior first: the base sends the trip-log notification, which
+    // must read the previous trip's metrics before they are reset below.
+    OvmsVehicle::NotifyVehicleOn();
+
     ESP_LOGV(TAG, "Notification of vehicle on - Reset energy metrics for trip reporting");
     // Vehicle started. Reset the trip statistics (per-trip metrics only; *_total are lifetime)
     StandardMetrics.ms_v_bat_energy_used->SetValue(0);
@@ -170,7 +174,10 @@ void OvmsVehicleToyotaETNGA::NotifyChargeStart()
 
     m_v_env_hvac_kwh->SetValue(0);
     lastHvacEnergyLogTime = 0;
-    
+
+    // Standard framework behavior last: the base sends the "charge started" push
+    // notification, which should reflect the freshly reset session counters.
+    OvmsVehicle::NotifyChargeStart();
 }
 
 void OvmsVehicleToyotaETNGA::Ticker1(uint32_t ticker)
