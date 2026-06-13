@@ -65,6 +65,24 @@ void OvmsVehicleToyotaETNGA::IncomingPollReply(const OvmsPoller::poll_job_t &job
     }
 }
 
+void OvmsVehicleToyotaETNGA::IncomingPollError(const OvmsPoller::poll_job_t &job, int32_t code)
+{
+    // UDS negative responses and poll TX failures previously vanished silently.  Logged
+    // for diagnosis only (OBC lock-isolation NRCs, gateway refusals, and TX failures
+    // while the bus is wedged) — deliberately NO state/session action here; see the
+    // lock-isolation notes in HandleChargeAcState/HandleChargeDcState.
+    // A repeating identical error (e.g. one TX failure per poll on a wedged bus) logs
+    // at WARN once, then at debug level until the error signature changes.
+    // Non-overlapping fold: module low byte (bits 24-31), pid (8-23), code (0-7).
+    uint32_t sig = ((job.moduleid_rec & 0xFF) << 24) ^ ((job.pid & 0xFFFF) << 8) ^ (code & 0xFF);
+    if (sig != m_last_poll_error) {
+        m_last_poll_error = sig;
+        ESP_LOGW(TAG, "Poll error: module %03" PRIx32 " PID %04X code %d", job.moduleid_rec, job.pid, (int)code);
+    } else {
+        ESP_LOGD(TAG, "Poll error (repeat): module %03" PRIx32 " PID %04X code %d", job.moduleid_rec, job.pid, (int)code);
+    }
+}
+
 void OvmsVehicleToyotaETNGA::IncomingAirConditionerSystem(uint16_t pid)
 {
     switch (pid) {
@@ -252,6 +270,9 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
         }
 
         case PID_BATTERY_CHARGING_POWER: {
+            // Biased u16: a zero-filled short reply decodes as -327.68 kW and would be
+            // integrated into ms_v_charge_kwh — guard before the gate.
+            if (m_rxbuf.size() < 2) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             // Only valid during AC or DC charging
             if (StandardMetrics.ms_v_charge_inprogress->AsBool()) {
                 float batteryChargingPower = CalculateBatteryChargingPower(m_rxbuf);
@@ -261,6 +282,8 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
         }
 
         case PID_CHARGER_INPUT_POWER: {
+            // Accumulates into the LIFETIME grid-energy total — guard against short replies.
+            if (m_rxbuf.size() < 2) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             // Only valid during AC charging
             if (m_poll_state == PollState::CHARGE_AC) {
                 float chargerInputPower = CalculateChargerInputPower(m_rxbuf);

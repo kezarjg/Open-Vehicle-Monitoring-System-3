@@ -204,7 +204,7 @@ bool OvmsVehicleToyotaETNGA::CalculateChargingDoorStatus(const std::string& data
     return GetRxBBit(data, 1, 1);
 }
 
-int OvmsVehicleToyotaETNGA::CalculateAcOpStatus(const std::string& data) { return GetRxBInt8(data, 0); }
+int OvmsVehicleToyotaETNGA::CalculateAcOpStatus(const std::string& data) { return GetRxBByte(data, 0); }
 void OvmsVehicleToyotaETNGA::SetAcOpStatus(int v)
 {
     if (m_v_charge_ac_op->SetValue(v))
@@ -232,7 +232,9 @@ void OvmsVehicleToyotaETNGA::SetHlcState(int v)
             LogChargeEvent(lbl);
     }
 }
-int OvmsVehicleToyotaETNGA::CalculatePISWRaw(const std::string& data) { return GetRxBInt8(data, 0); }
+// Unsigned byte: a signed read made codes >= 0x80 negative, silently failing the
+// state machine's `pisw >= 0x02` cable-present checks on any extended/error code.
+int OvmsVehicleToyotaETNGA::CalculatePISWRaw(const std::string& data) { return GetRxBByte(data, 0); }
 void OvmsVehicleToyotaETNGA::SetPISWRaw(int v)
 {
     if (m_v_charge_pisw_raw->SetValue(v))
@@ -509,7 +511,9 @@ int OvmsVehicleToyotaETNGA::CalculateChargeType(const std::string& data)
 
 float OvmsVehicleToyotaETNGA::CalculateHVACSetpoint(const std::string& data)
 {
-    int rawValue = GetRxBInt8(data, 0);
+    // Unsigned byte: the raw value is an enumerated code (0..255); a signed read sent
+    // codes >= 0x80 into the wrong piecewise branch as negatives.
+    int rawValue = GetRxBByte(data, 0);
     
     // Calculate the HVAC setpoint based on the piecewise function
     if (rawValue == 0) {
@@ -536,7 +540,7 @@ bool OvmsVehicleToyotaETNGA::CalculatePISWStatus(const std::string& data)
 {
     // 0x00 = None
     // 0x03 = Charging connector connected
-    return GetRxBInt8(data, 0);
+    return GetRxBByte(data, 0) != 0;
 }
 
 bool OvmsVehicleToyotaETNGA::CalculateReadyStatus(const std::string& data)
@@ -731,7 +735,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryCellVoltageStatistics(const std::vector<f
     float averageVoltage = sum / voltages.size();
     float variance = 0.0f;
     for (float v : voltages) {
-        variance += pow(v - averageVoltage, 2);
+        variance += (v - averageVoltage) * (v - averageVoltage);
     }
     float standardDeviation = sqrt(variance / voltages.size());
 
@@ -771,7 +775,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryTemperatureStatistics(const std::vector<f
         float maxTemperature = *std::max_element(temperatures.begin(), temperatures.end());
         float variance = 0.0f;
         for (float temperature : temperatures) {
-            variance += pow(temperature - averageTemperature, 2);
+            variance += (temperature - averageTemperature) * (temperature - averageTemperature);
         }
         float standardDeviation = sqrt(variance / temperatures.size());
 

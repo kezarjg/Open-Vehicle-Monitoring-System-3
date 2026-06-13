@@ -236,9 +236,14 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
 
     int now = StandardMetrics.ms_m_monotonic->AsInt();
     int elapsed = now - m_charge_session.start_monotonic;
+    // Ambient is undefined until the first in-charge 0x1F46 reply (~30 s in): write an
+    // empty field rather than 0.0, which is indistinguishable from a real 0 C reading.
+    char amb[16] = "";
+    if (StandardMetrics.ms_v_env_temp->IsDefined())
+        snprintf(amb, sizeof(amb), "%.1f", StandardMetrics.ms_v_env_temp->AsFloat());
     char row[256];
     snprintf(row, sizeof(row),
-        "%d,%.0f,%.3f,%.1f,%.1f,%.1f,%.1f,%s,"
+        "%d,%.0f,%.3f,%.1f,%.1f,%.1f,%s,%s,"
         "%.2f,%.0f,%.0f,%.2f,%.0f,%.3f,%.0f,%.0f\n",
         elapsed,
         StandardMetrics.ms_v_bat_soc->AsFloat(),
@@ -246,7 +251,7 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
         StandardMetrics.ms_v_bat_voltage->AsFloat(),
         StandardMetrics.ms_v_bat_current->AsFloat(),
         StandardMetrics.ms_v_bat_temp->AsFloat(),
-        StandardMetrics.ms_v_env_temp->AsFloat(),
+        amb,
         (m_charge_session.is_dc ? "DC" : "AC"),
         m_v_charge_sta_max_p->AsFloat(), m_v_charge_sta_max_i->AsFloat(), m_v_charge_sta_max_v->AsFloat(),
         m_v_charge_perm->AsFloat(), m_v_charge_tgti->AsFloat(),
@@ -270,8 +275,30 @@ void OvmsVehicleToyotaETNGA::FlushChargeCsv()
     std::ofstream f(m_charge_session.base + ".csv", m_charge_session.csv_file_created
         ? (std::ios::out | std::ios::app)
         : (std::ios::out | std::ios::trunc));
-    if (!f) return;
+    if (!f) {
+        // Can't open (SD removed/unmounted mid-charge?): keep the rows for retry, but
+        // bound the pending buffer — at ~100 B/row this otherwise grows without limit
+        // for the rest of the session (heap safety).
+        if (m_charge_session.csv_buf.size() > 16384) {
+            ESP_LOGE(TAG, "Charge CSV unwritable, buffer over limit — discarding buffered rows: %s.csv",
+                m_charge_session.base.c_str());
+            m_charge_session.csv_buf.clear();
+        }
+        return;
+    }
     f << m_charge_session.csv_buf;
+    f.flush();
+    if (f.fail()) {
+        // Keep the rows for the next attempt (disk full / SD hiccup) — clearing here
+        // silently lost them. last_csv_flush stays old, so retry on the next row.
+        ESP_LOGE(TAG, "Charge CSV write failed (disk full?): %s.csv", m_charge_session.base.c_str());
+        if (m_charge_session.csv_buf.size() > 16384) {
+            // Filesystem persistently unwritable: bound the pending buffer (heap safety).
+            ESP_LOGE(TAG, "Charge CSV buffer over limit — discarding buffered rows");
+            m_charge_session.csv_buf.clear();
+        }
+        return;
+    }
     m_charge_session.csv_buf.clear();
     m_charge_session.csv_file_created = true;
     m_charge_session.last_csv_flush = StandardMetrics.ms_m_monotonic->AsInt();
@@ -320,11 +347,15 @@ static void PruneChargeReports(const char* tag, const std::string& dir)
 //   - traces: delivered power, station-offered max (DC only) and car-permitted limit (the
 //     0x16A1 taper curve), plus the SOC overlay. All powers plot as magnitudes (0x16A1 is
 //     signed: negative = charging), so the three power traces share one positive axis.
-std::string OvmsVehicleToyotaETNGA::RenderPowerSvg()
+// Streams directly to the (already open) report file: a 300-sample DC session built a
+// ~25-30 KB contiguous std::string here, a needless heap spike on the ESP32.
+void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
 {
     const std::vector<ChargeSessionState::Sample>& s = m_charge_session.svg;
-    if (s.size() < 2)
-        return "<p>(not enough samples for a chart)</p>";
+    if (s.size() < 2) {
+        out << "<p>(not enough samples for a chart)</p>";
+        return;
+    }
 
     const bool  dc    = m_charge_session.is_dc;
     const float pmax  = dc ? 150.0f : 11.0f;   // fixed power-axis full scale (kW)
@@ -334,78 +365,76 @@ std::string OvmsVehicleToyotaETNGA::RenderPowerSvg()
     const int PW = W - PADL - PADR, PH = H - PADT - PADB;
     int tmax = s.back().t_s > 0 ? s.back().t_s : 1;
 
-    std::string out;
     char b[256];
     snprintf(b, sizeof(b), "<svg viewBox=\"0 0 %d %d\" style=\"width:100%%;max-width:%dpx;height:auto\" xmlns=\"http://www.w3.org/2000/svg\">\n", W, H, W);
-    out += b;
-    out += "<rect width=\"100%\" height=\"100%\" fill=\"#fff\"/>\n";
+    out << b;
+    out << "<rect width=\"100%\" height=\"100%\" fill=\"#fff\"/>\n";
 
     // Horizontal gridlines + left power-axis (kW) labels.
     for (float kw = 0.0f; kw <= pmax + 0.01f; kw += pstep) {
         float y = PADT + (float)PH * (1.0f - kw / pmax);
-        snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%.1f\" x2=\"%d\" y2=\"%.1f\" stroke=\"#eee\"/>\n", PADL, y, W-PADR, y); out += b;
-        snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%.1f\" font-size=\"10\" fill=\"#06c\" text-anchor=\"end\">%g</text>\n", PADL-3, y+3, kw); out += b;
+        snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%.1f\" x2=\"%d\" y2=\"%.1f\" stroke=\"#eee\"/>\n", PADL, y, W-PADR, y); out << b;
+        snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%.1f\" font-size=\"10\" fill=\"#06c\" text-anchor=\"end\">%g</text>\n", PADL-3, y+3, kw); out << b;
     }
     // Right SOC-axis (%) labels, fixed 0-100.
     for (int soc = 0; soc <= 100; soc += 25) {
         float y = PADT + (float)PH * (1.0f - soc / 100.0f);
-        snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%.1f\" font-size=\"10\" fill=\"#39c\">%d</text>\n", W-PADR+3, y+3, soc); out += b;
+        snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%.1f\" font-size=\"10\" fill=\"#39c\">%d</text>\n", W-PADR+3, y+3, soc); out << b;
     }
     // Axis lines (left power, right SOC, bottom time).
-    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, PADT, PADL, H-PADB); out += b;
-    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", W-PADR, PADT, W-PADR, H-PADB); out += b;
-    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, H-PADB, W-PADR, H-PADB); out += b;
+    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, PADT, PADL, H-PADB); out << b;
+    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", W-PADR, PADT, W-PADR, H-PADB); out << b;
+    snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, H-PADB, W-PADR, H-PADB); out << b;
 
     // SOC overlay (right axis, 0-100).
-    out += "<polyline fill=\"none\" stroke=\"#39c\" stroke-width=\"1\" stroke-dasharray=\"1 3\" points=\"";
+    out << "<polyline fill=\"none\" stroke=\"#39c\" stroke-width=\"1\" stroke-dasharray=\"1 3\" points=\"";
     for (size_t i = 0; i < s.size(); i++) {
         float x = PADL + (float)PW * s[i].t_s / tmax;
         float soc = s[i].soc < 0 ? 0.0f : (s[i].soc > 100 ? 100.0f : (float)s[i].soc);
         float y = PADT + (float)PH * (1.0f - soc / 100.0f);
-        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out += b;
+        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
     }
-    out += "\"/>\n";
+    out << "\"/>\n";
 
     // Station-offered max (DC only — 0x166A is not polled on AC).
     if (dc) {
-        out += "<polyline fill=\"none\" stroke=\"#e80\" stroke-width=\"1\" stroke-dasharray=\"5 3\" points=\"";
+        out << "<polyline fill=\"none\" stroke=\"#e80\" stroke-width=\"1\" stroke-dasharray=\"5 3\" points=\"";
         for (size_t i = 0; i < s.size(); i++) {
             float x = PADL + (float)PW * s[i].t_s / tmax;
             float v = s[i].sta_max; if (v < 0) v = 0; if (v > pmax) v = pmax;
             float y = PADT + (float)PH * (1.0f - v / pmax);
-            snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out += b;
+            snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
         }
-        out += "\"/>\n";
+        out << "\"/>\n";
     }
 
     // Car-permitted limit (the BMS taper curve).
-    out += "<polyline fill=\"none\" stroke=\"#0a0\" stroke-width=\"1\" stroke-dasharray=\"5 3\" points=\"";
+    out << "<polyline fill=\"none\" stroke=\"#0a0\" stroke-width=\"1\" stroke-dasharray=\"5 3\" points=\"";
     for (size_t i = 0; i < s.size(); i++) {
         float x = PADL + (float)PW * s[i].t_s / tmax;
         float v = s[i].car_perm; if (v < 0) v = 0; if (v > pmax) v = pmax;
         float y = PADT + (float)PH * (1.0f - v / pmax);
-        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out += b;
+        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
     }
-    out += "\"/>\n";
+    out << "\"/>\n";
 
     // Delivered power (primary trace).
-    out += "<polyline fill=\"none\" stroke=\"#06c\" stroke-width=\"2\" points=\"";
+    out << "<polyline fill=\"none\" stroke=\"#06c\" stroke-width=\"2\" points=\"";
     for (size_t i = 0; i < s.size(); i++) {
         float x = PADL + (float)PW * s[i].t_s / tmax;
         float v = s[i].kw; if (v < 0) v = 0; if (v > pmax) v = pmax;
         float y = PADT + (float)PH * (1.0f - v / pmax);
-        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out += b;
+        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
     }
-    out += "\"/>\n";
+    out << "\"/>\n";
 
     // Legend (bottom).
     int ly = H - 6;
-    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#06c\">delivered kW</text>\n", PADL+6, ly); out += b;
-    if (dc) { snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#e80\">station max</text>\n", PADL+96, ly); out += b; }
-    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#0a0\">car permitted</text>\n", PADL+186, ly); out += b;
-    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#39c\">SOC %%</text>\n", PADL+282, ly); out += b;
-    out += "</svg>\n";
-    return out;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#06c\">delivered kW</text>\n", PADL+6, ly); out << b;
+    if (dc) { snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#e80\">station max</text>\n", PADL+96, ly); out << b; }
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#0a0\">car permitted</text>\n", PADL+186, ly); out << b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#39c\">SOC %%</text>\n", PADL+282, ly); out << b;
+    out << "</svg>\n";
 }
 
 void OvmsVehicleToyotaETNGA::GenerateChargeReport()
@@ -493,7 +522,8 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     }
     f << "</dl>\n";
 
-    f << "<h2>Charging power</h2>\n" << RenderPowerSvg();
+    f << "<h2>Charging power</h2>\n";
+    RenderPowerSvg(f);
 
     f << "<h2>Session events</h2>\n<table><tr><th>Time</th><th>Event</th></tr>\n";
     for (size_t i = 0; i < m_charge_session.events.size(); i++) {
@@ -518,14 +548,23 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     {
         std::string csv = m_charge_session.base + ".csv";
         std::string name = csv.substr(csv.find_last_of('/') + 1);
-        f << "<p><a href=\"/xte/report?file=" << name << "\">Download per-sample CSV</a></p>\n";
+        // Include the storage location (the write side knows it) so WebChargeReport
+        // serves the right file without a fallback scan over every location.
+        const char* loc = (m_charge_session.base.compare(0, 4, "/sd/") == 0) ? "sd" : "store";
+        f << "<p><a href=\"/xte/report?file=" << name << "&amp;loc=" << loc
+          << "\">Download per-sample CSV</a></p>\n";
     }
 
     f << "<p class=\"note\">Generated on-module by OVMS (Toyota e-TNGA). Single-phase; avg power is over the "
          "whole plug-in interval. Estimates are provisional.</p>\n</body></html>\n";
     f.close();
-
-    ESP_LOGI(TAG, "Charge report written: %s.html (%.2f kWh, %d%%->%d%%)",
-        m_charge_session.base.c_str(), energy_kwh, start_soc, end_soc);
+    if (f.fail()) {
+        // The stream writes above are individually unchecked; surface a disk-full /
+        // truncated report here rather than logging success.
+        ESP_LOGE(TAG, "Charge report write failed (disk full?): %s.html", m_charge_session.base.c_str());
+    } else {
+        ESP_LOGI(TAG, "Charge report written: %s.html (%.2f kWh, %d%%->%d%%)",
+            m_charge_session.base.c_str(), energy_kwh, start_soc, end_soc);
+    }
     PruneChargeReports(TAG, ChargeReportDir());
 }
