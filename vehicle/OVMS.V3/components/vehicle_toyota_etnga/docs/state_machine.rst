@@ -28,9 +28,13 @@ Two parallel states
      - PID ``0x10D1`` on the Plug-In Control ECU
      - ``CS_NONE=0``, ``CS_DRIVING=1``, ``CS_CHARGING=3``
 
-``PollState`` selects which PIDs are polled — see the seven-column
-``obdii_polls[]`` table in ``vehicle_toyota_etnga.cpp`` (documented in
-:doc:`index` under "PID Polling Logic").
+``PollState`` selects which PIDs are polled.  Because a poll list supports only
+``VEHICLE_POLL_NSTATES`` (4) states, the seven states are split across two poll
+series in ``vehicle_toyota_etnga.cpp``: ``obdii_polls_base`` (offset 0, the
+non-charge states ``SLEEP``/``AWAKE``/``DRIVING``) and ``obdii_polls_charge``
+(offset 3, the four charge states ``CHARGE_HANDSHAKE``..``CHARGE_DC``).  PIDs
+polled in both a non-charge and a charge state appear in both tables.  See
+:doc:`index` under "PID Polling Logic".
 ``ControlState`` is the vehicle's own self-report and is the primary trigger
 for the ``AWAKE → DRIVING`` edge.
 
@@ -151,7 +155,7 @@ Practical consequences:
   next poll reply after the forced ``TransitionToSleepState`` would
   immediately bounce the driver back to ``AWAKE``.
 * Any future change that reduces poll throttling, adds more PIDs to the
-  ``A`` column of ``obdii_polls[]``, or shortens the watchdog needs to
+  ``AWAKE`` column of ``obdii_polls_base[]``, or shortens the watchdog needs to
   consider whether it could keep a quiescent vehicle awake long enough
   to drain the 12 V battery.
 
@@ -376,7 +380,7 @@ metric is fresh (non-stale) *and* PISW reports ``0x00`` (unconnected),
 the cable was removed during the sleep gap — the driver finalises the
 session immediately (sets ``ms_v_charge_state = "done"`` and resets
 ``m_charge_session``).  The AWAKE-column PISW poll (DID ``0x1669``) in
-``obdii_polls[]`` is required for this reconcile to fire — removing it
+``obdii_polls_base[]`` is required for this reconcile to fire — removing it
 would silently break the wake-reconcile path.
 
 Charge curve & station metrics
