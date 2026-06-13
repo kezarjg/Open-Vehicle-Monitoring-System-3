@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <iosfwd>
+#include <time.h>
 #include "vehicle.h"
 #ifdef CONFIG_OVMS_COMP_WEBSERVER
 #include "ovms_webserver.h"
@@ -47,6 +49,7 @@ public:
     void Ticker1(uint32_t ticker) override;
 
     void IncomingPollReply(const OvmsPoller::poll_job_t &job, uint8_t* data, uint8_t length) override;
+    void IncomingPollError(const OvmsPoller::poll_job_t &job, int32_t code) override;
 
     void IncomingFrameCan2(CAN_frame_t* p_frame) override;
 
@@ -71,6 +74,8 @@ protected:
     int m_sleep_entry_time = 0;  // Used to track the time that cooldown timer started
     int m_sleep_cooldown_secs = 10;  // Cooldown window (s) for the current sleep; default must equal SLEEP_COOLDOWN_SECS[0]
     int m_sleep_backoff_idx = 0;     // Index into SLEEP_COOLDOWN_SECS; escalates on consecutive no-activity sleeps
+    bool m_12v_was_high = false;     // 12V-above-threshold latch: the SLEEP 12V wake fires on the rising edge only
+                                     // (level-triggering oscillated; seeded on each sleep entry in TransitionToSleepState)
 
     bool m_armed_for_charge = false;   // charge lid seen open since entering AWAKE
     int  m_cable_watch_start = 0;      // monotonic s when armed (15-min cable watch)
@@ -80,7 +85,7 @@ protected:
         bool  in_session = false;
         int   start_monotonic = 0;
         int   start_soc = -1;
-        int   start_utc = 0;
+        time_t start_utc = 0;
         bool  is_dc = false;
         float peak_power = 0.0f;
         bool  temp_seen = false;
@@ -152,7 +157,8 @@ protected:
     OvmsMetricInt* m_v_e_awd;   // 0x1087 b2 AWD / X-MODE status (custom; no standard OVMS metric)
     
     void NotifyVehicleOn() override;
-    void NotifyChargeStart() override;
+    // NotifyChargeStart deliberately not overridden — see vehicle_toyota_etnga.cpp;
+    // session counters reset at session open in TransitionToChargeHandshakeState.
 
 private:
     static constexpr const char* TAG = "v-toyota-etnga";
@@ -166,12 +172,17 @@ private:
     uint32_t lastHvacEnergyLogTime = 0;
     uint32_t lastHvacDriveEnergyLogTime = 0;
 
+    // XOR-folded signature of the last poll error logged at WARN (module/pid/code — see
+    // IncomingPollError): repeats of the same error (e.g. one TX failure per poll while
+    // the bus is wedged) drop to debug level until the signature changes.
+    uint32_t m_last_poll_error = 0;
+
     void InitializeMetrics();  // Initializes the metrics specific to this vehicle module
     void ResetStaleMetrics();  // Checks if state transition metrics are stale (and resets them)
 
     // Charge session report (etnga_charge_report.cpp)
     void UpdateChargeSessionStats();   // live aggregation while charging (peak power, temp range, type)
-    std::string RenderPowerSvg();      // inline SVG power(+SOC)-vs-time chart from m_charge_session.svg
+    void RenderPowerSvg(std::ostream& out);  // stream the inline SVG power(+SOC)-vs-time chart from m_charge_session.svg
     void GenerateChargeReport();       // write the session-end HTML report to /store/charge-reports/
     void LogChargeEvent(const char* label);            // append a timestamped event
     void AppendChargeCsvRow();                          // buffer one CSV row (header on first call)

@@ -22,7 +22,9 @@ void OvmsVehicleToyotaETNGA::IncomingFrameCan2(CAN_frame_t* p_frame)
              p_frame->MsgID, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
 
     if (!m_allow_wake) {
-        ESP_LOGI(TAG, "OBD message ignored during cooldown");
+        // Verbose: this fires for EVERY frame received during a cooldown window — at
+        // parked-bus broadcast rates an INFO message here flooded the log.
+        ESP_LOGV(TAG, "OBD message ignored during cooldown");
     } else {
         SetAwake(true);
     }

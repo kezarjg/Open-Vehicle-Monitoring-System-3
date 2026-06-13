@@ -49,19 +49,38 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
     if (StandardMetrics.ms_v_env_awake->AsBool()) {
         // There is life.
         TransitionToAwakeState();
-    } else if (StandardMetrics.ms_v_bat_12v_voltage->AsFloat() > (StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat()+0.2f)) {
-        // Voltage is high. Maybe awake as well...
-        ESP_LOGI(TAG, "Aux 12V has exceeded the threshold");
-        // Real power-up — resume responsive cooldowns.
-        ResetSleepBackoff();
-        // Send a CAN reset.
-        esp_err_t result = m_can2->Reset();
-        if (result == ESP_OK) {
-            ESP_LOGI(TAG, "CAN bus reset successfully");
-        } else {
-            ESP_LOGE(TAG, "CAN bus reset failed, error code: %d", result);
+    } else {
+        // 12V wake is RISING-EDGE only. Level-triggering here oscillated: the post-drive/
+        // post-charge surface charge keeps 12V above ref+0.2 for a long time with a dead
+        // bus, so every SLEEP tick reset the backoff, reset the CAN controller and bounced
+        // to AWAKE — a ~2s SLEEP/AWAKE loop (one CAN reset per cycle) whose sleep re-entry
+        // also restarted the cooldown, so frame-wake never re-enabled until 12V decayed.
+        float v12 = StandardMetrics.ms_v_bat_12v_voltage->AsFloat();
+        float ref = StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat();
+        bool high = v12 > ref + 0.2f;
+        if (high && !m_12v_was_high) {
+            // Voltage just jumped: real power-up (DC-DC came on) — wake even during cooldown.
+            ESP_LOGI(TAG, "Aux 12V has exceeded the threshold");
+            ResetSleepBackoff();
+            // Send a CAN reset.
+            esp_err_t result = m_can2->Reset();
+            if (result == ESP_OK) {
+                ESP_LOGI(TAG, "CAN bus reset successfully");
+            } else {
+                ESP_LOGE(TAG, "CAN bus reset failed, error code: %d", result);
+            }
+            // Lift the cooldown gate so incoming CAN frames can hold us awake; without this
+            // a 12V wake during cooldown bounced straight back to sleep even with the
+            // vehicle genuinely on (IncomingFrameCan2 was still discarding frames).
+            m_allow_wake = true;
+            TransitionToAwakeState();
         }
-        TransitionToAwakeState();
+        // Hysteresis on the latch: set above ref+0.2, clear only below ref+0.1 — a level
+        // hovering at the threshold (ADC noise) must not produce repeated edges/CAN resets.
+        if (high)
+            m_12v_was_high = true;
+        else if (v12 < ref + 0.1f)
+            m_12v_was_high = false;
     }
 }
 
@@ -83,8 +102,13 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
         !m_v_charge_pisw_raw->IsStale() &&
         m_v_charge_pisw_raw->AsInt() == 0x00) {
         // Session ended while we slept (cable removed during the sleep gap).
+        // Close the session the same way TransitionToAwakeState does: flush + report.
+        // Resetting without the report silently discarded the whole session (and the
+        // streamed CSV was then deleted as an orphan by PruneChargeReports).
         ESP_LOGI(TAG, "Charge session ended during sleep — finalizing");
         StandardMetrics.ms_v_charge_state->SetValue("done");
+        LogChargeEvent("Unplugged (during sleep)");
+        GenerateChargeReport();   // flushes the CSV; no-op + stub-CSV cleanup if no energy delivered
         m_charge_session = ChargeSessionState{};
         // fall through to normal AWAKE handling
     }
@@ -105,8 +129,9 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
     int pisw = m_v_charge_pisw_raw->AsInt();
     bool lid_open = StandardMetrics.ms_v_door_chargeport->AsBool();
 
-    // pisw is fresh here mainly after a HANDSHAKE->AWAKE bounce (pisw not polled in
-    // plain AWAKE); cold cable-detect relies on the lid-open arm logic below.
+    // pisw is polled @5s in AWAKE (obdii_polls[]; also required by the wake-reconcile
+    // above), so a seated cable is detected here directly. The lid-open arm logic below
+    // only bounds how long we stay awake waiting for a plug-in.
     if (pisw >= 0x02) {
         // Cable is seated — enter charge handshake immediately
         TransitionToChargeHandshakeState();
@@ -259,6 +284,10 @@ void OvmsVehicleToyotaETNGA::TransitionToSleepState()
     m_sleep_entry_time = monotonic;
     m_sleep_cooldown_secs = SLEEP_COOLDOWN_SECS[m_sleep_backoff_idx];
     m_allow_wake = false;
+    // Seed the 12V edge latch from the current reading: entering sleep with 12V still
+    // elevated (post-drive/post-charge surface charge) must not count as a rising edge.
+    m_12v_was_high = StandardMetrics.ms_v_bat_12v_voltage->AsFloat()
+                     > (StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat() + 0.2f);
     if (m_sleep_backoff_idx < SLEEP_COOLDOWN_STEPS - 1)
         m_sleep_backoff_idx++;
     SetPollState(PollState::SLEEP);
@@ -320,6 +349,19 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
         m_charge_session.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
         m_charge_session.start_utc = StandardMetrics.ms_m_timeutc->AsInt();
         m_charge_session.start_soc = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
+        // Session energy counters reset HERE (session open), NOT in NotifyChargeStart:
+        // the framework fires that hook on every ms_v_charge_state change to "charging",
+        // including a CHARGE_WAIT pause/resume mid-session, which wiped the energy
+        // accumulated in earlier phases (and made the report's kWh phase-local).
+        StandardMetrics.ms_v_bat_energy_used->SetValue(0);
+        StandardMetrics.ms_v_bat_energy_recd->SetValue(0);
+        lastBatteryEnergyLogTime = 0;
+        StandardMetrics.ms_v_charge_kwh->SetValue(0);
+        lastChargerEnergyLogTime = 0;
+        StandardMetrics.ms_v_charge_kwh_grid->SetValue(0);
+        lastGridEnergyLogTime = 0;
+        m_v_env_hvac_kwh->SetValue(0);
+        lastHvacEnergyLogTime = 0;
         if (StandardMetrics.ms_v_pos_gpslock->AsBool()) {
             m_charge_session.has_loc = true;
             m_charge_session.start_lat = StandardMetrics.ms_v_pos_latitude->AsFloat();
@@ -339,9 +381,9 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
         // basename = "<dir>/<UTC timestamp>" (no extension); files are <base>.html / <base>.csv
         {
             char ts[40];
-            int utc = m_charge_session.start_utc;
+            time_t utc = m_charge_session.start_utc;
             if (utc > 1000000000) {
-                time_t st = (time_t) utc; struct tm tmv; gmtime_r(&st, &tmv);
+                time_t st = utc; struct tm tmv; gmtime_r(&st, &tmv);
                 strftime(ts, sizeof(ts), "%Y%m%dT%H%M%SZ", &tmv);
             } else {
                 snprintf(ts, sizeof(ts), "charge-%d", m_charge_session.start_monotonic);

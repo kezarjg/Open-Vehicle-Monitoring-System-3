@@ -158,27 +158,10 @@ void OvmsVehicleToyotaETNGA::NotifyVehicleOn()
     lastHvacDriveEnergyLogTime = 0;
 }
 
-void OvmsVehicleToyotaETNGA::NotifyChargeStart()
-{
-    ESP_LOGV(TAG, "Notification of charge start - Reset energy metrics for trip reporting");
-    // Vehicle started. Reset the trip statistics
-    StandardMetrics.ms_v_bat_energy_used->SetValue(0);
-    StandardMetrics.ms_v_bat_energy_recd->SetValue(0);
-    lastBatteryEnergyLogTime = 0;
-    
-    StandardMetrics.ms_v_charge_kwh->SetValue(0);
-    lastChargerEnergyLogTime = 0;
-
-    StandardMetrics.ms_v_charge_kwh_grid->SetValue(0);
-    lastGridEnergyLogTime = 0;
-
-    m_v_env_hvac_kwh->SetValue(0);
-    lastHvacEnergyLogTime = 0;
-
-    // Standard framework behavior last: the base sends the "charge started" push
-    // notification, which should reflect the freshly reset session counters.
-    OvmsVehicle::NotifyChargeStart();
-}
+// NotifyChargeStart is deliberately NOT overridden: the framework fires it on every
+// ms_v_charge_state change to "charging" — including a CHARGE_WAIT pause/resume mid-
+// session — so resetting the session energy counters there wiped earlier phases.
+// The counters reset at session open in TransitionToChargeHandshakeState instead.
 
 void OvmsVehicleToyotaETNGA::Ticker1(uint32_t ticker)
 {

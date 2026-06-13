@@ -13,6 +13,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <string>
@@ -44,6 +45,28 @@ static std::vector<etnga_report_loc> etnga_report_locs()
         locs.push_back({ "sd", "/sd/charge-reports" });
     locs.push_back({ "store", "/store/charge-reports" });
     return locs;
+}
+
+// Percent-encode a string for use as a URL query-parameter value (RFC 3986 unreserved
+// characters pass through). encode_html() is the wrong codec for hrefs: current report
+// filenames are plain timestamps, but any future filename scheme with reserved
+// characters would silently produce broken links.
+static std::string etnga_url_encode(const std::string& s)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+            out += (char)c;
+        else {
+            out += '%';
+            out += hex[c >> 4];
+            out += hex[c & 0x0F];
+        }
+    }
+    return out;
 }
 
 // Map a location label back to its directory, or "" if the label is unknown.
@@ -470,13 +493,15 @@ void OvmsVehicleToyotaETNGA::WebChargeReports(PageEntry_t& p, PageContext_t& c)
         c.print("<ul class=\"list-unstyled\">");
         for (size_t i = 0; i < files.size(); i++) {
             const char* loc = files[i].second;
-            std::string html = c.encode_html(files[i].first);
             std::string stem = files[i].first.substr(0, files[i].first.size() - 5);   // strip ".html"
-            std::string csv  = c.encode_html(stem + ".csv");
+            // hrefs take URL-encoding; the visible link text takes HTML-encoding.
+            std::string html_url = etnga_url_encode(files[i].first);
+            std::string csv_url  = etnga_url_encode(stem + ".csv");
+            std::string html_txt = c.encode_html(files[i].first);
             c.printf("<li><a href=\"/xte/report?file=%s&amp;loc=%s\" target=\"_blank\">%s</a> "
                      "&nbsp;<a href=\"/xte/report?file=%s&amp;loc=%s\">csv</a> "
                      "<span class=\"text-muted\">[%s]</span></li>",
-                     html.c_str(), loc, html.c_str(), csv.c_str(), loc, loc);
+                     html_url.c_str(), loc, html_txt.c_str(), csv_url.c_str(), loc, loc);
         }
         c.print("</ul>");
     }
