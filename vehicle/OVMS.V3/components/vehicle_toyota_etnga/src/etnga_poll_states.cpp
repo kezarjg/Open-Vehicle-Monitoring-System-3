@@ -93,7 +93,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
     // Guard: only act on a non-stale PISW value to avoid the ~30s OBC post-wake transient
     // where PISW may briefly report 0x00 before the OBC fully wakes.
     // REGRESSION DEPENDENCY: this requires PID_PISW_STATUS to be polled in the AWAKE
-    // column (obdii_polls[] in vehicle_toyota_etnga.cpp, AWAKE=5s). Without an AWAKE poll
+    // column (obdii_polls_base[] in vehicle_toyota_etnga.cpp, AWAKE=5s). Without an AWAKE poll
     // the cached PISW value is stale (gap >120s) or the pre-sleep connected value
     // (gap <120s), so a fresh 0x00 never arrives and this reconcile can NEVER fire —
     // leaking in_session and blocking the next session's open-guard. Do not remove the
@@ -129,7 +129,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
     int pisw = m_v_charge_pisw_raw->AsInt();
     bool lid_open = StandardMetrics.ms_v_door_chargeport->AsBool();
 
-    // pisw is polled @5s in AWAKE (obdii_polls[]; also required by the wake-reconcile
+    // pisw is polled @5s in AWAKE (obdii_polls_base[]; also required by the wake-reconcile
     // above), so a seated cable is detected here directly. The lid-open arm logic below
     // only bounds how long we stay awake waiting for a plug-in.
     if (pisw >= 0x02) {
