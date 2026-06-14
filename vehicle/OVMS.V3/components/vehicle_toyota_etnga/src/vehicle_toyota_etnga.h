@@ -100,6 +100,7 @@ protected:
         float amb_max = 0.0f;
         // v2: charge-side coulomb counter (Ah) for the implied-capacity estimate
         float delivered_ah = 0.0f;
+        float station_kwh = 0.0f;   // ∫ station_kw dt — energy drawn from the EVSE this session
         int   last_sample_monotonic = 0;   // dt for delivered_ah + CSV row cadence
         // v2: event log (monotonic seconds, static label string)
         std::vector<std::pair<int,const char*>> events;

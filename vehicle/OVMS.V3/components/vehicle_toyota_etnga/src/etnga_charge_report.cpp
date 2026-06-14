@@ -193,6 +193,10 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
         int dt = now - m_charge_session.last_sample_monotonic;
         if (dt > 0 && dt <= 10) {   // ignore gaps (pause / lock-isolation / sleep) so delivered_ah stays accurate
             m_charge_session.delivered_ah += fabsf(StandardMetrics.ms_v_bat_current->AsFloat()) * (dt / 3600.0f);
+            float pv = StandardMetrics.ms_v_charge_voltage->AsFloat();
+            float pa = StandardMetrics.ms_v_charge_current->AsFloat();
+            float skw = m_charge_session.is_dc ? (pv * pa / 1000.0f) : m_v_charge_grid_power->AsFloat();
+            m_charge_session.station_kwh += skw * (dt / 3600.0f);
         }
     }
     m_charge_session.last_sample_monotonic = now;
@@ -541,6 +545,18 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     f << "<dt>Energy</dt><dd>" << b << "</dd>\n";
     snprintf(b, sizeof(b), "%.1f kW peak / %.2f kW avg", m_charge_session.peak_power, avg_kw);
     f << "<dt>Power</dt><dd>" << b << "</dd>\n";
+    {
+        float e_batt = StandardMetrics.ms_v_charge_kwh->AsFloat();
+        float e_hvac = m_v_env_hvac_kwh->AsFloat();
+        float e_sta  = m_charge_session.station_kwh;
+        float e_loss = e_sta - e_batt - e_hvac;
+        int eff = (e_sta > 0.05f) ? (int)(100.0f * e_batt / e_sta + 0.5f) : 0;
+        char acc[160];
+        snprintf(acc, sizeof(acc),
+            "<dt>Accounting</dt><dd>station %.2f kWh &rarr; battery %.2f kWh + HVAC %.2f kWh + losses %.2f kWh (%d%% to battery)</dd>\n",
+            e_sta, e_batt, e_hvac, e_loss, eff);
+        f << acc;
+    }
     if (m_charge_session.temp_seen) {
         snprintf(b, sizeof(b), "%.0f&deg;C &rarr; %.0f&deg;C", m_charge_session.temp_min, m_charge_session.temp_max);
         f << "<dt>Battery temp</dt><dd>" << b << "</dd>\n";
