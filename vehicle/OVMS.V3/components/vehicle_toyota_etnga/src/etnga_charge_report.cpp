@@ -193,6 +193,10 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
         int dt = now - m_charge_session.last_sample_monotonic;
         if (dt > 0 && dt <= 10) {   // ignore gaps (pause / lock-isolation / sleep) so delivered_ah stays accurate
             m_charge_session.delivered_ah += fabsf(StandardMetrics.ms_v_bat_current->AsFloat()) * (dt / 3600.0f);
+            float pv = StandardMetrics.ms_v_charge_voltage->AsFloat();
+            float pa = StandardMetrics.ms_v_charge_current->AsFloat();
+            float skw = m_charge_session.is_dc ? (pv * pa / 1000.0f) : m_v_charge_grid_power->AsFloat();
+            m_charge_session.station_kwh += skw * (dt / 3600.0f);
         }
     }
     m_charge_session.last_sample_monotonic = now;
@@ -209,6 +213,10 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
         s.soc = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
         s.sta_max  = m_v_charge_sta_max_p->AsFloat();        // station-offered max kW (0x166A, DC only; 0 on AC)
         s.car_perm = fabsf(m_v_charge_perm->AsFloat());      // car-permitted kW (0x16A1 is signed: |.| is the charge limit)
+        s.station_kw = m_charge_session.is_dc
+            ? (StandardMetrics.ms_v_charge_voltage->AsFloat() * StandardMetrics.ms_v_charge_current->AsFloat() / 1000.0f)
+            : m_v_charge_grid_power->AsFloat();
+        s.hvac_kw = m_v_env_hvac_power->AsFloat();
         m_charge_session.svg.push_back(s);
         m_charge_session.last_svg_monotonic = now;
         // Cap ~300 points: when exceeded, double the interval and decimate (keep every other).
@@ -228,9 +236,16 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
         return;
 
     if (!m_charge_session.csv_started) {
+        // Column semantics:
+        //   car's asks      : car_perm_kw (0x16A1), car_target_a (0x166D) — both on the OBC / Plug-In Control ECU (0x745)
+        //   station's caps  : station_max_kw/_a/_v
+        //   actuals         : station_kw (from EVSE), battery_kw (into battery), hvac_kw (into cabin),
+        //                     plus raw station_grid_kw / station_present_v / station_present_a
+        //   obc_kw          : diagnostic — raw 0x10D4 (under-reads on DC, issue #109)
         m_charge_session.csv_buf =
-            "elapsed_s,soc_pct,delivered_kw,pack_v,pack_a,batt_temp_c,ambient_c,state,"
-            "station_max_kw,station_max_a,station_max_v,car_perm_kw,target_a,grid_kw,present_v,present_a\n";
+            "elapsed_s,soc_pct,bms_soc_pct,station_kw,battery_kw,hvac_kw,pack_v,pack_a,"
+            "batt_temp_c,ambient_c,state,station_max_kw,station_max_a,station_max_v,"
+            "car_perm_kw,car_target_a,station_grid_kw,station_present_v,station_present_a,obc_kw\n";
         m_charge_session.csv_started = true;
     }
 
@@ -241,13 +256,20 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
     char amb[16] = "";
     if (StandardMetrics.ms_v_env_temp->IsDefined())
         snprintf(amb, sizeof(amb), "%.1f", StandardMetrics.ms_v_env_temp->AsFloat());
-    char row[256];
+    char row[320];
+    float present_v = StandardMetrics.ms_v_charge_voltage->AsFloat();
+    float present_a = StandardMetrics.ms_v_charge_current->AsFloat();
+    float grid_kw   = m_v_charge_grid_power->AsFloat();
+    float station_kw = m_charge_session.is_dc ? (present_v * present_a / 1000.0f) : grid_kw;
     snprintf(row, sizeof(row),
-        "%d,%.0f,%.3f,%.1f,%.1f,%.1f,%s,%s,"
-        "%.2f,%.0f,%.0f,%.2f,%.0f,%.3f,%.0f,%.0f\n",
+        "%d,%.0f,%.1f,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%s,%s,"
+        "%.2f,%.0f,%.0f,%.2f,%.0f,%.3f,%.0f,%.0f,%.3f\n",
         elapsed,
         StandardMetrics.ms_v_bat_soc->AsFloat(),
-        StandardMetrics.ms_v_charge_power->AsFloat(),
+        m_v_bat_soc_bms->AsFloat(),
+        station_kw,
+        StandardMetrics.ms_v_charge_power->AsFloat(),   // battery_kw (corrected, pack V×I)
+        m_v_env_hvac_power->AsFloat(),                   // hvac_kw
         StandardMetrics.ms_v_bat_voltage->AsFloat(),
         StandardMetrics.ms_v_bat_current->AsFloat(),
         StandardMetrics.ms_v_bat_temp->AsFloat(),
@@ -255,8 +277,8 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
         (m_charge_session.is_dc ? "DC" : "AC"),
         m_v_charge_sta_max_p->AsFloat(), m_v_charge_sta_max_i->AsFloat(), m_v_charge_sta_max_v->AsFloat(),
         m_v_charge_perm->AsFloat(), m_v_charge_tgti->AsFloat(),
-        m_v_charge_grid_power->AsFloat(),
-        StandardMetrics.ms_v_charge_voltage->AsFloat(), StandardMetrics.ms_v_charge_current->AsFloat());
+        grid_kw, present_v, present_a,
+        m_charge_obc_kw);
     m_charge_session.csv_buf += row;
 
     // Flush at most every 30 s (or ~4 KB): a 1 Hz open/append/close per row would put
@@ -341,12 +363,12 @@ static void PruneChargeReports(const char* tag, const std::string& dir)
     }
 }
 
-// Render a self-contained inline SVG chart vs time, with standardized axes:
-//   - left axis: delivered power (kW), fixed full-scale per charge type (AC 0-11, DC 0-150)
+// Render a self-contained inline SVG chart vs time, with auto-scaled axes:
+//   - left axis: power (kW), auto-scaled to the max of battery/station/HVAC series
 //   - right axis: SOC, fixed 0-100 %
-//   - traces: delivered power, station-offered max (DC only) and car-permitted limit (the
-//     0x16A1 taper curve), plus the SOC overlay. All powers plot as magnitudes (0x16A1 is
-//     signed: negative = charging), so the three power traces share one positive axis.
+//   - traces: battery power (blue), station power (orange), HVAC power (purple),
+//     car-permitted limit (green, the 0x16A1 taper curve), and SOC overlay.
+//     All powers plot as magnitudes (0x16A1 is signed: |.| is the charge limit).
 // Streams directly to the (already open) report file: a 300-sample DC session built a
 // ~25-30 KB contiguous std::string here, a needless heap spike on the ESP32.
 void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
@@ -357,9 +379,14 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
         return;
     }
 
-    const bool  dc    = m_charge_session.is_dc;
-    const float pmax  = dc ? 150.0f : 11.0f;   // fixed power-axis full scale (kW)
-    const float pstep = dc ? 25.0f  : 2.0f;    // power gridline / tick spacing (kW)
+    float pmax = 1.0f;
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i].kw > pmax) pmax = s[i].kw;
+        if (s[i].station_kw > pmax) pmax = s[i].station_kw;
+        if (s[i].hvac_kw > pmax) pmax = s[i].hvac_kw;
+    }
+    const float pstep = (pmax > 60.0f) ? 25.0f : (pmax > 12.0f ? 10.0f : 2.0f);
+    pmax = pstep * ceilf(pmax / pstep);
 
     const int W = 640, H = 260, PADL = 44, PADB = 28, PADT = 12, PADR = 44;
     const int PW = W - PADL - PADR, PH = H - PADT - PADB;
@@ -396,18 +423,6 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
     }
     out << "\"/>\n";
 
-    // Station-offered max (DC only — 0x166A is not polled on AC).
-    if (dc) {
-        out << "<polyline fill=\"none\" stroke=\"#e80\" stroke-width=\"1\" stroke-dasharray=\"5 3\" points=\"";
-        for (size_t i = 0; i < s.size(); i++) {
-            float x = PADL + (float)PW * s[i].t_s / tmax;
-            float v = s[i].sta_max; if (v < 0) v = 0; if (v > pmax) v = pmax;
-            float y = PADT + (float)PH * (1.0f - v / pmax);
-            snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
-        }
-        out << "\"/>\n";
-    }
-
     // Car-permitted limit (the BMS taper curve).
     out << "<polyline fill=\"none\" stroke=\"#0a0\" stroke-width=\"1\" stroke-dasharray=\"5 3\" points=\"";
     for (size_t i = 0; i < s.size(); i++) {
@@ -418,6 +433,24 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
     }
     out << "\"/>\n";
 
+    // Station power (actual from EVSE).
+    out << "<polyline fill=\"none\" stroke=\"#e80\" stroke-width=\"1.5\" points=\"";
+    for (size_t i = 0; i < s.size(); i++) {
+        float x = PADL + (float)PW * s[i].t_s / tmax;
+        float v = s[i].station_kw; if (v < 0) v = 0; if (v > pmax) v = pmax;
+        float y = PADT + (float)PH * (1.0f - v / pmax);
+        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
+    }
+    out << "\"/>\n";
+    // HVAC power (into cabin / My-Room).
+    out << "<polyline fill=\"none\" stroke=\"#a0a\" stroke-width=\"1.5\" points=\"";
+    for (size_t i = 0; i < s.size(); i++) {
+        float x = PADL + (float)PW * s[i].t_s / tmax;
+        float v = s[i].hvac_kw; if (v < 0) v = 0; if (v > pmax) v = pmax;
+        float y = PADT + (float)PH * (1.0f - v / pmax);
+        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
+    }
+    out << "\"/>\n";
     // Delivered power (primary trace).
     out << "<polyline fill=\"none\" stroke=\"#06c\" stroke-width=\"2\" points=\"";
     for (size_t i = 0; i < s.size(); i++) {
@@ -430,10 +463,11 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
 
     // Legend (bottom).
     int ly = H - 6;
-    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#06c\">delivered kW</text>\n", PADL+6, ly); out << b;
-    if (dc) { snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#e80\">station max</text>\n", PADL+96, ly); out << b; }
-    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#0a0\">car permitted</text>\n", PADL+186, ly); out << b;
-    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#39c\">SOC %%</text>\n", PADL+282, ly); out << b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#06c\">battery kW</text>\n", PADL+6, ly); out << b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#e80\">station kW</text>\n", PADL+86, ly); out << b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#a0a\">HVAC kW</text>\n", PADL+166, ly); out << b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#0a0\">car permitted</text>\n", PADL+236, ly); out << b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#39c\">SOC %%</text>\n", PADL+330, ly); out << b;
     out << "</svg>\n";
 }
 
@@ -511,6 +545,18 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     f << "<dt>Energy</dt><dd>" << b << "</dd>\n";
     snprintf(b, sizeof(b), "%.1f kW peak / %.2f kW avg", m_charge_session.peak_power, avg_kw);
     f << "<dt>Power</dt><dd>" << b << "</dd>\n";
+    {
+        float e_batt = StandardMetrics.ms_v_charge_kwh->AsFloat();
+        float e_hvac = m_v_env_hvac_kwh->AsFloat();
+        float e_sta  = m_charge_session.station_kwh;
+        float e_loss = e_sta - e_batt - e_hvac;
+        int eff = (e_sta > 0.05f) ? (int)(100.0f * e_batt / e_sta + 0.5f) : 0;
+        char acc[160];
+        snprintf(acc, sizeof(acc),
+            "<dt>Accounting</dt><dd>station %.2f kWh &rarr; battery %.2f kWh + HVAC %.2f kWh + losses %.2f kWh (%d%% to battery)</dd>\n",
+            e_sta, e_batt, e_hvac, e_loss, eff);
+        f << acc;
+    }
     if (m_charge_session.temp_seen) {
         snprintf(b, sizeof(b), "%.0f&deg;C &rarr; %.0f&deg;C", m_charge_session.temp_min, m_charge_session.temp_max);
         f << "<dt>Battery temp</dt><dd>" << b << "</dd>\n";

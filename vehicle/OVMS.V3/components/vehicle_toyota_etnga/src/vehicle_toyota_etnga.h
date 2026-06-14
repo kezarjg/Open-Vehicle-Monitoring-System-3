@@ -100,13 +100,14 @@ protected:
         float amb_max = 0.0f;
         // v2: charge-side coulomb counter (Ah) for the implied-capacity estimate
         float delivered_ah = 0.0f;
+        float station_kwh = 0.0f;   // ∫ station_kw dt — energy drawn from the EVSE this session
         int   last_sample_monotonic = 0;   // dt for delivered_ah + CSV row cadence
         // v2: event log (monotonic seconds, static label string)
         std::vector<std::pair<int,const char*>> events;
         int   last_hlc = -1;               // last 0x1666 HLC state logged as an event (change detection)
         int   last_acop = -1;              // last 0x1684 AC-Op state logged as an event (change detection)
         // v2: downsampled chart buffer (per sample: delivered kW, SOC, station-offered + car-permitted kW)
-        struct Sample { int t_s; float kw; int soc; float sta_max; float car_perm; };
+        struct Sample { int t_s; float kw; int soc; float sta_max; float car_perm; float station_kw; float hvac_kw; };
         std::vector<Sample> svg;
         int   svg_interval_s = 20;
         int   last_svg_monotonic = 0;
@@ -169,6 +170,7 @@ private:
     // NotifyChargeStart reset them, and a garbage dt would corrupt the persistent *_total metrics.
     uint32_t lastBatteryEnergyLogTime = 0;
     uint32_t lastChargerEnergyLogTime = 0;
+    float m_charge_obc_kw = 0.0f;   // diagnostic: raw 0x10D4 OBC "battery charging power" (under-reads on DC, issue #109)
     uint32_t lastGridEnergyLogTime = 0;
     uint32_t lastHvacEnergyLogTime = 0;
     uint32_t lastHvacDriveEnergyLogTime = 0;

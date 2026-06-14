@@ -6,6 +6,13 @@ Open Vehicle Monitor System v3 - Change log
     efficiency/implied-capacity estimates) plus a fine-grained per-sample CSV (delivered/offered/
     allowed power, pack + battery-temp over time) to /sd/charge-reports/ (fallback /store). Also
     fixes peak charging power on DC (was sourced from the AC-only grid-input poll).
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): corrected DC charge power. v.c.power is now
+    derived from pack voltage x current (accurate on AC and DC); the OBC's 0x10D4 value
+    under-reported DC by ~27%. This also corrects the charge-session energy total and the
+    ABRP/server charge power on DC.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): charge report now breaks out station, battery,
+    and HVAC (My-Room) power — CSV columns, a three-series chart, and a power-accounting summary
+    (station = battery + HVAC + losses) — plus a BMS-SOC column distinct from the displayed SOC.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the Charging monitor web page now shows distinct
     AC and DC layouts (auto-selected from the active session), a live power/SOC chart that backfills
     the whole session and updates in real time (delivered power, car-permitted limit, and — on DC —
