@@ -117,6 +117,10 @@ min/max/deviation/alerting automatically.
 - **C++ matching ESP-IDF 3.3 / older GCC.** Match the surrounding file's existing style exactly
   (the project explicitly asks contributors to stick to each module's code style).
 - **Logging:** `ESP_LOGx(TAG, ...)`; each class defines a `static const char* TAG`.
+- **Always pair a PID with its ECU.** A PID (e.g. `0x10D4`) is only meaningful in the context of
+  the ECU it's polled on — the same PID number means different things on different ECUs. When
+  referencing, discussing, or documenting a PID, always name the ECU/poll target alongside it
+  (e.g. "`0x10D4` on the Plug-In Control System ECU"), never the PID alone.
 - **User-facing changes** are recorded in `vehicle/OVMS.V3/changes.txt` (note the entry format:
   date/author header, `-` bullets, and a `New configs:` / `Config extension:` sub-block listing any
   added `[instance] param` keys). `knownissues.txt` and `todo.txt` track the rest.
