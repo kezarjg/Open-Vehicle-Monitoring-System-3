@@ -596,16 +596,22 @@ float OvmsVehicleToyotaETNGA::EnergyIntervalHours(uint32_t& lastSampleTime)
     return hours;
 }
 
-void OvmsVehicleToyotaETNGA::SetBatteryChargingPower(float power)
+void OvmsVehicleToyotaETNGA::SetBatteryChargingPower(float obc_power)
 {
-    ESP_LOGD(TAG, "Battery Charging Power: %f", power);
+    // obc_power is the OBC 0x10D4 decode. It under-reports on DC (issue #109: ~0.73x of
+    // actual; correct on AC), so keep it only as a diagnostic and derive the authoritative
+    // charge power from pack V×I, which is accurate on both AC and DC.
+    m_charge_obc_kw = obc_power;
 
-    // Delivered charge power (valid in AC and DC; 0x161D only answers on AC). This is the
-    // authoritative "power delivered to the battery" used for peak/avg, the chart and the CSV.
+    float v = StandardMetrics.ms_v_bat_voltage->AsFloat();
+    float i = StandardMetrics.ms_v_bat_current->AsFloat();
+    float power = -(v * i) / 1000.0f;   // pack current is negative while charging -> positive charge power
+    if (power < 0.0f) power = 0.0f;
+
+    ESP_LOGD(TAG, "Charge power pack V×I=%.2f kW (obc 0x10D4=%.2f kW)", power, obc_power);
     StandardMetrics.ms_v_charge_power->SetValue(power);
 
     const float energy = power * EnergyIntervalHours(lastChargerEnergyLogTime);
-    ESP_LOGD(TAG, "Battery Charging Energy: %f kWh", energy);
     StandardMetrics.ms_v_charge_kwh->SetValue(StandardMetrics.ms_v_charge_kwh->AsFloat() + energy);
 }
 

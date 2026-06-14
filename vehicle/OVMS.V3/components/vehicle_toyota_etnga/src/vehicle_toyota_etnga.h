@@ -169,6 +169,7 @@ private:
     // NotifyChargeStart reset them, and a garbage dt would corrupt the persistent *_total metrics.
     uint32_t lastBatteryEnergyLogTime = 0;
     uint32_t lastChargerEnergyLogTime = 0;
+    float m_charge_obc_kw = 0.0f;   // diagnostic: raw 0x10D4 OBC "battery charging power" (under-reads on DC, issue #109)
     uint32_t lastGridEnergyLogTime = 0;
     uint32_t lastHvacEnergyLogTime = 0;
     uint32_t lastHvacDriveEnergyLogTime = 0;
