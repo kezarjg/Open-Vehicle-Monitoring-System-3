@@ -209,6 +209,10 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
         s.soc = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
         s.sta_max  = m_v_charge_sta_max_p->AsFloat();        // station-offered max kW (0x166A, DC only; 0 on AC)
         s.car_perm = fabsf(m_v_charge_perm->AsFloat());      // car-permitted kW (0x16A1 is signed: |.| is the charge limit)
+        s.station_kw = m_charge_session.is_dc
+            ? (StandardMetrics.ms_v_charge_voltage->AsFloat() * StandardMetrics.ms_v_charge_current->AsFloat() / 1000.0f)
+            : m_v_charge_grid_power->AsFloat();
+        s.hvac_kw = m_v_env_hvac_power->AsFloat();
         m_charge_session.svg.push_back(s);
         m_charge_session.last_svg_monotonic = now;
         // Cap ~300 points: when exceeded, double the interval and decimate (keep every other).
@@ -355,12 +359,12 @@ static void PruneChargeReports(const char* tag, const std::string& dir)
     }
 }
 
-// Render a self-contained inline SVG chart vs time, with standardized axes:
-//   - left axis: delivered power (kW), fixed full-scale per charge type (AC 0-11, DC 0-150)
+// Render a self-contained inline SVG chart vs time, with auto-scaled axes:
+//   - left axis: power (kW), auto-scaled to the max of battery/station/HVAC series
 //   - right axis: SOC, fixed 0-100 %
-//   - traces: delivered power, station-offered max (DC only) and car-permitted limit (the
-//     0x16A1 taper curve), plus the SOC overlay. All powers plot as magnitudes (0x16A1 is
-//     signed: negative = charging), so the three power traces share one positive axis.
+//   - traces: battery power (blue), station power (orange), HVAC power (purple),
+//     car-permitted limit (green, the 0x16A1 taper curve), and SOC overlay.
+//     All powers plot as magnitudes (0x16A1 is signed: |.| is the charge limit).
 // Streams directly to the (already open) report file: a 300-sample DC session built a
 // ~25-30 KB contiguous std::string here, a needless heap spike on the ESP32.
 void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
@@ -371,9 +375,14 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
         return;
     }
 
-    const bool  dc    = m_charge_session.is_dc;
-    const float pmax  = dc ? 150.0f : 11.0f;   // fixed power-axis full scale (kW)
-    const float pstep = dc ? 25.0f  : 2.0f;    // power gridline / tick spacing (kW)
+    float pmax = 1.0f;
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i].kw > pmax) pmax = s[i].kw;
+        if (s[i].station_kw > pmax) pmax = s[i].station_kw;
+        if (s[i].hvac_kw > pmax) pmax = s[i].hvac_kw;
+    }
+    const float pstep = (pmax > 60.0f) ? 25.0f : (pmax > 12.0f ? 10.0f : 2.0f);
+    pmax = pstep * ceilf(pmax / pstep);
 
     const int W = 640, H = 260, PADL = 44, PADB = 28, PADT = 12, PADR = 44;
     const int PW = W - PADL - PADR, PH = H - PADT - PADB;
@@ -410,18 +419,6 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
     }
     out << "\"/>\n";
 
-    // Station-offered max (DC only — 0x166A is not polled on AC).
-    if (dc) {
-        out << "<polyline fill=\"none\" stroke=\"#e80\" stroke-width=\"1\" stroke-dasharray=\"5 3\" points=\"";
-        for (size_t i = 0; i < s.size(); i++) {
-            float x = PADL + (float)PW * s[i].t_s / tmax;
-            float v = s[i].sta_max; if (v < 0) v = 0; if (v > pmax) v = pmax;
-            float y = PADT + (float)PH * (1.0f - v / pmax);
-            snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
-        }
-        out << "\"/>\n";
-    }
-
     // Car-permitted limit (the BMS taper curve).
     out << "<polyline fill=\"none\" stroke=\"#0a0\" stroke-width=\"1\" stroke-dasharray=\"5 3\" points=\"";
     for (size_t i = 0; i < s.size(); i++) {
@@ -432,6 +429,24 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
     }
     out << "\"/>\n";
 
+    // Station power (actual from EVSE).
+    out << "<polyline fill=\"none\" stroke=\"#e80\" stroke-width=\"1.5\" points=\"";
+    for (size_t i = 0; i < s.size(); i++) {
+        float x = PADL + (float)PW * s[i].t_s / tmax;
+        float v = s[i].station_kw; if (v < 0) v = 0; if (v > pmax) v = pmax;
+        float y = PADT + (float)PH * (1.0f - v / pmax);
+        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
+    }
+    out << "\"/>\n";
+    // HVAC power (into cabin / My-Room).
+    out << "<polyline fill=\"none\" stroke=\"#a0a\" stroke-width=\"1.5\" points=\"";
+    for (size_t i = 0; i < s.size(); i++) {
+        float x = PADL + (float)PW * s[i].t_s / tmax;
+        float v = s[i].hvac_kw; if (v < 0) v = 0; if (v > pmax) v = pmax;
+        float y = PADT + (float)PH * (1.0f - v / pmax);
+        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
+    }
+    out << "\"/>\n";
     // Delivered power (primary trace).
     out << "<polyline fill=\"none\" stroke=\"#06c\" stroke-width=\"2\" points=\"";
     for (size_t i = 0; i < s.size(); i++) {
@@ -444,10 +459,11 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
 
     // Legend (bottom).
     int ly = H - 6;
-    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#06c\">delivered kW</text>\n", PADL+6, ly); out << b;
-    if (dc) { snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#e80\">station max</text>\n", PADL+96, ly); out << b; }
-    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#0a0\">car permitted</text>\n", PADL+186, ly); out << b;
-    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#39c\">SOC %%</text>\n", PADL+282, ly); out << b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#06c\">battery kW</text>\n", PADL+6, ly); out << b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#e80\">station kW</text>\n", PADL+86, ly); out << b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#a0a\">HVAC kW</text>\n", PADL+166, ly); out << b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#0a0\">car permitted</text>\n", PADL+236, ly); out << b;
+    snprintf(b, sizeof(b), "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#39c\">SOC %%</text>\n", PADL+330, ly); out << b;
     out << "</svg>\n";
 }
 

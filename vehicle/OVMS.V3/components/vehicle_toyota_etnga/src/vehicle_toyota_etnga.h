@@ -106,7 +106,7 @@ protected:
         int   last_hlc = -1;               // last 0x1666 HLC state logged as an event (change detection)
         int   last_acop = -1;              // last 0x1684 AC-Op state logged as an event (change detection)
         // v2: downsampled chart buffer (per sample: delivered kW, SOC, station-offered + car-permitted kW)
-        struct Sample { int t_s; float kw; int soc; float sta_max; float car_perm; };
+        struct Sample { int t_s; float kw; int soc; float sta_max; float car_perm; float station_kw; float hvac_kw; };
         std::vector<Sample> svg;
         int   svg_interval_s = 20;
         int   last_svg_monotonic = 0;
