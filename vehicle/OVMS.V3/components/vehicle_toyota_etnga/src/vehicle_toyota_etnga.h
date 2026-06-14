@@ -149,11 +149,12 @@ protected:
     OvmsMetricVector<float>* m_v_bat_cap_alt;   // 0x1D3F 8x u16 x0.01 Ah — parallel array, function unconfirmed (data collection)
     OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
-    OvmsMetricFloat* m_v_bat_speed_water_pump;
     OvmsMetricFloat* m_v_bat_temp_coolant;
     OvmsMetricFloat* m_v_bat_temp_heater;
-    OvmsMetricInt* m_v_env_awaketime;
-    OvmsMetricFloat* m_v_pos_trip_start;
+    // Internal bookkeeping (not exposed as metrics):
+    int   m_awake_entered = 0;        // ms_m_monotonic seconds when AWAKE was entered (awake-timeout watchdog)
+    float m_trip_start_odo = 0.0f;    // odometer baseline at trip start
+    bool  m_trip_start_valid = false; // false until the baseline is seeded; reset on transition to DRIVING
     OvmsMetricInt* m_v_e_awd;   // 0x1087 b2 AWD / X-MODE status (custom; no standard OVMS metric)
     
     void NotifyVehicleOn() override;

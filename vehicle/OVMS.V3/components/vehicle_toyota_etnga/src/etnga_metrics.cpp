@@ -15,36 +15,33 @@
 void OvmsVehicleToyotaETNGA::InitializeMetrics()
 {
     m_s_controlstate = MyMetrics.InitInt("xte.s.controlstate", SM_STALE_MIN);  // This variable stores the control state variable
-    m_v_charge_pisw_raw = MyMetrics.InitInt("xte.v.c.pisw", SM_STALE_MID);
-    m_v_charge_ac_op    = MyMetrics.InitInt("xte.v.c.acop", SM_STALE_MID);
-    m_v_charge_hlc      = MyMetrics.InitInt("xte.v.c.hlc",  SM_STALE_MID);
-    m_v_charge_perm = MyMetrics.InitFloat("xte.v.c.perm", SM_STALE_MID, 0.0f, kW);
-    m_v_charge_tgti = MyMetrics.InitFloat("xte.v.c.tgti", SM_STALE_MID, 0.0f, Amps);
-    m_v_charge_sta_max_p = MyMetrics.InitFloat("xte.v.c.stamaxp", SM_STALE_MID, 0.0f, kW);
-    m_v_charge_sta_max_i = MyMetrics.InitFloat("xte.v.c.stamaxi", SM_STALE_MID, 0.0f, Amps);
-    m_v_charge_sta_max_v = MyMetrics.InitFloat("xte.v.c.stamaxv", SM_STALE_MID, 0.0f, Volts);
-    m_v_charge_ac_tgt_p  = MyMetrics.InitFloat("xte.v.c.actgtp", SM_STALE_MID, 0.0f, kW);
-    m_v_charge_chgr_op   = MyMetrics.InitInt("xte.v.c.chgrop", SM_STALE_MID);                     // enum: 0=Stand by,1=Ready,2=Stop,3=RoB Stop
-    m_v_charge_ac_ilim   = MyMetrics.InitFloat("xte.v.c.acilim", SM_STALE_MID, 0.0f, Amps);
-    m_v_charge_out       = MyMetrics.InitFloat("xte.v.c.chgout", SM_STALE_MID, 0.0f, kW);
-    m_v_charge_out_tgt   = MyMetrics.InitFloat("xte.v.c.chgotgt", SM_STALE_MID, 0.0f, kW);
-    m_v_charge_ac_usable = MyMetrics.InitFloat("xte.v.c.acusbl", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_pisw_raw = MyMetrics.InitInt("xte.v.c.piswraw", SM_STALE_MID);
+    m_v_charge_ac_op    = MyMetrics.InitInt("xte.v.c.ac.opstatus", SM_STALE_MID);
+    m_v_charge_hlc      = MyMetrics.InitInt("xte.v.c.hlcstate",  SM_STALE_MID);
+    m_v_charge_perm = MyMetrics.InitFloat("xte.v.c.permpower", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_tgti = MyMetrics.InitFloat("xte.v.c.tgtcurrent", SM_STALE_MID, 0.0f, Amps);
+    m_v_charge_sta_max_p = MyMetrics.InitFloat("xte.v.c.dc.maxpower", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_sta_max_i = MyMetrics.InitFloat("xte.v.c.dc.maxcurrent", SM_STALE_MID, 0.0f, Amps);
+    m_v_charge_sta_max_v = MyMetrics.InitFloat("xte.v.c.dc.maxvoltage", SM_STALE_MID, 0.0f, Volts);
+    m_v_charge_ac_tgt_p  = MyMetrics.InitFloat("xte.v.c.ac.tgtpower", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_chgr_op   = MyMetrics.InitInt("xte.v.c.chargerstate", SM_STALE_MID);                     // enum: 0=Stand by,1=Ready,2=Stop,3=RoB Stop
+    m_v_charge_ac_ilim   = MyMetrics.InitFloat("xte.v.c.ac.ilimit", SM_STALE_MID, 0.0f, Amps);
+    m_v_charge_out       = MyMetrics.InitFloat("xte.v.c.output", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_out_tgt   = MyMetrics.InitFloat("xte.v.c.outputtarget", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_ac_usable = MyMetrics.InitFloat("xte.v.c.ac.usable", SM_STALE_MID, 0.0f, kW);
     m_v_charge_myroom  = MyMetrics.InitBool("xte.v.c.myroom", SM_STALE_MID);
     m_v_charge_grid_power = MyMetrics.InitFloat("xte.v.c.gridpower", SM_STALE_MID, 0.0f, kW);
     m_v_env_hvac_power = MyMetrics.InitFloat("xte.v.e.hvac.power", SM_STALE_MID, 0.0f, kW);
     m_v_env_hvac_kwh   = MyMetrics.InitFloat("xte.v.e.hvac.kwh",   SM_STALE_MID, 0.0f, kWh);
     m_v_env_hvac_kwh_drive = MyMetrics.InitFloat("xte.v.e.hvac.kwh.drive", SM_STALE_MID, 0.0f, kWh);  // Per-trip driving cabin/HVAC energy
     m_v_charge_outcome = MyMetrics.InitInt("xte.v.c.outcome", SM_STALE_MID);
-    m_v_charge_stopreq = MyMetrics.InitInt("xte.v.c.stopreq", SM_STALE_MID);
+    m_v_charge_stopreq = MyMetrics.InitInt("xte.v.c.stoprequest", SM_STALE_MID);
     m_v_bat_cap_full = MyMetrics.InitVector<float>("xte.v.b.cap.full", SM_STALE_HIGH, 0, AmpHours);  // 0x1D3E 8x per-module full-charge capacity (data collection)
     m_v_bat_cap_alt  = MyMetrics.InitVector<float>("xte.v.b.cap.alt",  SM_STALE_HIGH, 0, AmpHours);  // 0x1D3F 8x parallel capacity array, function unconfirmed (data collection)
     m_v_bat_heater_status = MyMetrics.InitBool("xte.v.b.heater", SM_STALE_MID);  // This variable stores the status of the battery coolant heater relay
     m_v_bat_soc_bms = MyMetrics.InitFloat("xte.v.b.soc.bms", SM_STALE_MID, 0.0f, Percentage, true);  // This variable stores the SOC as reported by the BMS
-    m_v_bat_speed_water_pump = MyMetrics.InitFloat("xte.v.b.speed.waterpump", SM_STALE_MID, 0.0f, Other);  // This variable stores the RPM of the battery water pump
     m_v_bat_temp_coolant = MyMetrics.InitFloat("xte.v.b.temp.coolant", SM_STALE_MID, 0.0f, Celcius);  // This variable stores the temperature of the battery coolant
     m_v_bat_temp_heater = MyMetrics.InitFloat("xte.v.b.temp.heater", SM_STALE_MID, 0.0f, Celcius);  // This variable stores the temperature of the battery coolant
-    m_v_pos_trip_start = MyMetrics.InitFloat("xte.v.p.trip.start", SM_STALE_NONE, 0.0f, Kilometers, false);  // This variable stores the odometer reading at the beginning of a trip
-    m_v_env_awaketime = MyMetrics.InitInt("xte.v.e.awaketime", SM_STALE_NONE);  // Time awake state was entered for awake timeout (monotonic seconds)
     m_v_e_awd = MyMetrics.InitInt("xte.v.e.awd", SM_STALE_MID);  // 0x1087 b2 AWD / X-MODE status (custom)
 
     // Set initial values for metrics
@@ -918,15 +915,16 @@ void OvmsVehicleToyotaETNGA::SetOdometer(float odometer)
     LogMetricChange(StandardMetrics.ms_v_pos_odometer, odometer, "Odometer", "km");
     StandardMetrics.ms_v_pos_odometer->SetValue(odometer);  // Set the odometer metric
 
-    if (m_v_pos_trip_start->IsStale())
+    if (!m_trip_start_valid)
     {
-        // Update the trip start metric if it is stale
-        // It becomes stale when first transitioning to the READY state
-        m_v_pos_trip_start->SetValue(odometer);
+        // Seed the trip-start baseline on the first reading of a trip.
+        // It is invalidated on transition to DRIVING (see TransitionToDrivingState).
+        m_trip_start_odo = odometer;
+        m_trip_start_valid = true;
     }
 
     // Update the trip odometer
-    float tripOdometer = odometer - m_v_pos_trip_start->AsFloat();
+    float tripOdometer = odometer - m_trip_start_odo;
     StandardMetrics.ms_v_pos_trip->SetValue(tripOdometer);
 }
 
