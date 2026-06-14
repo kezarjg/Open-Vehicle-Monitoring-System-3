@@ -200,16 +200,16 @@ All edges live in ``etnga_poll_states.cpp``.
        frames) and ``ResetStaleMetrics`` flips it false.
    * - ``AWAKE → DRIVING``
      - ``controlstate == CS_DRIVING``
-     - Marks the trip-start metric stale on entry so it resets on the
-       next odometer reading.  Also calls ``RequestVIN()`` (no-op if VIN
-       already cached).
+     - Invalidates the internal trip-start odometer baseline on entry so it
+       reseeds on the next odometer reading.  Also calls ``RequestVIN()``
+       (no-op if VIN already cached).
    * - ``AWAKE → CHARGE_HANDSHAKE``
      - PISW (DID ``0x1669``) ``≥ 0x02`` (cable seated)
      - **Changed from old model** (was ``controlstate == CS_CHARGING``).
        Opens the in-RAM charge session if not already open.  Calls
        ``RequestVIN()``.  Sets ``ms_v_charge_state = "prepared"``.
    * - ``AWAKE → SLEEP`` (forced, door watch)
-     - ``monotonic - m_v_env_awaketime > 300`` AND charge door never opened
+     - ``monotonic - m_awake_entered > 300`` AND charge door never opened
      - 5-minute watchdog when awake with no ``CS_DRIVING`` and charge
        door not opened.  Arms the escalating cooldown latch.
    * - ``AWAKE → SLEEP`` (forced, cable watch)
@@ -405,26 +405,26 @@ These are populated during DC charging (and where applicable, AC charging).
      - DID
      - Unit
      - Meaning
-   * - ``xte.v.c.perm``
+   * - ``xte.v.c.permpower``
      - ``0x16A1``
      - kW
      - Minimum charging permission power — the taper floor of the DC
        charge curve.  Decoded as ``s16 BE × 0.01 kW/LSB``.  The
        ``0x8000`` sentinel is skipped (metric left unchanged).
-   * - ``xte.v.c.tgti``
+   * - ``xte.v.c.tgtcurrent``
      - ``0x166D``
      - A
      - Target charging current set by the vehicle during DC
        fast-charge.
-   * - ``xte.v.c.stamaxp``
+   * - ``xte.v.c.dc.maxpower``
      - ``0x166A``
      - kW
      - DC station maximum power capability as negotiated via HLC.
-   * - ``xte.v.c.stamaxi``
+   * - ``xte.v.c.dc.maxcurrent``
      - ``0x1679``
      - A
      - DC station maximum current (CCS contract).
-   * - ``xte.v.c.stamaxv``
+   * - ``xte.v.c.dc.maxvoltage``
      - ``0x1681``
      - V
      - DC station maximum voltage (CCS contract).
@@ -456,8 +456,8 @@ AC-only custom metrics
 -----------------------
 
 These metrics are populated only while ``PollState == CHARGE_AC``.  Note
-that ``xte.v.c.chgrop`` (charger operation status, from ``0x1619`` byte 3)
-is distinct from ``xte.v.c.acop`` (``0x1684``), which drives the
+that ``xte.v.c.chargerstate`` (charger operation status, from ``0x1619`` byte 3)
+is distinct from ``xte.v.c.ac.opstatus`` (``0x1684``), which drives the
 ``CHARGE_HANDSHAKE → CHARGE_AC`` transition.
 
 .. list-table::
@@ -468,31 +468,31 @@ is distinct from ``xte.v.c.acop`` (``0x1684``), which drives the
      - DID / bytes
      - Unit
      - Meaning
-   * - ``xte.v.c.actgtp``
+   * - ``xte.v.c.ac.tgtpower``
      - ``0x1619`` b1–2
      - kW
      - AC target charging power.  Decoded as ``u16 BE biased-32768
        × 0.01 kW/LSB``.
-   * - ``xte.v.c.chgrop``
+   * - ``xte.v.c.chargerstate``
      - ``0x1619`` b3
      - enum
      - Charger operation status (see source for enum values).
-   * - ``xte.v.c.acilim``
+   * - ``xte.v.c.ac.ilimit``
      - ``0x1619`` b4–5
      - A
      - AC charging current upper limit.  Decoded as ``u16 BE
        biased-32768 × 0.01 A/LSB``.
-   * - ``xte.v.c.chgout``
+   * - ``xte.v.c.output``
      - ``0x161E`` b1–2
      - kW
      - Charger output power.  Decoded as ``u16 BE × 5/1000 kW/LSB``
        (unit inferred).
-   * - ``xte.v.c.chgotgt``
+   * - ``xte.v.c.outputtarget``
      - ``0x161E`` b3–4
      - kW
      - Target-from-charger power.  Decoded as ``u16 BE × 5/1000
        kW/LSB`` (unit inferred).
-   * - ``xte.v.c.acusbl``
+   * - ``xte.v.c.ac.usable``
      - ``0x1665``
      - kW
      - A/C useable power.  Decoded as ``u8 × 0.01 kW/LSB`` (unit
@@ -500,8 +500,8 @@ is distinct from ``xte.v.c.acop`` (``0x1684``), which drives the
 
 .. note::
 
-   The four AC channels (``xte.v.c.acilim``, ``xte.v.c.chgout``,
-   ``xte.v.c.chgotgt``, ``xte.v.c.acusbl``) are now scaled per the
+   The four AC channels (``xte.v.c.ac.ilimit``, ``xte.v.c.output``,
+   ``xte.v.c.outputtarget``, ``xte.v.c.ac.usable``) are now scaled per the
    Techstream dictionary factors.  The ``0x161E`` and ``0x1665`` kW
    units are inferred (by analogy to ``0x161D`` grid power) and pending
    sustained AC-charge confirmation.
@@ -515,7 +515,7 @@ is called at session end from ``TransitionToAwakeState()``.
 ``xte.v.c.myroom`` is polled only in the ``CHARGE_AC`` and ``CHARGE_DC``
 states; ``xte.v.e.hvac.power`` is polled in those charge states (from the
 OBC, ``0x745``) **and** in ``DRIVING`` (from the hybrid control ECU,
-``0x7D2``); ``xte.v.c.outcome`` and ``xte.v.c.stopreq`` are also polled in
+``0x7D2``); ``xte.v.c.outcome`` and ``xte.v.c.stoprequest`` are also polled in
 ``CHARGE_HANDSHAKE`` and ``CHARGE_WAIT``.
 
 .. list-table::
@@ -558,7 +558,7 @@ OBC, ``0x745``) **and** in ``DRIVING`` (from the hybrid control ECU,
        the vehicle does not reset this on plug-in, so a report must
        scope it per-session (capture value at session open and
        compare at session close).
-   * - ``xte.v.c.stopreq``
+   * - ``xte.v.c.stoprequest``
      - ``0x1667``
      - enum
      - Charge Sequence Stop Request from the CCM — HLC-layer fault

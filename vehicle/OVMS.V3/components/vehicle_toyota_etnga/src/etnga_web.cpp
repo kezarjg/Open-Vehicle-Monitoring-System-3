@@ -296,9 +296,9 @@ void OvmsVehicleToyotaETNGA::WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaE
 
         "<div class=\"clearfix\">"
           "<h6 class=\"metric-head\">Station</h6>"
-          "<div class=\"metric number\" data-metric=\"xte.v.c.stamaxp\" data-prec=\"1\"><span class=\"label\">Max power</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
-          "<div class=\"metric number\" data-metric=\"xte.v.c.stamaxv\" data-prec=\"0\"><span class=\"label\">Max V</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
-          "<div class=\"metric number\" data-metric=\"xte.v.c.stamaxi\" data-prec=\"0\"><span class=\"label\">Max A</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
+          "<div class=\"metric number\" data-metric=\"xte.v.c.dc.maxpower\" data-prec=\"1\"><span class=\"label\">Max power</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
+          "<div class=\"metric number\" data-metric=\"xte.v.c.dc.maxvoltage\" data-prec=\"0\"><span class=\"label\">Max V</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
+          "<div class=\"metric number\" data-metric=\"xte.v.c.dc.maxcurrent\" data-prec=\"0\"><span class=\"label\">Max A</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
           "<div class=\"metric number\" data-metric=\"v.c.voltage\" data-prec=\"1\"><span class=\"label\">Present V</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
           "<div class=\"metric number\" data-metric=\"v.c.current\" data-prec=\"1\"><span class=\"label\">Present A</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
         "</div>"
@@ -310,7 +310,7 @@ void OvmsVehicleToyotaETNGA::WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaE
           // charging), so it's updated from JS as an absolute value (id=permkw) like the chart does,
           // rather than bound raw via data-metric — keeps the on-screen number positive.
           "<div class=\"metric number\"><span class=\"label\">Permitted</span><span class=\"value\" id=\"permkw\">?</span><span class=\"unit\">kW</span></div>"
-          "<div class=\"metric number\" data-metric=\"xte.v.c.tgti\" data-prec=\"0\"><span class=\"label\">Target</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
+          "<div class=\"metric number\" data-metric=\"xte.v.c.tgtcurrent\" data-prec=\"0\"><span class=\"label\">Target</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
         "</div>"
 
         "<div class=\"clearfix\">"
@@ -380,17 +380,17 @@ void OvmsVehicleToyotaETNGA::WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaET
         "  var pm=null;\n"
         "  function showPerm(){if(DC&&pm!=null)$('#permkw').text(Math.abs(pm).toFixed(2));}\n"
         "  function onUpd(){\n"
-        "    pm=mv('xte.v.c.perm'); showPerm();\n"   // update the Permitted panel field even before the chart builds
+        "    pm=mv('xte.v.c.permpower'); showPerm();\n"   // update the Permitted panel field even before the chart builds
         "    if(!chart) return;\n"
         "    var t=baseT/60+(Date.now()/1000-loadT)/60;\n"
-        "    var d=mv('v.c.power'),sc=mv('v.b.soc'),sm=mv('xte.v.c.stamaxp');\n"
+        "    var d=mv('v.c.power'),sc=mv('v.b.soc'),sm=mv('xte.v.c.dc.maxpower');\n"
         "    var cap=600, sidx=DC?3:2;\n"
         "    if(d!=null) chart.series[0].addPoint([t,d],false,chart.series[0].data.length>cap);\n"
         "    chart.series[1].addPoint([t,pm==null?0:Math.abs(pm)],false,chart.series[1].data.length>cap);\n"
         "    if(DC) chart.series[2].addPoint([t,sm==null?0:sm],false,chart.series[2].data.length>cap);\n"
         "    chart.series[sidx].addPoint([t,sc],true,chart.series[sidx].data.length>cap);\n"
         "  }\n"
-        "  function init(){build(); pm=mv('xte.v.c.perm'); showPerm(); $('#chgmon').on('msg:metrics',onUpd);}\n"
+        "  function init(){build(); pm=mv('xte.v.c.permpower'); showPerm(); $('#chgmon').on('msg:metrics',onUpd);}\n"
         "  if(window.Highcharts) init();\n"
         "  else $.ajax({url:window.assets.charts_js,dataType:'script',cache:true,success:init});\n"
         "})();\n"
@@ -398,8 +398,8 @@ void OvmsVehicleToyotaETNGA::WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaET
         dc ? 1 : 0, init.c_str(), elapsed);
 }
 // Emit the state-history table, a backfill literal of the in-memory event log, and JS that seeds
-// the table then appends a row whenever the watched state metric changes (xte.v.c.hlc on DC,
-// xte.v.c.acop on AC). On DC it also keeps the #hlcstate header span current. Labels come from
+// the table then appends a row whenever the watched state metric changes (xte.v.c.hlcstate on DC,
+// xte.v.c.ac.opstatus on AC). On DC it also keeps the #hlcstate header span current. Labels come from
 // inline maps so no extra string metric is needed.
 void OvmsVehicleToyotaETNGA::WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc)
 {
@@ -440,7 +440,7 @@ void OvmsVehicleToyotaETNGA::WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleT
         "  for(var i=0;i<EVT.length;i++) row(EVT[i][0],EVT[i][1]);\n"
         "  if(DC){var hn=HLC[lastState]; if(hn) $('#hlcstate').text(hn);}\n"
         "  function onUpd(){\n"
-        "    var m=DC?metrics['xte.v.c.hlc']:metrics['xte.v.c.acop'];\n"
+        "    var m=DC?metrics['xte.v.c.hlcstate']:metrics['xte.v.c.ac.opstatus'];\n"
         "    if(m==null) return; m=parseInt(m);\n"
         "    if(DC){var hn=HLC[m]; if(hn) $('#hlcstate').text(hn);}\n"
         "    if(m===lastState) return; lastState=m;\n"
