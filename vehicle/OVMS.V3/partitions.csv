@@ -1,8 +1,13 @@
 # OVMS 16MB flash ESP32 Partition Table
-# Name,   Type, SubType, Offset,   Size
-nvs,      data, nvs,     0x9000,  0x4000
-otadata,  data, ota,     0xd000,  0x2000
-phy_init, data, phy,     0xf000,  0x1000
-ota_0,    app,  ota_0,   0x010000, 7M
-ota_1,    app,  ota_1,   0x710000, 7M
-store,    data, fat,     0xe10000, 0x1f0000
+# A `coredump` partition was added (ota_1 shrunk 7M -> 6.75M) so flash coredumps work; `store`
+# stays byte-identical at 0xe10000 (vintage config). In the launcher install the device table
+# (partitions-launcher.csv) is what's flashed and vintage finds `coredump`/`store` by subtype/
+# label at runtime — this build table just needs the partition present for the coredump build.
+# Name,   Type, SubType,  Offset,   Size
+nvs,      data, nvs,      0x9000,  0x4000
+otadata,  data, ota,      0xd000,  0x2000
+phy_init, data, phy,      0xf000,  0x1000
+ota_0,    app,  ota_0,    0x010000, 7M
+ota_1,    app,  ota_1,    0x710000, 0x6C0000
+coredump, data, coredump, 0xDD0000, 0x40000
+store,    data, fat,      0xe10000, 0x1f0000
