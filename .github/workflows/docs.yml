@@ -4,7 +4,13 @@ name: Docs build
 # does (see .readthedocs.yaml): Ubuntu 22.04, Python 3.11, the dependencies in
 # docs/source/requirements.txt, and a Sphinx HTML build of docs/source. Runs
 # only when docs change — the firmware workflow ignores docs/, so the two are
-# complementary. The rendered HTML is uploaded as an artifact for PR preview.
+# complementary.
+#
+# On master the rendered HTML is published to GitHub Pages. PRs only build (to
+# validate the strict `-W` Sphinx build); the short-lived `github-pages` artifact
+# the build job uploads is still downloadable from the PR's checks for preview.
+# (Previously every run uploaded a 30-day `ovms-docs-html` artifact, which piled
+# up well past the account-wide artifact storage quota.)
 
 on:
   push:
@@ -24,12 +30,19 @@ on:
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
+# Least privilege for the build; the deploy job needs pages:write + id-token:write
+# to publish to the github-pages environment.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 concurrency:
   group: docs-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  docs:
+  build:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -59,10 +72,27 @@ jobs:
         # stopping at the first.
         run: make html SPHINXOPTS="-W --keep-going"
 
-      - name: Upload rendered docs
-        uses: actions/upload-artifact@v7
+      # Sphinx/RTD theme emits `_static` and `_sources` dirs. The Pages workflow
+      # deployer serves the artifact as-is (no Jekyll), but `.nojekyll` guards
+      # against underscore-dir stripping if Pages is ever switched to branch mode.
+      - name: Disable Jekyll processing
+        run: touch docs/build/html/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: ovms-docs-html
           path: docs/build/html
-          if-no-files-found: error
-          retention-days: 30
+
+  deploy:
+    # Publish to Pages only from master (push or manual dispatch). PRs — including
+    # from forks, which can't access Pages credentials — stop after the build job.
+    if: github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-22.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
