@@ -68,7 +68,13 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    # Self-hosted (SH K3s, the `ovms3` ARC scale set) so the firmware build can
+    # push its output to the in-cluster MinIO artifact store (10.20.5.228) — a
+    # private IP that GitHub-hosted runners can't reach. The runner image
+    # (ovms-ci-runner) runs as root with apt/sudo/python3/ccache/git present, so
+    # this legacy ESP-IDF 3.3 build (which fetches its own toolchain + esp-idf)
+    # runs unchanged. docs.yml (Pages) and web-assets-check.yml stay GitHub-hosted.
+    runs-on: ovms3
     steps:
       - name: Checkout (with submodules)
         uses: actions/checkout@v6
