@@ -276,6 +276,7 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     void PollReply_BMS_CellResistance(const char* data, uint16_t reply_len, uint16_t start);
     void PollReply_BMS_BattHealth(const char* data, uint16_t reply_len);
     void PollReply_BMS_ProductionData(const char* data, uint16_t reply_len);
+    void PollReply_BMS_IdentificationData(const char* data, uint16_t reply_len);
 
     // --- Poll reply handlers: TDB ---
     void PollReply_TDB(const char* data, uint16_t reply_len);
@@ -358,6 +359,14 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     // --- Custom metrics: BMS production data (PID 0x90) ---
     OvmsMetricString        *mt_bms_prod_data;          // BMS production data formatted (serial, MM/YYYY)
 
+    // --- Custom metrics: BMS Identification (PID 0x80) ---
+    OvmsMetricString        *mt_bms_ident_data;         // BMS Identification: PartNo|Supplier|DiagV|HW|SW|basicPart|Ed|Cal
+    OvmsMetricString        *mt_bms_part_no;            // BMS Part Number (PartNumber.LowerPart)
+    OvmsMetricString        *mt_bms_hw_version;         // BMS Hardware Version (HardwareNumber.LowerPart)
+    OvmsMetricString        *mt_bms_sw_version;         // BMS Software Version (SoftwareNumber hex)
+    OvmsMetricInt           *mt_bms_mfr_id;             // BMS Manufacturer Identification Code
+    OvmsMetricString        *mt_bms_basic_parts;        // BMS BasicPartList (PN/HW/Approval hex)
+
     // --- Custom metrics: 0x637 ---
     OvmsMetricFloat         *mt_energy_used;            // Energy used since mission start (kWh)
     OvmsMetricFloat         *mt_energy_recd;            // Energy recovered since mission start (kWh)
@@ -383,7 +392,7 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
 
     // --- Custom metrics: BMS ---
     OvmsMetricVector<float> *mt_bms_voltages;                // Voltages: [0]=cv_min, [1]=cv_max, [2]=cv_mean, [3]=link, [4]=contactor
-    OvmsMetricVector<int>   *mt_bms_contactor_cycles;        // Max/Total HV contactor cycles [0]=max, [1]=remaining, [2]=consumed, [3]=diff last/now remained cycles
+    OvmsMetricVector<int>   *mt_bms_contactor_cycles;        // [0]=max, [1]=now, [2]=consumed, [3]=diff, [4]=1h_count
     OvmsMetricVector<float> *mt_bms_soc_values;              // SOC values: [0]=kernel, [1]=real, [2]=min, [3]=max, [4]=display
     OvmsMetricString        *mt_bms_soc_recal_state;         // SOC Recalibration State
     OvmsMetricFloat         *mt_bms_soh;                     // State of Health (%)
@@ -503,7 +512,8 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     // ADC factor calculation is needed based on 12V reading, only check when car is on or charging to avoid false recalculations based on 12V drop when car is off
     // activated only after reboot
     bool m_check12vadc = true;
-    std::deque<uint32_t> m_12v_trickle_charge_times; // activation timestamps for 12V trickle charge alarm within 24h
+    std::deque<uint32_t> m_12v_trickle_charge_times;  // activation timestamps for 12V trickle charge alarm within 24h
+    std::deque<uint32_t> m_cchange_times;             // contactor changes timestamps for tracking within 1h
 
     // --- ADC variables ---
     bool m_ADCfactor_recalc = false;      // request recalculation of ADC factor
@@ -559,6 +569,7 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     bool m_charge_finished = true;    
     int m_candata_timer = -1;
     int32_t m_above_cycles = 50000;       // alert threshold for cycles counted
+    int m_contactor_1h_limit = 8;         // limit for contactor cycles changes per hour (for alerting)
 
     // --- TPMS internal arrays ---
     bool m_tpms_lowbatt[4] = {};          // 0=ok, 1=low
