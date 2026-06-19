@@ -28,6 +28,13 @@
 static const int SLEEP_COOLDOWN_SECS[] = {10, 30, 60, 120, 300};
 static const int SLEEP_COOLDOWN_STEPS  = (int)(sizeof(SLEEP_COOLDOWN_SECS) / sizeof(SLEEP_COOLDOWN_SECS[0]));
 
+// CHARGE_WAIT 12V-drain protection: stop polling after a sustained idle wait so the bus
+// idles and the 12V recovers (session is preserved; resumes on passive wake). First wait
+// gets a responsive window; a wait re-entered after a prior sleep re-sleeps quickly to keep
+// the oscillation duty-cycle low. See HandleChargeWaitState().
+static const int CHARGE_WAIT_SLEEP_SECS   = 600;  // first wait, no charge -> sleep
+static const int CHARGE_WAIT_RESLEEP_SECS = 15;   // re-entered after a wait-sleep -> sleep fast
+
 void OvmsVehicleToyotaETNGA::ResetSleepBackoff()
 {
     m_sleep_backoff_idx = 0;
@@ -225,6 +232,18 @@ void OvmsVehicleToyotaETNGA::HandleChargeWaitState()
         TransitionToSleepState();
         return;
     }
+    // 12V-drain protection: if we have sat in CHARGE_WAIT without charge engaging for the
+    // threshold, stop polling and sleep so the bus idles and 12V recovers. The session is
+    // preserved across the sleep and resumes on passive wake (see HandleAwakeState). A wait
+    // re-entered after a prior sleep uses the short threshold to keep oscillation cheap.
+    int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
+    int sleep_after = m_charge_wait_slept ? CHARGE_WAIT_RESLEEP_SECS : CHARGE_WAIT_SLEEP_SECS;
+    if (monotonic - m_charge_state_entry >= sleep_after) {
+        ESP_LOGI(TAG, "CHARGE_WAIT idle %ds — sleeping to protect 12V", sleep_after);
+        m_charge_wait_slept = true;
+        TransitionToSleepState();
+        return;
+    }
 }
 
 void OvmsVehicleToyotaETNGA::HandleChargeAcState()
@@ -324,6 +343,7 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
             GenerateChargeReport();   // write the session-end HTML report (no-op if no energy delivered)
         }
         m_charge_session = ChargeSessionState{};   // reset (clears in_session)
+        m_charge_wait_slept = false;   // leaving the charge sub-machine — clear wait flag
     }
 }
 
@@ -345,6 +365,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
     SetChargingStatus(false);    // not yet delivering energy (AC/DC states set true)
     SetChargeState(PollState::CHARGE_HANDSHAKE);
     if (!m_charge_session.in_session) {
+        m_charge_wait_slept = false;   // brand-new session — fresh responsive wait window
         m_charge_session.in_session = true;
         m_charge_session.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
         m_charge_session.start_utc = StandardMetrics.ms_m_timeutc->AsInt();
@@ -409,6 +430,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeWaitState()
 void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
 {
     m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
+    m_charge_wait_slept = false;   // real charge engaged — end the wait
     SetPollState(PollState::CHARGE_AC);
     SetChargingStatus(true);
     SetChargeState(PollState::CHARGE_AC);
@@ -419,6 +441,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
 void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
 {
     m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
+    m_charge_wait_slept = false;   // real charge engaged — end the wait
     SetPollState(PollState::CHARGE_DC);
     SetChargingStatus(true);
     SetChargeState(PollState::CHARGE_DC);

@@ -80,6 +80,7 @@ protected:
     bool m_armed_for_charge = false;   // charge lid seen open since entering AWAKE
     int  m_cable_watch_start = 0;      // monotonic s when armed (15-min cable watch)
     int  m_charge_state_entry = 0;     // monotonic s of last charge-state entry (handshake 60s timer)
+    bool m_charge_wait_slept = false;  // true after Tier-2 CHARGE_WAIT sleep; selects the short re-sleep threshold
 
     struct ChargeSessionState {
         bool  in_session = false;
