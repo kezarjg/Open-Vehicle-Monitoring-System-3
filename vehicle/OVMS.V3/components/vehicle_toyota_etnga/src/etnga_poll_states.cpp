@@ -140,8 +140,15 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
     // above), so a seated cable is detected here directly. The lid-open arm logic below
     // only bounds how long we stay awake waiting for a plug-in.
     if (pisw >= 0x02) {
-        // Cable is seated — enter charge handshake immediately
-        TransitionToChargeHandshakeState();
+        // Cable is seated. If a session is already open we are resuming after a CHARGE_WAIT
+        // sleep — go straight back to CHARGE_WAIT (the engage-watch + direct AC/DC checks there
+        // catch the charge when it starts) and let Tier 2 re-sleep. Only a genuinely new
+        // plug-in (no open session) runs the full handshake negotiation.
+        if (m_charge_session.in_session) {
+            TransitionToChargeWaitState();
+        } else {
+            TransitionToChargeHandshakeState();
+        }
         return;
     }
     if (!m_armed_for_charge) {
@@ -359,12 +366,12 @@ void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
 void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
 {
     m_armed_for_charge = false;  // arm state consumed on entering handshake
-    ResetSleepBackoff();   // charge session beginning — resume responsive cooldowns
     m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
     SetPollState(PollState::CHARGE_HANDSHAKE);
     SetChargingStatus(false);    // not yet delivering energy (AC/DC states set true)
     SetChargeState(PollState::CHARGE_HANDSHAKE);
     if (!m_charge_session.in_session) {
+        ResetSleepBackoff();   // brand-new charge session — resume responsive cooldowns
         m_charge_wait_slept = false;   // brand-new session — fresh responsive wait window
         m_charge_session.in_session = true;
         m_charge_session.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
