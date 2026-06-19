@@ -105,9 +105,16 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
     // (gap <120s), so a fresh 0x00 never arrives and this reconcile can NEVER fire —
     // leaking in_session and blocking the next session's open-guard. Do not remove the
     // AWAKE PISW poll without replacing this reconcile trigger.
-    if (m_charge_session.in_session &&
-        !m_v_charge_pisw_raw->IsStale() &&
-        m_v_charge_pisw_raw->AsInt() == 0x00) {
+    // Debounce the cable-removed read: the OBC can briefly report PISW=0x00 for ~30s after
+    // wake before it is fully up. Require two consecutive fresh 0x00 reads before finalizing,
+    // so a wake-from-CHARGE_WAIT-sleep transient does not falsely close a still-plugged session.
+    if (!m_v_charge_pisw_raw->IsStale()) {
+        if (m_v_charge_pisw_raw->AsInt() == 0x00)
+            m_pisw_zero_count++;
+        else
+            m_pisw_zero_count = 0;
+    }
+    if (m_charge_session.in_session && m_pisw_zero_count >= 2) {
         // Session ended while we slept (cable removed during the sleep gap).
         // Close the session the same way TransitionToAwakeState does: flush + report.
         // Resetting without the report silently discarded the whole session (and the
@@ -373,6 +380,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
     if (!m_charge_session.in_session) {
         ResetSleepBackoff();   // brand-new charge session — resume responsive cooldowns
         m_charge_wait_slept = false;   // brand-new session — fresh responsive wait window
+        m_pisw_zero_count = 0;   // fresh session — clear cable-removed debounce
         m_charge_session.in_session = true;
         m_charge_session.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
         m_charge_session.start_utc = StandardMetrics.ms_m_timeutc->AsInt();
