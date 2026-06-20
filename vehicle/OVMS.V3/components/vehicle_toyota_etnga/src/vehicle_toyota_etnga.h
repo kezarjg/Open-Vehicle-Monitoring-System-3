@@ -82,6 +82,7 @@ protected:
     int  m_charge_state_entry = 0;     // monotonic s of last charge-state entry (handshake 60s timer)
     bool m_charge_wait_slept = false;  // true after Tier-2 CHARGE_WAIT sleep; selects the short re-sleep threshold
     int  m_pisw_zero_count = 0;        // consecutive fresh AWAKE PISW==0x00 reads; debounces the OBC post-wake transient
+    uint32_t m_pisw_last_modified = 0;  // LastModified() of the last PISW reading counted, so the debounce counts distinct polls not 1s ticks
 
     struct ChargeSessionState {
         bool  in_session = false;

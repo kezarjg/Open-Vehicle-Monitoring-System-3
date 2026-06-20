@@ -108,11 +108,19 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
     // Debounce the cable-removed read: the OBC can briefly report PISW=0x00 for ~30s after
     // wake before it is fully up. Require two consecutive fresh 0x00 reads before finalizing,
     // so a wake-from-CHARGE_WAIT-sleep transient does not falsely close a still-plugged session.
-    if (!m_v_charge_pisw_raw->IsStale()) {
-        if (m_v_charge_pisw_raw->AsInt() == 0x00)
-            m_pisw_zero_count++;
-        else
+    // Count only DISTINCT fresh PISW polls. This handler runs every 1s, but PISW is polled
+    // @5s in AWAKE and the metric stays non-stale for ~120s, so without this gate one cached
+    // 0x00 would be counted on every tick and trip the debounce in ~2s. LastModified advances
+    // on every poll (even an unchanged value), so a new timestamp == a new reading. The
+    // debounce therefore means "two consecutive ~5s AWAKE polls read 0x00", per the design.
+    uint32_t pisw_ts = m_v_charge_pisw_raw->LastModified();
+    if (!m_v_charge_pisw_raw->IsStale() && pisw_ts != m_pisw_last_modified) {
+        m_pisw_last_modified = pisw_ts;
+        if (m_v_charge_pisw_raw->AsInt() == 0x00) {
+            if (m_pisw_zero_count < 2) m_pisw_zero_count++;   // only need 2; don't grow unbounded
+        } else {
             m_pisw_zero_count = 0;
+        }
     }
     if (m_charge_session.in_session && m_pisw_zero_count >= 2) {
         // Session ended while we slept (cable removed during the sleep gap).
@@ -124,6 +132,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
         LogChargeEvent("Unplugged (during sleep)");
         GenerateChargeReport();   // flushes the CSV; no-op + stub-CSV cleanup if no energy delivered
         m_charge_session = ChargeSessionState{};
+        m_pisw_zero_count = 0;   // consumed — reset the debounce
         // fall through to normal AWAKE handling
     }
 
@@ -253,7 +262,7 @@ void OvmsVehicleToyotaETNGA::HandleChargeWaitState()
     int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
     int sleep_after = m_charge_wait_slept ? CHARGE_WAIT_RESLEEP_SECS : CHARGE_WAIT_SLEEP_SECS;
     if (monotonic - m_charge_state_entry >= sleep_after) {
-        ESP_LOGI(TAG, "CHARGE_WAIT idle %ds — sleeping to protect 12V", sleep_after);
+        ESP_LOGI(TAG, "CHARGE_WAIT idle %ds — sleeping to protect 12V", monotonic - m_charge_state_entry);
         m_charge_wait_slept = true;
         TransitionToSleepState();
         return;
@@ -381,6 +390,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
         ResetSleepBackoff();   // brand-new charge session — resume responsive cooldowns
         m_charge_wait_slept = false;   // brand-new session — fresh responsive wait window
         m_pisw_zero_count = 0;   // fresh session — clear cable-removed debounce
+        m_pisw_last_modified = 0;   // fresh session — clear the distinct-poll tracker too
         m_charge_session.in_session = true;
         m_charge_session.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
         m_charge_session.start_utc = StandardMetrics.ms_m_timeutc->AsInt();
