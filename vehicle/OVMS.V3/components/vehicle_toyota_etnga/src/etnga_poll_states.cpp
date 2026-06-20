@@ -278,6 +278,13 @@ void OvmsVehicleToyotaETNGA::HandleChargeAcState()
     // handlers resume normally.  Do not add timeout-based session teardown here.
     UpdateChargeSessionStats();   // aggregate peak power / temp range / type for the session report
 
+    // Keep charge-state metrics fresh (they're otherwise set only on transition → go stale
+    // at 120s, and a mid-charge reboot leaves the Status page showing "Not charging").
+    if (StandardMetrics.ms_v_charge_inprogress->Age() > 60) {
+        StandardMetrics.ms_v_charge_inprogress->SetValue(true);
+        StandardMetrics.ms_v_charge_state->SetValue("charging");
+    }
+
     int pisw = m_v_charge_pisw_raw->AsInt();
     int ac_op = m_v_charge_ac_op->AsInt();
 
@@ -300,6 +307,13 @@ void OvmsVehicleToyotaETNGA::HandleChargeDcState()
     // (0x00) read or hlc==0xFF (HLC Unconnected) terminates the DC phase.  On unlock the
     // OBC answers again and polling resumes.  Do not add timeout-based session teardown here.
     UpdateChargeSessionStats();   // aggregate peak power / temp range / type for the session report
+
+    // Keep charge-state metrics fresh (they're otherwise set only on transition → go stale
+    // at 120s, and a mid-charge reboot leaves the Status page showing "Not charging").
+    if (StandardMetrics.ms_v_charge_inprogress->Age() > 60) {
+        StandardMetrics.ms_v_charge_inprogress->SetValue(true);
+        StandardMetrics.ms_v_charge_state->SetValue("charging");
+    }
 
     int pisw = m_v_charge_pisw_raw->AsInt();
     int hlc = m_v_charge_hlc->AsInt();
