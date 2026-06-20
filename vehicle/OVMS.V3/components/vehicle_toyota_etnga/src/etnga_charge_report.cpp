@@ -21,7 +21,7 @@
 #include <time.h>
 #include <stdio.h>
 #include <math.h>
-#include <fstream>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,8 +34,6 @@
 #include "ovms_location.h"
 #endif
 #include "vehicle_toyota_etnga.h"
-
-static const int CHARGE_REPORT_MAX = 50;   // retain at most this many reports
 
 // Prefer the SD card (GBs, removable) for reports+CSV; fall back to internal flash.
 std::string OvmsVehicleToyotaETNGA::ChargeReportDir()
@@ -314,43 +312,6 @@ void OvmsVehicleToyotaETNGA::FlushChargeCsv()
     }
 }
 
-// Retain only the newest CHARGE_REPORT_MAX sessions; delete both .html and .csv for each pruned stem.
-// Also removes orphan .csv files whose session never produced an .html (aborted/sleep-ended sessions).
-static void PruneChargeReports(const char* tag, const std::string& dir)
-{
-    DIR* d = opendir(dir.c_str());
-    if (!d) return;
-    std::vector<std::string> stems;        // .html stems (a complete report)
-    std::vector<std::string> csv_stems;    // .csv stems (may be orphaned)
-    struct dirent* e;
-    while ((e = readdir(d)) != NULL) {
-        std::string n = e->d_name;
-        if (n.size() > 5 && n.compare(n.size()-5, 5, ".html") == 0)
-            stems.push_back(n.substr(0, n.size()-5));
-        else if (n.size() > 4 && n.compare(n.size()-4, 4, ".csv") == 0)
-            csv_stems.push_back(n.substr(0, n.size()-4));
-    }
-    closedir(d);
-
-    // Remove orphan CSVs (streamed CSV whose session never produced an HTML report).
-    for (size_t i = 0; i < csv_stems.size(); i++) {
-        bool has_html = false;
-        for (size_t j = 0; j < stems.size(); j++)
-            if (stems[j] == csv_stems[i]) { has_html = true; break; }
-        if (!has_html)
-            unlink((dir + "/" + csv_stems[i] + ".csv").c_str());
-    }
-
-    if ((int)stems.size() <= CHARGE_REPORT_MAX) return;
-    std::sort(stems.begin(), stems.end());
-    int del = (int)stems.size() - CHARGE_REPORT_MAX;
-    for (int i = 0; i < del; i++) {
-        unlink((dir + "/" + stems[i] + ".html").c_str());
-        unlink((dir + "/" + stems[i] + ".csv").c_str());
-        ESP_LOGD(tag, "Charge report pruned: %s", stems[i].c_str());
-    }
-}
-
 // Render a self-contained inline SVG chart vs time, with auto-scaled axes:
 //   - left axis: power (kW), auto-scaled to the max of battery/station/HVAC series
 //   - right axis: SOC, fixed 0-100 %
@@ -464,8 +425,12 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     const float energy_kwh = StandardMetrics.ms_v_charge_kwh->AsFloat();
     if (energy_kwh < 0.05f || m_charge_session.base.empty()) {
         ESP_LOGD(TAG, "Charge report skipped (%.3f kWh)", energy_kwh);
-        if (m_charge_session.csv_file_created)   // remove the streamed stub CSV (buffered rows are discarded with the session)
-            unlink((m_charge_session.base + ".csv").c_str());
+        if (m_charge_session.csv_file_created) {  // remove the streamed stub CSV via the worker
+            etnga_io_job* j = new etnga_io_job;
+            j->op = etnga_io_job::UNLINK;
+            j->path = m_charge_session.base + ".csv";
+            ChargeIoEnqueue(j);
+        }
         return;
     }
     FlushChargeCsv();   // complete the per-sample CSV before linking it from the report
@@ -486,8 +451,7 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     }
     int dh = dur/3600, dm = (dur%3600)/60, ds = dur%60;
 
-    std::ofstream f(m_charge_session.base + ".html", std::ios::out | std::ios::trunc);
-    if (!f) { ESP_LOGE(TAG, "Charge report: cannot write %s.html", m_charge_session.base.c_str()); return; }
+    std::ostringstream f;   // render into RAM; the async worker writes the file off the Events task
 
     const char* vn = MyVehicleFactory.ActiveVehicleName();
     std::string vname = (vn && *vn) ? vn : "Toyota e-TNGA";
@@ -603,14 +567,13 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
 
     f << "<p class=\"note\">Generated on-module by OVMS (Toyota e-TNGA). Single-phase; avg power is over the "
          "whole plug-in interval. Estimates are provisional.</p>\n</body></html>\n";
-    f.close();
-    if (f.fail()) {
-        // The stream writes above are individually unchecked; surface a disk-full /
-        // truncated report here rather than logging success.
-        ESP_LOGE(TAG, "Charge report write failed (disk full?): %s.html", m_charge_session.base.c_str());
-    } else {
-        ESP_LOGI(TAG, "Charge report written: %s.html (%.2f kWh, %d%%->%d%%)",
-            m_charge_session.base.c_str(), energy_kwh, start_soc, end_soc);
-    }
-    PruneChargeReports(TAG, ChargeReportDir());
+    // Hand the rendered HTML to the async writer; it writes the file and prunes off-thread.
+    etnga_io_job* job = new etnga_io_job;
+    job->op        = etnga_io_job::WRITE_TRUNCATE;
+    job->path      = m_charge_session.base + ".html";
+    job->data      = f.str();
+    job->prune_dir = ChargeReportDir();
+    ChargeIoEnqueue(job);
+    ESP_LOGI(TAG, "Charge report queued: %s.html (%.2f kWh, %d%%->%d%%)",
+        m_charge_session.base.c_str(), energy_kwh, start_soc, end_soc);
 }
