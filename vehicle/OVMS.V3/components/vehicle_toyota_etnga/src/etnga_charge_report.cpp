@@ -318,8 +318,10 @@ void OvmsVehicleToyotaETNGA::FlushChargeCsv()
 //   - traces: battery power (blue), station power (orange), HVAC power (purple),
 //     car-permitted limit (green, the 0x16A1 taper curve), and SOC overlay.
 //     All powers plot as magnitudes (0x16A1 is signed: |.| is the charge limit).
-// Streams directly to the (already open) report file: a 300-sample DC session built a
-// ~25-30 KB contiguous std::string here, a needless heap spike on the ESP32.
+// Streams into the caller's std::ostream incrementally rather than building its own buffer.
+// The report is rendered into an in-RAM ostringstream (GenerateChargeReport) and handed to the
+// async I/O worker to write off the Events task; the full ~25-30 KB report string therefore lives
+// only for the brief enqueue-to-write window (once per charge session), not on the Events task.
 void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
 {
     const std::vector<ChargeSessionState::Sample>& s = m_charge_session.svg;

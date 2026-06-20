@@ -130,4 +130,8 @@ void OvmsVehicleToyotaETNGA::StopChargeIoTask()
     // here, which risks a worse FATFS-lock wedge if the task is mid-fwrite.
     // Wait for the worker to drain and exit, but never block module shutdown forever.
     if (m_io_stopped) xSemaphoreTake(m_io_stopped, pdMS_TO_TICKS(2000));
+    // m_io_queue / m_io_stopped are intentionally NOT deleted here: per the bounded residual
+    // above the worker may still reference them past the join, so freeing them would risk a UAF.
+    // The leak (one 8-deep queue + a binary semaphore) is bounded — the vehicle object is a
+    // rarely-swapped singleton — and matches the OVMS pattern of not freeing task primitives.
 }
