@@ -48,6 +48,13 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     SetAwake(false);
     SetReadyStatus(false);
     SetChargingDoorStatus(false);
+    // Default gear to Park (0) at boot. v.e.gear is otherwise only set by the 0x1061 poll
+    // (DRIVING-only) or on the DRIVING->AWAKE transition, so a module that boots straight into
+    // charging (e.g. after a crash) would never set it — leaving the is_parked override
+    // (gear === 0) with no value, so is_parked goes absent during charging. Park is the safe
+    // boot default; if we actually boot mid-drive, the DRIVING-state 0x1061 poll corrects it
+    // within ~1s.
+    SetShiftPosition(0);
     // v.c.charging is a persistent metric (restored from RTC across soft reboots) and is
     // read by ABRP as the charging indicator. Boot is forced into the SLEEP poll state, so
     // initialize it false to match — otherwise a reboot mid-charge leaves it stale-true (and
