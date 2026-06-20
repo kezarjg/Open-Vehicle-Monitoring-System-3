@@ -1,6 +1,11 @@
 Open Vehicle Monitor System v3 - Change log
 
 ????-??-?? ???  ???????  OTA release
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the module no longer drains the 12V battery
+    while plugged in waiting for a scheduled charge. The charge-wait state now polls sparsely
+    and, after a sustained idle wait, sleeps until charging actually starts (waking
+    automatically) — so a scheduled/overnight charge is captured in one session instead of
+    being missed when the module previously browned out. No config changes.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): charge report v2 — each session now writes an
     HTML report (location, ambient, human-readable outcome, inline power-vs-time chart, event log,
     efficiency/implied-capacity estimates) plus a fine-grained per-sample CSV (delivered/offered/
