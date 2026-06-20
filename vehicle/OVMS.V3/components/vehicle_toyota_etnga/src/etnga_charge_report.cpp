@@ -21,7 +21,7 @@
 #include <time.h>
 #include <stdio.h>
 #include <math.h>
-#include <fstream>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,8 +34,6 @@
 #include "ovms_location.h"
 #endif
 #include "vehicle_toyota_etnga.h"
-
-static const int CHARGE_REPORT_MAX = 50;   // retain at most this many reports
 
 // Prefer the SD card (GBs, removable) for reports+CSV; fall back to internal flash.
 std::string OvmsVehicleToyotaETNGA::ChargeReportDir()
@@ -289,77 +287,28 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
         FlushChargeCsv();
 }
 
-// Write the buffered CSV rows to <base>.csv (truncating on the first flush of a session).
+// Write the buffered CSV rows to <base>.csv via the async I/O worker.
+// FIFO order guarantees the first (truncate) write lands before later appends.
 void OvmsVehicleToyotaETNGA::FlushChargeCsv()
 {
     if (m_charge_session.csv_buf.empty() || m_charge_session.base.empty())
         return;
-    std::ofstream f(m_charge_session.base + ".csv", m_charge_session.csv_file_created
-        ? (std::ios::out | std::ios::app)
-        : (std::ios::out | std::ios::trunc));
-    if (!f) {
-        // Can't open (SD removed/unmounted mid-charge?): keep the rows for retry, but
-        // bound the pending buffer — at ~100 B/row this otherwise grows without limit
-        // for the rest of the session (heap safety).
-        if (m_charge_session.csv_buf.size() > 16384) {
-            ESP_LOGE(TAG, "Charge CSV unwritable, buffer over limit — discarding buffered rows: %s.csv",
-                m_charge_session.base.c_str());
-            m_charge_session.csv_buf.clear();
-        }
-        return;
-    }
-    f << m_charge_session.csv_buf;
-    f.flush();
-    if (f.fail()) {
-        // Keep the rows for the next attempt (disk full / SD hiccup) — clearing here
-        // silently lost them. last_csv_flush stays old, so retry on the next row.
-        ESP_LOGE(TAG, "Charge CSV write failed (disk full?): %s.csv", m_charge_session.base.c_str());
-        if (m_charge_session.csv_buf.size() > 16384) {
-            // Filesystem persistently unwritable: bound the pending buffer (heap safety).
-            ESP_LOGE(TAG, "Charge CSV buffer over limit — discarding buffered rows");
-            m_charge_session.csv_buf.clear();
-        }
-        return;
-    }
-    m_charge_session.csv_buf.clear();
-    m_charge_session.csv_file_created = true;
-    m_charge_session.last_csv_flush = StandardMetrics.ms_m_monotonic->AsInt();
-}
-
-// Retain only the newest CHARGE_REPORT_MAX sessions; delete both .html and .csv for each pruned stem.
-// Also removes orphan .csv files whose session never produced an .html (aborted/sleep-ended sessions).
-static void PruneChargeReports(const char* tag, const std::string& dir)
-{
-    DIR* d = opendir(dir.c_str());
-    if (!d) return;
-    std::vector<std::string> stems;        // .html stems (a complete report)
-    std::vector<std::string> csv_stems;    // .csv stems (may be orphaned)
-    struct dirent* e;
-    while ((e = readdir(d)) != NULL) {
-        std::string n = e->d_name;
-        if (n.size() > 5 && n.compare(n.size()-5, 5, ".html") == 0)
-            stems.push_back(n.substr(0, n.size()-5));
-        else if (n.size() > 4 && n.compare(n.size()-4, 4, ".csv") == 0)
-            csv_stems.push_back(n.substr(0, n.size()-4));
-    }
-    closedir(d);
-
-    // Remove orphan CSVs (streamed CSV whose session never produced an HTML report).
-    for (size_t i = 0; i < csv_stems.size(); i++) {
-        bool has_html = false;
-        for (size_t j = 0; j < stems.size(); j++)
-            if (stems[j] == csv_stems[i]) { has_html = true; break; }
-        if (!has_html)
-            unlink((dir + "/" + csv_stems[i] + ".csv").c_str());
-    }
-
-    if ((int)stems.size() <= CHARGE_REPORT_MAX) return;
-    std::sort(stems.begin(), stems.end());
-    int del = (int)stems.size() - CHARGE_REPORT_MAX;
-    for (int i = 0; i < del; i++) {
-        unlink((dir + "/" + stems[i] + ".html").c_str());
-        unlink((dir + "/" + stems[i] + ".csv").c_str());
-        ESP_LOGD(tag, "Charge report pruned: %s", stems[i].c_str());
+    // Hand the buffered rows to the async writer instead of writing on the Events task.
+    // FIFO order guarantees the first (truncate) write lands before later appends.
+    etnga_io_job* job = new etnga_io_job;
+    job->op   = m_charge_session.csv_file_created ? etnga_io_job::WRITE_APPEND
+                                                  : etnga_io_job::WRITE_TRUNCATE;
+    job->path = m_charge_session.base + ".csv";
+    job->data = m_charge_session.csv_buf;
+    if (ChargeIoEnqueue(job)) {
+        m_charge_session.csv_buf.clear();
+        m_charge_session.csv_file_created = true;
+        m_charge_session.last_csv_flush = StandardMetrics.ms_m_monotonic->AsInt();
+    } else if (m_charge_session.csv_buf.size() > 16384) {
+        // Worker persistently backlogged: bound the pending buffer (heap safety),
+        // matching the prior synchronous behavior.
+        ESP_LOGE(TAG, "Charge CSV buffer over limit — discarding buffered rows");
+        m_charge_session.csv_buf.clear();
     }
 }
 
@@ -369,8 +318,10 @@ static void PruneChargeReports(const char* tag, const std::string& dir)
 //   - traces: battery power (blue), station power (orange), HVAC power (purple),
 //     car-permitted limit (green, the 0x16A1 taper curve), and SOC overlay.
 //     All powers plot as magnitudes (0x16A1 is signed: |.| is the charge limit).
-// Streams directly to the (already open) report file: a 300-sample DC session built a
-// ~25-30 KB contiguous std::string here, a needless heap spike on the ESP32.
+// Streams into the caller's std::ostream incrementally rather than building its own buffer.
+// The report is rendered into an in-RAM ostringstream (GenerateChargeReport) and handed to the
+// async I/O worker to write off the Events task; the full ~25-30 KB report string therefore lives
+// only for the brief enqueue-to-write window (once per charge session), not on the Events task.
 void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
 {
     const std::vector<ChargeSessionState::Sample>& s = m_charge_session.svg;
@@ -476,8 +427,12 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     const float energy_kwh = StandardMetrics.ms_v_charge_kwh->AsFloat();
     if (energy_kwh < 0.05f || m_charge_session.base.empty()) {
         ESP_LOGD(TAG, "Charge report skipped (%.3f kWh)", energy_kwh);
-        if (m_charge_session.csv_file_created)   // remove the streamed stub CSV (buffered rows are discarded with the session)
-            unlink((m_charge_session.base + ".csv").c_str());
+        if (m_charge_session.csv_file_created) {  // remove the streamed stub CSV via the worker
+            etnga_io_job* j = new etnga_io_job;
+            j->op = etnga_io_job::UNLINK;
+            j->path = m_charge_session.base + ".csv";
+            ChargeIoEnqueue(j);
+        }
         return;
     }
     FlushChargeCsv();   // complete the per-sample CSV before linking it from the report
@@ -498,8 +453,7 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     }
     int dh = dur/3600, dm = (dur%3600)/60, ds = dur%60;
 
-    std::ofstream f(m_charge_session.base + ".html", std::ios::out | std::ios::trunc);
-    if (!f) { ESP_LOGE(TAG, "Charge report: cannot write %s.html", m_charge_session.base.c_str()); return; }
+    std::ostringstream f;   // render into RAM; the async worker writes the file off the Events task
 
     const char* vn = MyVehicleFactory.ActiveVehicleName();
     std::string vname = (vn && *vn) ? vn : "Toyota e-TNGA";
@@ -615,14 +569,13 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
 
     f << "<p class=\"note\">Generated on-module by OVMS (Toyota e-TNGA). Single-phase; avg power is over the "
          "whole plug-in interval. Estimates are provisional.</p>\n</body></html>\n";
-    f.close();
-    if (f.fail()) {
-        // The stream writes above are individually unchecked; surface a disk-full /
-        // truncated report here rather than logging success.
-        ESP_LOGE(TAG, "Charge report write failed (disk full?): %s.html", m_charge_session.base.c_str());
-    } else {
-        ESP_LOGI(TAG, "Charge report written: %s.html (%.2f kWh, %d%%->%d%%)",
-            m_charge_session.base.c_str(), energy_kwh, start_soc, end_soc);
-    }
-    PruneChargeReports(TAG, ChargeReportDir());
+    // Hand the rendered HTML to the async writer; it writes the file and prunes off-thread.
+    etnga_io_job* job = new etnga_io_job;
+    job->op        = etnga_io_job::WRITE_TRUNCATE;
+    job->path      = m_charge_session.base + ".html";
+    job->data      = f.str();
+    job->prune_dir = ChargeReportDir();
+    ChargeIoEnqueue(job);
+    ESP_LOGI(TAG, "Charge report queued: %s.html (%.2f kWh, %d%%->%d%%)",
+        m_charge_session.base.c_str(), energy_kwh, start_soc, end_soc);
 }

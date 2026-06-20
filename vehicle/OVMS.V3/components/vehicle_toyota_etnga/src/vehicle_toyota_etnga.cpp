@@ -174,6 +174,7 @@ OvmsVehicleToyotaETNGA::OvmsVehicleToyotaETNGA()
 
 OvmsVehicleToyotaETNGA::~OvmsVehicleToyotaETNGA()
 {
+    StopChargeIoTask();   // drain/stop the async charge-I/O worker before teardown
     ESP_LOGI(TAG, "Shutdown Toyota eTNGA platform module");
 #ifdef CONFIG_OVMS_COMP_WEBSERVER
     WebDeInit();

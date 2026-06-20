@@ -194,6 +194,24 @@ private:
     void AppendChargeCsvRow();                          // buffer one CSV row (header on first call)
     void FlushChargeCsv();                              // write buffered CSV rows to <base>.csv
     std::string ChargeReportDir();                      // "/sd/charge-reports" if SD mounted else "/store/..."
+
+    // --- Async charge file-I/O worker (decouples SD writes from the Events task) ---
+    // See docs/superpowers/specs/2026-06-20-etnga-charge-async-io-design.md
+    struct etnga_io_job {
+        enum Op { WRITE_APPEND, WRITE_TRUNCATE, UNLINK, STOP } op;
+        std::string path;        // destination (producer resolves SD vs /store)
+        std::string data;        // bytes to write (empty for UNLINK/STOP)
+        std::string prune_dir;   // non-empty on the report write → prune that dir afterward
+    };
+    QueueHandle_t     m_io_queue   = NULL;
+    TaskHandle_t      m_io_task     = NULL;
+    SemaphoreHandle_t m_io_stopped  = NULL;
+    uint32_t          m_io_dropcnt  = 0;
+    static void ChargeIoTaskEntry(void* arg);
+    void ChargeIoTask();
+    void StartChargeIoTask();              // lazy, idempotent
+    bool ChargeIoEnqueue(etnga_io_job* job);
+    void StopChargeIoTask();               // sentinel + timed join (never blocks shutdown)
     static const char* ChargeOutcomeLabel(int code);    // 0x1688 enum -> human text
     static const char* HlcStateLabel(int code);         // 0x1666 DC HLC state enum -> human text ("" if unknown)
     static const char* AcOpStatusLabel(int code);       // 0x1684 AC-Op state enum -> human text ("" for Stop/unknown)
