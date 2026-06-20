@@ -62,11 +62,11 @@ OvmsVehicleSmartEQ::OvmsVehicleSmartEQ() {
   BmsSetCellDefaultThresholdsVoltage(0.040, 0.060);  // Warn: 40mV, Alert: 60mV
   BmsSetCellDefaultThresholdsTemperature(4.0, 5.5);  // Warn: 4,0°C, Alert: 5,5°C
 
-  //mt_bus_awake                  = MyMetrics.InitBool("xsq.v.bus.awake", SM_STALE_MIN, false);
   mt_canbyte                    = MyMetrics.InitString("xsq.ddt4all.canbyte", SM_STALE_MAX, "", Other);
-  mt_adc_factor                 = MyMetrics.InitFloat("xsq.adc.factor", SM_STALE_MAX, 0, Other);
-  mt_adc_factor_history         = MyMetrics.InitVector<float>("xsq.adc.factor.history", SM_STALE_MAX, nullptr, Other);
-  mt_adc_factor_history->SetElemValue(m_adc_samples -1, 0.0f);  // Pre-allocate x samples to avoid reallocs
+  mt_adc_factor                 = MyMetrics.InitFloat("xsq.adc.factor", SM_STALE_MAX, 0, Other,true);
+  mt_adc_factor_history         = MyMetrics.InitVector<float>("xsq.adc.factor.history", SM_STALE_MAX, nullptr, Other,true);
+  if(mt_adc_factor_history->GetSize() < m_adc_samples)
+    mt_adc_factor_history->SetElemValue(m_adc_samples -1, 0.0f);  // Pre-allocate x samples to avoid reallocs
   mt_poll_state                 = MyMetrics.InitString("xsq.poll.state", SM_STALE_MAX, "UNKNOWN", Other);  
   mt_ed4_values                 = MyMetrics.InitInt("xsq.ed4.values", SM_STALE_MAX, 10);
 
@@ -80,8 +80,6 @@ OvmsVehicleSmartEQ::OvmsVehicleSmartEQ() {
   mt_reset_speed                = MyMetrics.InitFloat("xsq.v.reset.speed", SM_STALE_MID, 0, Kph);
   // 0x658 metrics
   mt_bat_serial                 = MyMetrics.InitString("xsq.v.bat.serial", SM_STALE_MAX, "");
-    // BMS production data (PID 0x9000)
-  mt_bms_prod_data              = MyMetrics.InitString("xsq.bms.prod.data", SM_STALE_MAX, "");
   // 0x646 metrics
   mt_energy_used                = MyMetrics.InitFloat("xsq.v.energy.used", SM_STALE_MID, 0, kWh);
   mt_energy_recd                = MyMetrics.InitFloat("xsq.v.energy.recd", SM_STALE_MID, 0, kWh);
@@ -92,8 +90,8 @@ OvmsVehicleSmartEQ::OvmsVehicleSmartEQ() {
   mt_bcb_power_mains            = MyMetrics.InitFloat("xsq.v.charge.bcb.power", SM_STALE_MID, 0, Watts);
   // 0x763 OBD metrics
   mt_obd_duration               = MyMetrics.InitInt("xsq.obd.charge.duration", SM_STALE_MID, 0, Minutes);
-  mt_obd_mt_day_prewarn         = MyMetrics.InitInt("xsq.obd.mt.day.prewarn", SM_STALE_MID, 45, Other);
-  mt_obd_mt_day_usual           = MyMetrics.InitInt("xsq.obd.mt.day.usual", SM_STALE_MID, 0, Other);
+  mt_obd_mt_day_prewarn         = MyMetrics.InitInt("xsq.obd.mt.day.prewarn", SM_STALE_MID, 45, Days);
+  mt_obd_mt_day_usual           = MyMetrics.InitInt("xsq.obd.mt.day.usual", SM_STALE_MID, 0, Days);
   mt_obd_mt_km_usual            = MyMetrics.InitInt("xsq.obd.mt.km.usual", SM_STALE_MID, 0, Kilometers);
   mt_obd_mt_level               = MyMetrics.InitString("xsq.obd.mt.level", SM_STALE_MID, "unknown", Other);
 
@@ -104,10 +102,13 @@ OvmsVehicleSmartEQ::OvmsVehicleSmartEQ() {
 
   mt_tpms_low_batt               = MyMetrics.InitVector<short> ("xsq.tpms.lowbatt", SM_STALE_MID, nullptr, Other);
   mt_tpms_missing_tx             = MyMetrics.InitVector<short> ("xsq.tpms.missing", SM_STALE_MID, nullptr, Other);
-    // Pre-allocate TPMS vectors for 4 wheels to avoid heap fragmentation
-  StdMetrics.ms_v_tpms_temp->SetElemValue(3, 0.0f);
-  StdMetrics.ms_v_tpms_pressure->SetElemValue(3, 0.0f);
-  StdMetrics.ms_v_tpms_alert->SetElemValue(3, 0);
+  // Pre-allocate TPMS vectors for 4 wheels to avoid heap fragmentation
+  if(StdMetrics.ms_v_tpms_pressure->GetSize() < 4)
+    {
+    StdMetrics.ms_v_tpms_temp->SetElemValue(3, 0.0f);
+    StdMetrics.ms_v_tpms_pressure->SetElemValue(3, 0.0f);
+    StdMetrics.ms_v_tpms_alert->SetElemValue(3, 0);
+    }
   mt_tpms_low_batt->SetElemValue(3, 0);
   mt_tpms_missing_tx->SetElemValue(3, 0);
 
@@ -121,7 +122,7 @@ OvmsVehicleSmartEQ::OvmsVehicleSmartEQ() {
   mt_evc_dcdc->SetElemValue(7, 0.0f);           // Pre-allocate 8 entries
   mt_evc_traceability           = MyMetrics.InitString("xsq.evc.traceability", SM_STALE_MAX, "");
   mt_evc_plug_detected          = MyMetrics.InitBool("xsq.evc.plug.detected", SM_STALE_MIN, false);
-  mt_12v_trickle_charge_count   = MyMetrics.InitInt("xsq.12v.trickle.count", SM_STALE_MAX, 0, Other);
+  mt_12v_trickle_charge_count   = MyMetrics.InitInt("xsq.12v.trickle.count", SM_STALE_MAX, 0, Other, true);
   // 0x793 OBL charger metrics
   mt_obl_fastchg                = MyMetrics.InitBool("xsq.obl.fastchg", SM_STALE_MIN, false);
   mt_obl_main_volts             = MyMetrics.InitVector<float>("xsq.obl.volts", SM_STALE_HIGH, nullptr, Volts);
@@ -138,8 +139,9 @@ OvmsVehicleSmartEQ::OvmsVehicleSmartEQ() {
   // 0x7BB BMS metrics
   mt_bms_voltages               = MyMetrics.InitVector<float>("xsq.bms.voltages", SM_STALE_MID, nullptr, Volts);
   mt_bms_voltages->SetElemValue(6, 0.0f);       // Pre-allocate: [0]=cv_min, [1]=cv_max, [2]=cv_mean, [3]=link, [4]=contactor, [5]=cv_sum, [6]=12v_system
-  mt_bms_contactor_cycles       = MyMetrics.InitVector<int>("xsq.bms.contactor.cycles", SM_STALE_HIGH, nullptr);
-  mt_bms_contactor_cycles->SetElemValue(3, 0);  // Pre-allocate Max/Total entries
+  mt_bms_contactor_cycles       = MyMetrics.InitVector<int>("xsq.bms.contactor.cycles", SM_STALE_HIGH, nullptr, Other, true);
+  if(mt_bms_contactor_cycles->GetSize() < 5)
+    mt_bms_contactor_cycles->SetElemValue(4, 0);  // Pre-allocate: [0]=max, [1]=now, [2]=consumed, [3]=diff, [4]=1h_count
   mt_bms_soc_values             = MyMetrics.InitVector<float>("xsq.bms.soc.values", SM_STALE_MID, nullptr, Percentage);
   mt_bms_soc_values->SetElemValue(4, 0.0f);     // Pre-allocate: [0]=kernel, [1]=real, [2]=min, [3]=max, [4]=display
   mt_bms_soc_recal_state        = MyMetrics.InitString("xsq.bms.soc.recal.state", SM_STALE_MID, "");
@@ -158,6 +160,15 @@ OvmsVehicleSmartEQ::OvmsVehicleSmartEQ() {
   mt_bms_interlock_service      = MyMetrics.InitBool("xsq.bms.interlock.service", SM_STALE_MID, false);
   mt_bms_fusi_mode_txt          = MyMetrics.InitString("xsq.bms.fusi",SM_STALE_MID, "", Other);
   mt_bms_safety_mode_txt        = MyMetrics.InitString("xsq.bms.safety",SM_STALE_MID, "", Other);
+  // BMS production data (PID 0x90)
+  mt_bms_prod_data              = MyMetrics.InitString("xsq.bms.prod.data", SM_STALE_MAX, "");
+  // BMS identification data (PID 0x80)
+  mt_bms_ident_data             = MyMetrics.InitString("xsq.bms.id.ident.data", SM_STALE_MAX, "",  Other);
+  mt_bms_part_no                = MyMetrics.InitString("xsq.bms.id.part.no", SM_STALE_MAX, "",  Other);
+  mt_bms_hw_version             = MyMetrics.InitString("xsq.bms.id.hw.version", SM_STALE_MAX, "",  Other);
+  mt_bms_sw_version             = MyMetrics.InitString("xsq.bms.id.sw.version", SM_STALE_MAX, "",  Other);
+  mt_bms_mfr_id                 = MyMetrics.InitInt("xsq.bms.id.mfr", SM_STALE_MAX, 0,   Other);
+  mt_bms_basic_parts            = MyMetrics.InitString("xsq.bms.id.basic.parts", SM_STALE_MAX, "",  Other);
 
   // Start CAN bus in CAN_MODE_ACTIVE mode
   RegisterCanBus(1, CAN_MODE_ACTIVE, CAN_SPEED_500KBPS);
@@ -286,6 +297,7 @@ void OvmsVehicleSmartEQ::ConfigChanged(OvmsConfigParam* param) {
     cell_interval_drv      = map->GetValueInt("cell_interval_drv", 60);
     cell_interval_chg      = map->GetValueInt("cell_interval_chg", 60);
     m_above_cycles         = map->GetValueInt("bms.alert.above.cycles", 50000);
+    m_contactor_1h_limit   = map->GetValueInt("bms.contactor.1h.limit", 8);
     
     m_front_pressure       = map->GetValueFloat("tpms.front.pressure", 225.0f);
     m_rear_pressure        = map->GetValueFloat("tpms.rear.pressure", 255.0f);

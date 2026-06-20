@@ -15,39 +15,48 @@
 void OvmsVehicleToyotaETNGA::InitializeMetrics()
 {
     m_s_controlstate = MyMetrics.InitInt("xte.s.controlstate", SM_STALE_MIN);  // This variable stores the control state variable
-    m_v_charge_pisw_raw = MyMetrics.InitInt("xte.v.c.pisw", SM_STALE_MID);
-    m_v_charge_ac_op    = MyMetrics.InitInt("xte.v.c.acop", SM_STALE_MID);
-    m_v_charge_hlc      = MyMetrics.InitInt("xte.v.c.hlc",  SM_STALE_MID);
-    m_v_charge_perm = MyMetrics.InitFloat("xte.v.c.perm", SM_STALE_MID, 0.0f, kW);
-    m_v_charge_tgti = MyMetrics.InitFloat("xte.v.c.tgti", SM_STALE_MID, 0.0f, Amps);
-    m_v_charge_sta_max_p = MyMetrics.InitFloat("xte.v.c.stamaxp", SM_STALE_MID, 0.0f, kW);
-    m_v_charge_sta_max_i = MyMetrics.InitFloat("xte.v.c.stamaxi", SM_STALE_MID, 0.0f, Amps);
-    m_v_charge_sta_max_v = MyMetrics.InitFloat("xte.v.c.stamaxv", SM_STALE_MID, 0.0f, Volts);
-    m_v_charge_ac_tgt_p  = MyMetrics.InitFloat("xte.v.c.actgtp", SM_STALE_MID, 0.0f, kW);
-    m_v_charge_chgr_op   = MyMetrics.InitInt("xte.v.c.chgrop", SM_STALE_MID);
-    m_v_charge_ac_ilim   = MyMetrics.InitInt("xte.v.c.acilim", SM_STALE_MID);
-    m_v_charge_out       = MyMetrics.InitInt("xte.v.c.chgout", SM_STALE_MID);
-    m_v_charge_out_tgt   = MyMetrics.InitInt("xte.v.c.chgotgt", SM_STALE_MID);
-    m_v_charge_ac_usable = MyMetrics.InitInt("xte.v.c.acusbl", SM_STALE_MID);
+    m_v_charge_pisw_raw = MyMetrics.InitInt("xte.v.c.piswraw", SM_STALE_MID);
+    m_v_charge_ac_op    = MyMetrics.InitInt("xte.v.c.ac.opstatus", SM_STALE_MID);
+    m_v_charge_hlc      = MyMetrics.InitInt("xte.v.c.hlcstate",  SM_STALE_MID);
+    m_v_charge_perm = MyMetrics.InitFloat("xte.v.c.permpower", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_tgti = MyMetrics.InitFloat("xte.v.c.tgtcurrent", SM_STALE_MID, 0.0f, Amps);
+    m_v_charge_sta_max_p = MyMetrics.InitFloat("xte.v.c.dc.maxpower", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_sta_max_i = MyMetrics.InitFloat("xte.v.c.dc.maxcurrent", SM_STALE_MID, 0.0f, Amps);
+    m_v_charge_sta_max_v = MyMetrics.InitFloat("xte.v.c.dc.maxvoltage", SM_STALE_MID, 0.0f, Volts);
+    m_v_charge_ac_tgt_p  = MyMetrics.InitFloat("xte.v.c.ac.tgtpower", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_chgr_op   = MyMetrics.InitInt("xte.v.c.chargerstate", SM_STALE_MID);                     // enum: 0=Stand by,1=Ready,2=Stop,3=RoB Stop
+    m_v_charge_ac_ilim   = MyMetrics.InitFloat("xte.v.c.ac.ilimit", SM_STALE_MID, 0.0f, Amps);
+    m_v_charge_out       = MyMetrics.InitFloat("xte.v.c.output", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_out_tgt   = MyMetrics.InitFloat("xte.v.c.outputtarget", SM_STALE_MID, 0.0f, kW);
+    m_v_charge_ac_usable = MyMetrics.InitFloat("xte.v.c.ac.usable", SM_STALE_MID, 0.0f, kW);
     m_v_charge_myroom  = MyMetrics.InitBool("xte.v.c.myroom", SM_STALE_MID);
+    m_v_charge_grid_power = MyMetrics.InitFloat("xte.v.c.gridpower", SM_STALE_MID, 0.0f, kW);
     m_v_env_hvac_power = MyMetrics.InitFloat("xte.v.e.hvac.power", SM_STALE_MID, 0.0f, kW);
     m_v_env_hvac_kwh   = MyMetrics.InitFloat("xte.v.e.hvac.kwh",   SM_STALE_MID, 0.0f, kWh);
+    m_v_env_hvac_kwh_drive = MyMetrics.InitFloat("xte.v.e.hvac.kwh.drive", SM_STALE_MID, 0.0f, kWh);  // Per-trip driving cabin/HVAC energy
     m_v_charge_outcome = MyMetrics.InitInt("xte.v.c.outcome", SM_STALE_MID);
-    m_v_charge_stopreq = MyMetrics.InitInt("xte.v.c.stopreq", SM_STALE_MID);
+    m_v_charge_stopreq = MyMetrics.InitInt("xte.v.c.stoprequest", SM_STALE_MID);
     m_v_bat_cap_full = MyMetrics.InitVector<float>("xte.v.b.cap.full", SM_STALE_HIGH, 0, AmpHours);  // 0x1D3E 8x per-module full-charge capacity (data collection)
     m_v_bat_cap_alt  = MyMetrics.InitVector<float>("xte.v.b.cap.alt",  SM_STALE_HIGH, 0, AmpHours);  // 0x1D3F 8x parallel capacity array, function unconfirmed (data collection)
     m_v_bat_heater_status = MyMetrics.InitBool("xte.v.b.heater", SM_STALE_MID);  // This variable stores the status of the battery coolant heater relay
     m_v_bat_soc_bms = MyMetrics.InitFloat("xte.v.b.soc.bms", SM_STALE_MID, 0.0f, Percentage, true);  // This variable stores the SOC as reported by the BMS
-    m_v_bat_speed_water_pump = MyMetrics.InitFloat("xte.v.b.speed.waterpump", SM_STALE_MID, 0.0f, Other);  // This variable stores the RPM of the battery water pump
     m_v_bat_temp_coolant = MyMetrics.InitFloat("xte.v.b.temp.coolant", SM_STALE_MID, 0.0f, Celcius);  // This variable stores the temperature of the battery coolant
     m_v_bat_temp_heater = MyMetrics.InitFloat("xte.v.b.temp.heater", SM_STALE_MID, 0.0f, Celcius);  // This variable stores the temperature of the battery coolant
-    m_v_pos_trip_start = MyMetrics.InitFloat("xte.v.p.trip.start", SM_STALE_NONE, 0.0f, Kilometers, false);  // This variable stores the odometer reading at the beginning of a trip
-    m_v_env_awaketime = MyMetrics.InitInt("xte.v.e.awaketime", SM_STALE_NONE);  // Time awake state was entered for awake timeout (monotonic seconds)
+    m_v_e_awd = MyMetrics.InitInt("xte.v.e.awd", SM_STALE_MID);  // 0x1087 b2 AWD / X-MODE status (custom)
 
     // Set initial values for metrics
     SetAwake(false);
     SetReadyStatus(false);
     SetChargingDoorStatus(false);
+    // v.c.charging is a persistent metric (restored from RTC across soft reboots) and is
+    // read by ABRP as the charging indicator. Boot is forced into the SLEEP poll state, so
+    // initialize it false to match — otherwise a reboot mid-charge leaves it stale-true (and
+    // a fresh power-up leaves it undefined) until the poller re-derives the real state.
+    SetChargingStatus(false);
+    // v.c.mode pairs with the above: the poller only sets it ("standard" AC / "performance"
+    // DC, the ABRP is_dcfc indicator) while charging and clears it to "" on session end, so
+    // the not-charging boot value is empty.
+    StandardMetrics.ms_v_charge_mode->SetValue("");
 
     // Set poll state transition variables to shorter autostale than default
     // in case their ECUs go to sleep before the 'false' poll
@@ -68,8 +77,13 @@ void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale variables
         SetAwake(false);
     }
 
-    // Check to make sure the 'charging door' signal has been updated recently
-    if (StandardMetrics.ms_v_door_chargeport->IsStale() && StandardMetrics.ms_v_door_chargeport->AsBool()) {
+    // Check to make sure the 'charging door' signal has been updated recently.
+    // The lid (0x1625) is only polled in AWAKE+DRIVING, so in the charge states it
+    // reads stale even though the cable is physically holding the door open — don't
+    // force it off there, or the UI/server shows the port closed mid-charge. The arm
+    // logic in HandleAwakeState has already latched by then, so holding "open" is safe.
+    if (StandardMetrics.ms_v_door_chargeport->IsStale() && StandardMetrics.ms_v_door_chargeport->AsBool() &&
+            static_cast<PollState>(m_poll_state) < PollState::CHARGE_HANDSHAKE) {
         ESP_LOGD(TAG, "Charging Door is stale. Manually setting to off");
         SetChargingDoorStatus(false);
     }
@@ -187,79 +201,165 @@ bool OvmsVehicleToyotaETNGA::CalculateChargingDoorStatus(const std::string& data
     return GetRxBBit(data, 1, 1);
 }
 
-int OvmsVehicleToyotaETNGA::CalculateAcOpStatus(const std::string& data) { return GetRxBInt8(data, 0); }
-void OvmsVehicleToyotaETNGA::SetAcOpStatus(int v) { m_v_charge_ac_op->SetValue(v); }
+int OvmsVehicleToyotaETNGA::CalculateAcOpStatus(const std::string& data) { return GetRxBByte(data, 0); }
+void OvmsVehicleToyotaETNGA::SetAcOpStatus(int v)
+{
+    if (m_v_charge_ac_op->SetValue(v))
+        ESP_LOGD(TAG, "AC Op Status changed: 0x%02X (%d)", v, v);
+    // Log each new 0x1684 AC-Op state as a session event (mirrors SetHlcState for DC).
+    // Stop/unknown return "" from AcOpStatusLabel and are skipped.
+    if (m_charge_session.in_session && v != m_charge_session.last_acop) {
+        m_charge_session.last_acop = v;
+        const char* lbl = AcOpStatusLabel(v);
+        if (lbl && lbl[0])
+            LogChargeEvent(lbl);
+    }
+}
 int OvmsVehicleToyotaETNGA::CalculateHlcState(const std::string& data) { return GetRxBByte(data, 0); }
-void OvmsVehicleToyotaETNGA::SetHlcState(int v) { m_v_charge_hlc->SetValue(v); }
-int OvmsVehicleToyotaETNGA::CalculatePISWRaw(const std::string& data) { return GetRxBInt8(data, 0); }
-void OvmsVehicleToyotaETNGA::SetPISWRaw(int v) { m_v_charge_pisw_raw->SetValue(v); }
+void OvmsVehicleToyotaETNGA::SetHlcState(int v)
+{
+    if (m_v_charge_hlc->SetValue(v))
+        ESP_LOGD(TAG, "HLC State changed: 0x%02X (%d)", v, v);
+    // Log each new 0x1666 HLC (DC handshake) state as a session event. Unknown codes
+    // return "" and are skipped (avoids logging a non-static formatted string).
+    if (m_charge_session.in_session && v != m_charge_session.last_hlc) {
+        m_charge_session.last_hlc = v;
+        const char* lbl = HlcStateLabel(v);
+        if (lbl && lbl[0])
+            LogChargeEvent(lbl);
+    }
+}
+// Unsigned byte: a signed read made codes >= 0x80 negative, silently failing the
+// state machine's `pisw >= 0x02` cable-present checks on any extended/error code.
+int OvmsVehicleToyotaETNGA::CalculatePISWRaw(const std::string& data) { return GetRxBByte(data, 0); }
+void OvmsVehicleToyotaETNGA::SetPISWRaw(int v)
+{
+    if (m_v_charge_pisw_raw->SetValue(v))
+        ESP_LOGD(TAG, "PISW Raw changed: 0x%02X (%d)", v, v);
+}
 
 float OvmsVehicleToyotaETNGA::CalculatePermissionPower(const std::string& data)
 {
     // 0x16A1: two's-complement s16, x0.01 kW. Sentinel 0x8000 handled by caller (skip).
     return static_cast<float>(GetRxBInt16(data, 0)) / 100.0f;
 }
-void OvmsVehicleToyotaETNGA::SetPermissionPower(float kw) { m_v_charge_perm->SetValue(kw); }
+void OvmsVehicleToyotaETNGA::SetPermissionPower(float kw)
+{
+    LogMetricChange(m_v_charge_perm, kw, "Min Permission Power", "kW");
+    m_v_charge_perm->SetValue(kw);
+}
 
 float OvmsVehicleToyotaETNGA::CalculateTargetCurrent(const std::string& data)
 {
     return static_cast<float>(GetRxBUint16(data, 0));  // x1 A
 }
-void OvmsVehicleToyotaETNGA::SetTargetCurrent(float amps) { m_v_charge_tgti->SetValue(amps); }
+void OvmsVehicleToyotaETNGA::SetTargetCurrent(float amps)
+{
+    LogMetricChange(m_v_charge_tgti, amps, "Target Charging Current", "A");
+    m_v_charge_tgti->SetValue(amps);
+}
 
 float OvmsVehicleToyotaETNGA::CalculateStationVoltage(const std::string& data)
 {
     return static_cast<float>(GetRxBUint16(data, 0));  // 0x166B x1 V/LSB; idle=0, no sentinel
 }
-void OvmsVehicleToyotaETNGA::SetStationVoltage(float volts) { StandardMetrics.ms_v_charge_voltage->SetValue(volts); }
+void OvmsVehicleToyotaETNGA::SetStationVoltage(float volts)
+{
+    LogMetricChange(StandardMetrics.ms_v_charge_voltage, volts, "Station Voltage", "V");
+    StandardMetrics.ms_v_charge_voltage->SetValue(volts);
+}
 
 float OvmsVehicleToyotaETNGA::CalculateStationCurrent(const std::string& data)
 {
     return static_cast<float>(GetRxBUint16(data, 0));  // 0x166C x1 A/LSB; idle=0, no sentinel
 }
-void OvmsVehicleToyotaETNGA::SetStationCurrent(float amps)  { StandardMetrics.ms_v_charge_current->SetValue(amps); }
+void OvmsVehicleToyotaETNGA::SetStationCurrent(float amps)
+{
+    LogMetricChange(StandardMetrics.ms_v_charge_current, amps, "Station Current", "A");
+    StandardMetrics.ms_v_charge_current->SetValue(amps);
+}
 
 float OvmsVehicleToyotaETNGA::CalculateStationMaxPower(const std::string& data)
 {
     return static_cast<float>(GetRxBUint16(data, 0)) / 100.0f;  // 0x166A x0.01 kW/LSB; idle=0 when no station
 }
-void OvmsVehicleToyotaETNGA::SetStationMaxPower(float kw) { m_v_charge_sta_max_p->SetValue(kw); }
+void OvmsVehicleToyotaETNGA::SetStationMaxPower(float kw)
+{
+    LogMetricChange(m_v_charge_sta_max_p, kw, "Station Max Power", "kW");
+    m_v_charge_sta_max_p->SetValue(kw);
+}
 
 float OvmsVehicleToyotaETNGA::CalculateStationMaxCurrent(const std::string& data)
 {
     return static_cast<float>(GetRxBUint16(data, 0));  // 0x1679 x1 A/LSB; idle=0 when no station
 }
-void OvmsVehicleToyotaETNGA::SetStationMaxCurrent(float amps) { m_v_charge_sta_max_i->SetValue(amps); }
+void OvmsVehicleToyotaETNGA::SetStationMaxCurrent(float amps)
+{
+    LogMetricChange(m_v_charge_sta_max_i, amps, "Station Max Current", "A");
+    m_v_charge_sta_max_i->SetValue(amps);
+}
 
 float OvmsVehicleToyotaETNGA::CalculateStationMaxVoltage(const std::string& data)
 {
     return static_cast<float>(GetRxBUint16(data, 0));  // 0x1681 x1 V/LSB; idle=0 when no station
 }
-void OvmsVehicleToyotaETNGA::SetStationMaxVoltage(float volts) { m_v_charge_sta_max_v->SetValue(volts); }
+void OvmsVehicleToyotaETNGA::SetStationMaxVoltage(float volts)
+{
+    LogMetricChange(m_v_charge_sta_max_v, volts, "Station Max Voltage", "V");
+    m_v_charge_sta_max_v->SetValue(volts);
+}
 
 float OvmsVehicleToyotaETNGA::CalculateAcTargetPower(const std::string& data)
 {
     // 0x1619 b1-2: biased-32768 x0.01 kW (idle 0x8000 -> 0.00 kW)
     return static_cast<float>(GetRxBUint16(data, 0) - 32768) / 100.0f;
 }
-int OvmsVehicleToyotaETNGA::CalculateChargerOpStatus(const std::string& data)       { return GetRxBByte(data, 2); }    // 0x1619 b3 enum
-int OvmsVehicleToyotaETNGA::CalculateAcCurrentLimitRaw(const std::string& data)     { return GetRxBUint16(data, 3); }  // 0x1619 b4-5 raw, scale TBD
-int OvmsVehicleToyotaETNGA::CalculateChargerOutputRaw(const std::string& data)      { return GetRxBUint16(data, 0); }  // 0x161E b1-2 raw, scale TBD
-int OvmsVehicleToyotaETNGA::CalculateChargerOutputTargetRaw(const std::string& data){ return GetRxBUint16(data, 2); }  // 0x161E b3-4 raw, scale TBD
-int OvmsVehicleToyotaETNGA::CalculateAcUsableRaw(const std::string& data)           { return GetRxBByte(data, 0); }    // 0x1665 raw, scale TBD
+int   OvmsVehicleToyotaETNGA::CalculateChargerOpStatus(const std::string& data)      { return GetRxBByte(data, 2); }                    // 0x1619 b3 enum: 0=Stand by,1=Ready,2=Stop,3=RoB Stop
+float OvmsVehicleToyotaETNGA::CalculateAcCurrentLimit(const std::string& data)       { return static_cast<float>(GetRxBUint16(data, 3) - 32768) / 100.0f; }  // 0x1619 b4-5: biased-32768 x0.01 A (mirrors AC target power)
+float OvmsVehicleToyotaETNGA::CalculateChargerOutput(const std::string& data)        { return GetRxBUint16(data, 0) * 5.0f / 1000.0f; }   // 0x161E b1-2: x5/1000 kW (unit inferred by analogy to 0x161D grid power; confirm on sustained AC)
+float OvmsVehicleToyotaETNGA::CalculateChargerOutputTarget(const std::string& data)  { return GetRxBUint16(data, 2) * 5.0f / 1000.0f; }   // 0x161E b3-4: x5/1000 kW (unit inferred; confirm on sustained AC)
+float OvmsVehicleToyotaETNGA::CalculateAcUsable(const std::string& data)             { return GetRxBByte(data, 0) * 0.01f; }              // 0x1665: x0.01 kW (PluginCtrlAC dict factor; unit inferred)
 
-void OvmsVehicleToyotaETNGA::SetAcTargetPower(float kw)        { m_v_charge_ac_tgt_p->SetValue(kw); }
-void OvmsVehicleToyotaETNGA::SetChargerOpStatus(int v)        { m_v_charge_chgr_op->SetValue(v); }
-void OvmsVehicleToyotaETNGA::SetAcCurrentLimitRaw(int v)      { m_v_charge_ac_ilim->SetValue(v); }
-void OvmsVehicleToyotaETNGA::SetChargerOutputRaw(int v)       { m_v_charge_out->SetValue(v); }
-void OvmsVehicleToyotaETNGA::SetChargerOutputTargetRaw(int v) { m_v_charge_out_tgt->SetValue(v); }
-void OvmsVehicleToyotaETNGA::SetAcUsableRaw(int v)            { m_v_charge_ac_usable->SetValue(v); }
+void OvmsVehicleToyotaETNGA::SetAcTargetPower(float kw)
+{
+    LogMetricChange(m_v_charge_ac_tgt_p, kw, "AC Target Power", "kW");
+    m_v_charge_ac_tgt_p->SetValue(kw);
+}
+void OvmsVehicleToyotaETNGA::SetChargerOpStatus(int v)
+{
+    if (m_v_charge_chgr_op->SetValue(v))
+        ESP_LOGD(TAG, "Charger Op Status changed: 0x%02X (%d)", v, v);
+}
+void OvmsVehicleToyotaETNGA::SetAcCurrentLimit(float v)
+{
+    if (m_v_charge_ac_ilim->SetValue(v))
+        ESP_LOGD(TAG, "AC Current Limit changed: %.2f A", v);
+}
+void OvmsVehicleToyotaETNGA::SetChargerOutput(float v)
+{
+    if (m_v_charge_out->SetValue(v))
+        ESP_LOGD(TAG, "Charger Output changed: %.2f kW", v);
+}
+void OvmsVehicleToyotaETNGA::SetChargerOutputTarget(float v)
+{
+    if (m_v_charge_out_tgt->SetValue(v))
+        ESP_LOGD(TAG, "Charger Output Target changed: %.2f kW", v);
+}
+void OvmsVehicleToyotaETNGA::SetAcUsable(float v)
+{
+    if (m_v_charge_ac_usable->SetValue(v))
+        ESP_LOGD(TAG, "AC Usable Power changed: %.2f kW", v);
+}
 
 bool OvmsVehicleToyotaETNGA::CalculateMyRoom(const std::string& data)
 {
     return GetRxBBit(data, 1, 0);   // 0x1692 byte 2 (idx 1), bit 0 = My Room active
 }
-void OvmsVehicleToyotaETNGA::SetMyRoom(bool active) { m_v_charge_myroom->SetValue(active); }
+void OvmsVehicleToyotaETNGA::SetMyRoom(bool active)
+{
+    LogMetricChange(m_v_charge_myroom, active, "My Room", active ? "Active" : "Inactive");
+    m_v_charge_myroom->SetValue(active);
+}
 
 float OvmsVehicleToyotaETNGA::CalculateAcConsumption(const std::string& data)
 {
@@ -277,22 +377,121 @@ void OvmsVehicleToyotaETNGA::SetHvacPower(float kw)
     // 0x161D charger-input delta read 0 during DC). Integrate ONLY while My Room is active; this
     // same power metric is also polled while DRIVING (from 0x7D2), which must not feed cabin energy.
     if (m_v_charge_myroom->AsBool()) {
-        uint32_t now = esp_log_timestamp();
-        float hours = 1.0f / 3600.0f;   // default 1 s for the first sample of the interval
-        if (lastHvacEnergyLogTime != 0)
-            hours = static_cast<float>((now - lastHvacEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
-        m_v_env_hvac_kwh->SetValue(m_v_env_hvac_kwh->AsFloat() + kw * hours);
-        lastHvacEnergyLogTime = now;
+        m_v_env_hvac_kwh->SetValue(m_v_env_hvac_kwh->AsFloat() + kw * EnergyIntervalHours(lastHvacEnergyLogTime));
     } else {
         lastHvacEnergyLogTime = 0;   // reset so the next My-Room interval starts fresh
+    }
+
+    // A/C cooling active: 0x106E is the dedicated A/C consumption channel, so any draw => cooling on.
+    StandardMetrics.ms_v_env_cooling->SetValue(kw > 0.0f);
+
+    // Driving cabin/HVAC energy: per-trip time-integral of this power while DRIVING (reset in
+    // NotifyVehicleOn). My-Room (charging) energy above and this are exclusive — different poll states.
+    if (static_cast<PollState>(m_poll_state) == PollState::DRIVING) {
+        m_v_env_hvac_kwh_drive->SetValue(m_v_env_hvac_kwh_drive->AsFloat() + kw * EnergyIntervalHours(lastHvacDriveEnergyLogTime));
+    } else {
+        lastHvacDriveEnergyLogTime = 0;   // reset so the next driving interval starts fresh
     }
 }
 
 int OvmsVehicleToyotaETNGA::CalculateChargeOutcome(const std::string& data)  { return GetRxBByte(data, 0); }  // 0x1688 26-state enum; RETAINED between sessions (does not reset on plug-in) — report must scope it per-session
-void OvmsVehicleToyotaETNGA::SetChargeOutcome(int v) { m_v_charge_outcome->SetValue(v); }
+void OvmsVehicleToyotaETNGA::SetChargeOutcome(int v)
+{
+    if (m_v_charge_outcome->SetValue(v))
+        ESP_LOGD(TAG, "Charge Outcome changed: 0x%02X (%d)", v, v);
+}
 
 int OvmsVehicleToyotaETNGA::CalculateChargeStopReq(const std::string& data)  { return GetRxBByte(data, 0); }  // 0x1667 enum (partial)
-void OvmsVehicleToyotaETNGA::SetChargeStopReq(int v) { m_v_charge_stopreq->SetValue(v); }
+void OvmsVehicleToyotaETNGA::SetChargeStopReq(int v)
+{
+    if (m_v_charge_stopreq->SetValue(v))
+        ESP_LOGD(TAG, "Charge Stop Request changed: 0x%02X (%d)", v, v);
+}
+
+// --- 2026-06-06 pins: EV ECU driver inputs + Brake/EPB ---
+
+float OvmsVehicleToyotaETNGA::CalculateThrottle(const std::string& data)
+{
+    // 0x1060 b1: accelerator position, u8 x0.5 %/LSB (0x00-0xC8 -> 0-100%)
+    return static_cast<float>(GetRxBByte(data, 0)) * 0.5f;
+}
+void OvmsVehicleToyotaETNGA::SetThrottle(float pct)
+{
+    LogMetricChange(StandardMetrics.ms_v_env_throttle, pct, "Throttle", "%");
+    StandardMetrics.ms_v_env_throttle->SetValue(pct);
+}
+
+int OvmsVehicleToyotaETNGA::CalculateDriveMode(const std::string& data)
+{
+    return GetRxBByte(data, 0);   // 0x1004 b1: Drive Mode Select Status enum
+}
+void OvmsVehicleToyotaETNGA::SetDriveMode(int mode)
+{
+    // Platform enum (this BEV trim emits only 0/1/6 — Normal/Power/Eco):
+    const char* label;
+    switch (mode)
+    {
+        case 0:  label = "Normal";    break;
+        case 1:  label = "Power";     break;
+        case 2:  label = "Sport";     break;
+        case 3:  label = "Sport S";   break;
+        case 4:  label = "Sport S+";  break;
+        case 5:  label = "Comfort";   break;
+        case 6:  label = "Eco";       break;
+        case 9:  label = "Range";     break;
+        case 11: label = "Chauffeur"; break;
+        default: label = "unknown";   break;
+    }
+    LogMetricChange(StandardMetrics.ms_v_env_drivemode, mode, "Drive Mode", label);
+    StandardMetrics.ms_v_env_drivemode->SetValue(mode);
+}
+
+int OvmsVehicleToyotaETNGA::CalculateAwdMode(const std::string& data)
+{
+    return GetRxBByte(data, 1);   // 0x1087 b2: AWD / X-MODE status enum
+}
+void OvmsVehicleToyotaETNGA::SetAwdMode(int mode)
+{
+    const char* label;
+    switch (mode)
+    {
+        case 0:  label = "Normal";                      break;
+        case 2:  label = "Snow/Dirt";                   break;
+        case 3:  label = "Deep Snow/Mud";               break;
+        case 4:  label = "Snow/Dirt (Temp Cancel)";     break;
+        case 5:  label = "Deep Snow/Mud (Temp Cancel)"; break;
+        default: label = "unknown";                     break;
+    }
+    LogMetricChange(m_v_e_awd, mode, "AWD Mode", label);
+    m_v_e_awd->SetValue(mode);
+}
+
+float OvmsVehicleToyotaETNGA::CalculateFootBrake(const std::string& data)
+{
+    // 0x104C b1: brake pedal stroke, u8 ~1 mm/LSB. Captured range 0 (rest) .. 67 (full press).
+    // Map to 0-100% of observed full-press stroke for ms_v_env_footbrake (% semantics).
+    const float kFootBrakeFullStrokeMm = 67.0f;
+    float pct = static_cast<float>(GetRxBByte(data, 0)) * 100.0f / kFootBrakeFullStrokeMm;
+    if (pct > 100.0f) pct = 100.0f;
+    return pct;
+}
+void OvmsVehicleToyotaETNGA::SetFootBrake(float pct)
+{
+    LogMetricChange(StandardMetrics.ms_v_env_footbrake, pct, "Foot Brake", "%");
+    StandardMetrics.ms_v_env_footbrake->SetValue(pct);
+}
+
+bool OvmsVehicleToyotaETNGA::CalculateParkBrake(const std::string& data)
+{
+    // 0x1045 b1 (RH actuator): 0x00=Park Applied, 0x02=Released, 0x03=Applying, 0x04=Releasing, 0x05=Completely Released.
+    // OVMS handbrake bool: applied only when Park Applied (0x00). (0x01 Hold Applied is the separate brake-hold feature.)
+    return GetRxBByte(data, 0) == 0x00;
+}
+void OvmsVehicleToyotaETNGA::SetParkBrake(bool applied)
+{
+    LogMetricChange(StandardMetrics.ms_v_env_handbrake, applied, "Park Brake", applied ? "Applied" : "Released");
+    StandardMetrics.ms_v_env_handbrake->SetValue(applied);
+}
 
 int OvmsVehicleToyotaETNGA::CalculateControlMode(const std::string& data)
 {
@@ -309,7 +508,9 @@ int OvmsVehicleToyotaETNGA::CalculateChargeType(const std::string& data)
 
 float OvmsVehicleToyotaETNGA::CalculateHVACSetpoint(const std::string& data)
 {
-    int rawValue = GetRxBInt8(data, 0);
+    // Unsigned byte: the raw value is an enumerated code (0..255); a signed read sent
+    // codes >= 0x80 into the wrong piecewise branch as negatives.
+    int rawValue = GetRxBByte(data, 0);
     
     // Calculate the HVAC setpoint based on the piecewise function
     if (rawValue == 0) {
@@ -336,7 +537,7 @@ bool OvmsVehicleToyotaETNGA::CalculatePISWStatus(const std::string& data)
 {
     // 0x00 = None
     // 0x03 = Charging connector connected
-    return GetRxBInt8(data, 0);
+    return GetRxBByte(data, 0) != 0;
 }
 
 bool OvmsVehicleToyotaETNGA::CalculateReadyStatus(const std::string& data)
@@ -351,7 +552,9 @@ int OvmsVehicleToyotaETNGA::CalculateShiftPosition(const std::string& data)
 
 float OvmsVehicleToyotaETNGA::CalculateVehicleSpeed(const std::string& data)
 {
-    return static_cast<float>(GetRxBInt8(data, 0));
+    // 0x1F0D: u8, 1 km/h/LSB (max 210) — must decode unsigned or speeds above
+    // 127 km/h wrap negative.
+    return static_cast<float>(GetRxBByte(data, 0));
 }
 
 // Metric setter functions
@@ -374,28 +577,42 @@ void OvmsVehicleToyotaETNGA::SetAwake(bool awake)
     StandardMetrics.ms_v_env_awake->SetValue(awake);
 }
 
-void OvmsVehicleToyotaETNGA::SetBatteryChargingPower(float power)
+// Hours elapsed since the last sample on an energy-integrator channel; updates the
+// channel timestamp. The first sample of an interval (lastSampleTime == 0) counts as
+// 1 s. Gaps over 60 s (charge pause, OBC lock-isolation, sleep) also count as 1 s —
+// integrating the current power across a long gap would massively over-count energy
+// (same rationale as the delivered_ah dt guard in UpdateChargeSessionStats).
+float OvmsVehicleToyotaETNGA::EnergyIntervalHours(uint32_t& lastSampleTime)
 {
-    ESP_LOGD(TAG, "Battery Charging Power: %f", power);
-
-    float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
-
-    if (lastChargerEnergyLogTime != 0)
+    uint32_t now = esp_log_timestamp();
+    float hours = 1.0f / 3600.0f;
+    if (lastSampleTime != 0)
     {
-        hoursSinceLastUpdate = static_cast<float>((esp_log_timestamp() - lastChargerEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
+        float h = static_cast<float>(now - lastSampleTime) / (1000.0f * 3600.0f);
+        if (h <= 60.0f / 3600.0f)
+            hours = h;
     }
+    lastSampleTime = now;
+    return hours;
+}
 
-    const float energy = power * hoursSinceLastUpdate;
+void OvmsVehicleToyotaETNGA::SetBatteryChargingPower(float obc_power)
+{
+    // obc_power is the OBC 0x10D4 decode. It under-reports on DC (issue #109: ~0.73x of
+    // actual; correct on AC), so keep it only as a diagnostic and derive the authoritative
+    // charge power from pack V×I, which is accurate on both AC and DC.
+    m_charge_obc_kw = obc_power;
 
-    ESP_LOGD(TAG, "Time update: %f hours", hoursSinceLastUpdate);
-    ESP_LOGD(TAG, "Battery Charging Energy: %f kWh", energy);
+    float v = StandardMetrics.ms_v_bat_voltage->AsFloat();
+    float i = StandardMetrics.ms_v_bat_current->AsFloat();
+    float power = -(v * i) / 1000.0f;   // pack current is negative while charging -> positive charge power
+    if (power < 0.0f) power = 0.0f;
 
-    // Add the energy to the integrater
+    ESP_LOGD(TAG, "Charge power pack V×I=%.2f kW (obc 0x10D4=%.2f kW)", power, obc_power);
+    StandardMetrics.ms_v_charge_power->SetValue(power);
+
+    const float energy = power * EnergyIntervalHours(lastChargerEnergyLogTime);
     StandardMetrics.ms_v_charge_kwh->SetValue(StandardMetrics.ms_v_charge_kwh->AsFloat() + energy);
-
-    // Update the update time for the next energy period
-    lastChargerEnergyLogTime = esp_log_timestamp();
-
 }
 
 void OvmsVehicleToyotaETNGA::SetBatteryCurrent(float current)
@@ -409,35 +626,42 @@ void OvmsVehicleToyotaETNGA::SetBatteryPower(float power)
     LogMetricChange(StandardMetrics.ms_v_bat_power, power, "Battery Power", "kW");
     StandardMetrics.ms_v_bat_power->SetValue(power);
 
-    float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
-    int now = esp_log_timestamp();
-
-    if (lastBatteryEnergyLogTime != 0)
-    {
-        hoursSinceLastUpdate = static_cast<float>((now - lastBatteryEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
-    }
-
+    const float hoursSinceLastUpdate = EnergyIntervalHours(lastBatteryEnergyLogTime);
     const float energy = power * hoursSinceLastUpdate;
 
     ESP_LOGD(TAG, "Battery Energy: %f kWh", energy);
 
-    // Only log energy use/recovery while driving
+    // Coulomb count (Ah) over the same interval. Current shares the power sign (+ = discharge);
+    // ms_v_bat_current was just set from the same 0x1F9A reply (see IncomingHybridControlSystem).
+    const float charge = StandardMetrics.ms_v_bat_current->AsFloat() * hoursSinceLastUpdate;
+
+    // Only log energy/coulomb use/recovery while driving. The per-trip metrics reset in
+    // NotifyVehicleOn; the *_total accumulators are persistent (lifetime) and never reset here.
     if (static_cast<PollState>(m_poll_state) == PollState::DRIVING)
     {
         if (power > 0)
         {
             StandardMetrics.ms_v_bat_energy_used->SetValue(
                 StandardMetrics.ms_v_bat_energy_used->AsFloat() + energy);
+            StandardMetrics.ms_v_bat_energy_used_total->SetValue(
+                StandardMetrics.ms_v_bat_energy_used_total->AsFloat() + energy);
+            StandardMetrics.ms_v_bat_coulomb_used->SetValue(
+                StandardMetrics.ms_v_bat_coulomb_used->AsFloat() + charge);
+            StandardMetrics.ms_v_bat_coulomb_used_total->SetValue(
+                StandardMetrics.ms_v_bat_coulomb_used_total->AsFloat() + charge);
         }
         else if (power < 0)
         {
             StandardMetrics.ms_v_bat_energy_recd->SetValue(
                 StandardMetrics.ms_v_bat_energy_recd->AsFloat() - energy);
+            StandardMetrics.ms_v_bat_energy_recd_total->SetValue(
+                StandardMetrics.ms_v_bat_energy_recd_total->AsFloat() - energy);
+            StandardMetrics.ms_v_bat_coulomb_recd->SetValue(
+                StandardMetrics.ms_v_bat_coulomb_recd->AsFloat() - charge);
+            StandardMetrics.ms_v_bat_coulomb_recd_total->SetValue(
+                StandardMetrics.ms_v_bat_coulomb_recd_total->AsFloat() - charge);
         }
     }
-
-    // Update the update time for the next energy period
-    lastBatteryEnergyLogTime = now;
 }
 
 void OvmsVehicleToyotaETNGA::SetBatterySOC(float soc)
@@ -485,16 +709,23 @@ void OvmsVehicleToyotaETNGA::SetBatteryCellVoltages(const std::vector<float>& vo
 
 void OvmsVehicleToyotaETNGA::SetBatteryCapacityFull(const std::vector<float>& caps)
 {
-    m_v_bat_cap_full->SetValue(caps);
+    // SetValue() returns true only when an element actually changed → change-gated log
+    // (no vector overload of LogMetricChange exists). Slow poll (60-120s); data collection.
+    if (m_v_bat_cap_full->SetValue(caps))
+        ESP_LOGD(TAG, "Battery Capacity Full (Ah): %s", m_v_bat_cap_full->AsString().c_str());
 }
 
 void OvmsVehicleToyotaETNGA::SetBatteryCapacityAlt(const std::vector<float>& caps)
 {
-    m_v_bat_cap_alt->SetValue(caps);
+    if (m_v_bat_cap_alt->SetValue(caps))
+        ESP_LOGD(TAG, "Battery Capacity Alt (Ah): %s", m_v_bat_cap_alt->AsString().c_str());
 }
 
 void OvmsVehicleToyotaETNGA::SetBatteryCellVoltageStatistics(const std::vector<float>& voltages)
 {
+    if (voltages.empty())
+        return;
+
     if (BmsGetCellArangementVoltage() > 0) {
         // BmsSetCellVoltage already populated pack vmin/vmax/vavg/vstddev.
         return;
@@ -507,7 +738,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryCellVoltageStatistics(const std::vector<f
     float averageVoltage = sum / voltages.size();
     float variance = 0.0f;
     for (float v : voltages) {
-        variance += pow(v - averageVoltage, 2);
+        variance += (v - averageVoltage) * (v - averageVoltage);
     }
     float standardDeviation = sqrt(variance / voltages.size());
 
@@ -534,6 +765,9 @@ void OvmsVehicleToyotaETNGA::SetBatteryTemperatures(const std::vector<float>& te
 
 void OvmsVehicleToyotaETNGA::SetBatteryTemperatureStatistics(const std::vector<float>& temperatures)
 {
+    if (temperatures.empty())
+        return;
+
     // Average is needed for ms_v_bat_temp regardless of code path.
     float sum = std::accumulate(temperatures.begin(), temperatures.end(), 0.0f);
     float averageTemperature = sum / temperatures.size();
@@ -544,7 +778,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryTemperatureStatistics(const std::vector<f
         float maxTemperature = *std::max_element(temperatures.begin(), temperatures.end());
         float variance = 0.0f;
         for (float temperature : temperatures) {
-            variance += pow(temperature - averageTemperature, 2);
+            variance += (temperature - averageTemperature) * (temperature - averageTemperature);
         }
         float standardDeviation = sqrt(variance / temperatures.size());
 
@@ -568,8 +802,8 @@ void OvmsVehicleToyotaETNGA::SetBatteryVoltage(float voltage)
 
 void OvmsVehicleToyotaETNGA::SetChargingStatus(bool status)
 {
-    const std::string valueLabel = status ? "Charging" : "Not Charging";
-    LogMetricChange(StandardMetrics.ms_v_charge_inprogress, status, "Charging Status", valueLabel);
+    LogMetricChange(StandardMetrics.ms_v_charge_inprogress, status, "Charging Status",
+        status ? "Charging" : "Not Charging");
     StandardMetrics.ms_v_charge_inprogress->SetValue(status);
 }
 
@@ -632,39 +866,29 @@ void OvmsVehicleToyotaETNGA::SetChargeType(int chargeType)
 void OvmsVehicleToyotaETNGA::SetChargerInputPower(float power)
 {
     ESP_LOGD(TAG, "Charger Input Power: %f", power);
-    StandardMetrics.ms_v_charge_power->SetValue(power);
+    m_v_charge_grid_power->SetValue(power);
 
-    float hoursSinceLastUpdate = 1.0f / 60.0f / 60.0f; // Default value of 1 second
-    int now = esp_log_timestamp();
-
-    if (lastGridEnergyLogTime != 0)
-        {
-        hoursSinceLastUpdate = static_cast<float>((now - lastGridEnergyLogTime) / (1000.0f * 60.0f * 60.0f));
-        }
-
-    const float energy = power * hoursSinceLastUpdate;
+    const float energy = power * EnergyIntervalHours(lastGridEnergyLogTime);
 
     ESP_LOGD(TAG, "Grid Energy: %f kWh", energy);
 
     StandardMetrics.ms_v_charge_kwh_grid->SetValue(StandardMetrics.ms_v_charge_kwh_grid->AsFloat() + energy);
-
-    // Update the update time for the next energy period
-    lastGridEnergyLogTime = now;
+    StandardMetrics.ms_v_charge_kwh_grid_total->SetValue(StandardMetrics.ms_v_charge_kwh_grid_total->AsFloat() + energy);  // persistent lifetime grid energy
 }
 
 void OvmsVehicleToyotaETNGA::SetChargingDoorStatus(bool status)
 {
     int newValue = status ? 1 : 0;
-    const std::string valueLabel = status ? "Open" : "Closed";    
-    
-    LogMetricChange(StandardMetrics.ms_v_door_chargeport, newValue, "Charging Door Status", valueLabel);
+
+    LogMetricChange(StandardMetrics.ms_v_door_chargeport, newValue, "Charging Door Status",
+        status ? "Open" : "Closed");
 
     StandardMetrics.ms_v_door_chargeport->SetValue(status);
 }
 
 void OvmsVehicleToyotaETNGA::SetControlMode(int controlMode)
 {
-    std::string controlModeLabel;
+    const char* controlModeLabel;
 
     switch (controlMode)
     {
@@ -697,22 +921,23 @@ void OvmsVehicleToyotaETNGA::SetOdometer(float odometer)
     LogMetricChange(StandardMetrics.ms_v_pos_odometer, odometer, "Odometer", "km");
     StandardMetrics.ms_v_pos_odometer->SetValue(odometer);  // Set the odometer metric
 
-    if (m_v_pos_trip_start->IsStale())
+    if (!m_trip_start_valid)
     {
-        // Update the trip start metric if it is stale
-        // It becomes stale when first transitioning to the READY state
-        m_v_pos_trip_start->SetValue(odometer);
+        // Seed the trip-start baseline on the first reading of a trip.
+        // It is invalidated on transition to DRIVING (see TransitionToDrivingState).
+        m_trip_start_odo = odometer;
+        m_trip_start_valid = true;
     }
 
     // Update the trip odometer
-    float tripOdometer = odometer - m_v_pos_trip_start->AsFloat();
+    float tripOdometer = odometer - m_trip_start_odo;
     StandardMetrics.ms_v_pos_trip->SetValue(tripOdometer);
 }
 
 void OvmsVehicleToyotaETNGA::SetPISWStatus(bool status)
 {
-    const std::string valueLabel = status ? "Connected" : "Not Connected";
-    LogMetricChange(StandardMetrics.ms_v_charge_pilot, status, "Pilot Status", valueLabel);
+    LogMetricChange(StandardMetrics.ms_v_charge_pilot, status, "Pilot Status",
+        status ? "Connected" : "Not Connected");
     StandardMetrics.ms_v_charge_pilot->SetValue(status);
 }
 
@@ -728,8 +953,8 @@ void OvmsVehicleToyotaETNGA::SetPollState(int state)
 
 void OvmsVehicleToyotaETNGA::SetReadyStatus(bool status)
 {
-    const std::string valueLabel = status ? "Ready" : "Not Ready";
-    LogMetricChange(StandardMetrics.ms_v_env_on, status, "Ready Status", valueLabel);
+    LogMetricChange(StandardMetrics.ms_v_env_on, status, "Ready Status",
+        status ? "Ready" : "Not Ready");
     StandardMetrics.ms_v_env_on->SetValue(status);
 }
 
@@ -782,50 +1007,50 @@ void OvmsVehicleToyotaETNGA::SetVehicleVIN(std::string vin)
     StandardMetrics.ms_v_vin->SetValue(std::move(vin));
 }
 
-void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel)
+void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricBool* metric, bool newValue, const char* label, const char* valueLabel)
 {
     if (metric->AsBool() != newValue)
     {
-        ESP_LOGD(TAG, "%s changed: %s (%d)", label.c_str(), valueLabel.c_str(), newValue ? 1 : 0);
+        ESP_LOGD(TAG, "%s changed: %s (%d)", label, valueLabel, newValue ? 1 : 0);
     }
     else
     {
-        ESP_LOGV(TAG, "%s unchanged: %s (%d)", label.c_str(), valueLabel.c_str(), newValue ? 1 : 0);
+        ESP_LOGV(TAG, "%s unchanged: %s (%d)", label, valueLabel, newValue ? 1 : 0);
     }
 }
 
-void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label, const std::string& units = "")
+void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricFloat* metric, float newValue, const char* label, const char* units)
 {
     if (metric->AsFloat() != newValue)
     {
-        ESP_LOGD(TAG, "%s changed: %.2f%s", label.c_str(), newValue, units.empty() ? "" : (" " + units).c_str());
+        ESP_LOGD(TAG, "%s changed: %.2f%s%s", label, newValue, units[0] ? " " : "", units);
     }
     else
     {
-        ESP_LOGV(TAG, "%s unchanged: %.2f%s", label.c_str(), newValue, units.empty() ? "" : (" " + units).c_str());
+        ESP_LOGV(TAG, "%s unchanged: %.2f%s%s", label, newValue, units[0] ? " " : "", units);
     }
 }
 
-void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricInt* metric, int newValue, const std::string& label, const std::string& valueLabel)
+void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricInt* metric, int newValue, const char* label, const char* valueLabel)
 {
     if (metric->AsInt() != newValue)
     {
-        ESP_LOGD(TAG, "%s changed: %s (%d)", label.c_str(), valueLabel.c_str(), newValue);
+        ESP_LOGD(TAG, "%s changed: %s (%d)", label, valueLabel, newValue);
     }
     else
     {
-        ESP_LOGV(TAG, "%s unchanged: %s (%d)", label.c_str(), valueLabel.c_str(), newValue);
+        ESP_LOGV(TAG, "%s unchanged: %s (%d)", label, valueLabel, newValue);
     }
 }
 
-void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricString* metric, const std::string& newValue, const std::string& label)
+void OvmsVehicleToyotaETNGA::LogMetricChange(OvmsMetricString* metric, const std::string& newValue, const char* label)
 {
     if (metric->AsString() != newValue)
     {
-        ESP_LOGD(TAG, "%s changed: %s", label.c_str(), newValue.c_str());
+        ESP_LOGD(TAG, "%s changed: %s", label, newValue.c_str());
     }
     else
     {
-        ESP_LOGV(TAG, "%s unchanged: %s", label.c_str(), newValue.c_str());
+        ESP_LOGV(TAG, "%s unchanged: %s", label, newValue.c_str());
     }
 }

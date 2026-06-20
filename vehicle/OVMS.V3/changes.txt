@@ -13,22 +13,83 @@ Open Vehicle Monitor System v3 - Change log
                                               password configured under wifi.ssid
     [network] wifi.priority.interval       -- upgrade-scan period in seconds while on a non-top
                                               network (default: 60, minimum: 10)
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the module no longer drains the 12V battery
+    while plugged in waiting for a scheduled charge. The charge-wait state now polls sparsely
+    and, after a sustained idle wait, sleeps until charging actually starts (waking
+    automatically) — so a scheduled/overnight charge is captured in one session instead of
+    being missed when the module previously browned out. No config changes.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): charge report v2 — each session now writes an
+    HTML report (location, ambient, human-readable outcome, inline power-vs-time chart, event log,
+    efficiency/implied-capacity estimates) plus a fine-grained per-sample CSV (delivered/offered/
+    allowed power, pack + battery-temp over time) to /sd/charge-reports/ (fallback /store). Also
+    fixes peak charging power on DC (was sourced from the AC-only grid-input poll).
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): corrected DC charge power. v.c.power is now
+    derived from pack voltage x current (accurate on AC and DC); the OBC's 0x10D4 value
+    under-reported DC by ~27%. This also corrects the charge-session energy total and the
+    ABRP/server charge power on DC.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): charge report now breaks out station, battery,
+    and HVAC (My-Room) power — CSV columns, a three-series chart, and a power-accounting summary
+    (station = battery + HVAC + losses) — plus a BMS-SOC column distinct from the displayed SOC.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the Charging monitor web page now shows distinct
+    AC and DC layouts (auto-selected from the active session), a live power/SOC chart that backfills
+    the whole session and updates in real time (delivered power, car-permitted limit, and — on DC —
+    station-offered max, matching the report chart), and a live "charging state history" of the DC
+    HLC handshake states (0x1666) or the AC operation states (0x1684). The AC operation-state
+    transitions are also recorded in the saved charge report's event log (DC HLC states already were).
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): charge report refinements — the power chart now
+    uses a fixed, standardized scale per charge type (AC 0-11 kW, DC 0-150 kW) with a fixed 0-100%
+    SOC axis, and overlays the station-offered max (DC) and car-permitted (BMS taper) traces
+    alongside delivered power. The report shows the matching named OVMS location (geofence) when
+    one is defined, decodes the DC HLC handshake states (0x1666) into the session event log, and
+    no longer reports a bogus "0 -> 0 C" ambient range. Ambient temperature is now polled during
+    charging (HCS 0x1F46 — the A/C ambient sensor's ECU sleeps while charging), and "kWh from grid"
+    / charging-efficiency are shown for AC sessions only (not meaningful on DC). The "Charging
+    metrics" vehicle-menu page is renamed "Charging monitor".
 - hw3.1: Fix random crash (abort in esp_sha_read_digest_state) during TLS handshakes by disabling
     mbedTLS hardware SHA acceleration (CONFIG_MBEDTLS_HARDWARE_SHA). The shared ESP32 SHA engine
     could return an all-zero digest state when mbedtls_sha256_clone() snapshotted it mid-handshake,
     tripping the IDF fault-injection abort(). SHA now runs in software (AES/MPI hardware accel kept);
     matches the hw3.0 preset, which already had hardware SHA disabled. Rebuild + reflash required.
-- Console: Fix crash (LoadProhibited use-after-free) when an SSH or Telnet session running a
-    command in follow mode (e.g. "vfs tail <file>") was closed or dropped without Ctrl-C. The
-    follow-mode command task kept running and wrote to its now-freed session writer. The writer
-    now tracks its active follow-mode task, and console teardown stops and joins it before
-    freeing the connection. Affects any follow-mode command (OvmsCommandTask), not just vfs tail.
 - smart EQ:
     As soon as the 12V trickle charge begins, a timestamp is generated and stored in `m_12v_trickle_charge_times`.
     The counted value is set in `xsq.12v.trickle.count`.
     Within `Ticker3600`, a routine removes all timestamps older than 24 hours and updates `xsq.12v.trickle.count` by -1.
     New metric:
-      xsq.12v.trickle.count             -- Count of 12V trickle-charge cycles in 24h
+      xsq.12v.trickle.count                  -- Count of 12V trickle-charge cycles in 24h
+    updated metric:
+      xsq.bms.contactor.cycles (vector int)  -- [0]=max, [1]=now, [2]=consumed, [3]=diff, [4]=1h_counted_changes
+    New config:
+      [xsq] bms.alert.above.cycles (int)     -- alert threshold for cycles counted; default 50000
+      [xsq] bms.contactor.1h.limit (int)     -- limit for contactor cycles changes per hour for alerting; default 8
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): added web UI pages in the Vehicle menu —
+    BMS cell monitor, a live charging-metrics dashboard, a configuration page that exposes
+    the TPMS alert thresholds (previously settable only via the `config` command), and a
+    charge-reports browser that lists and opens the stored HTML reports. The browser now scans
+    both the SD card (/sd/charge-reports) and internal flash (/store/charge-reports), tagging
+    each entry with its source, so reports stay visible after an SD card is added or removed.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): populate more standard metrics that were
+    previously unset — climate flags v.e.cooling / v.e.heating, fan speed v.e.cabinfan,
+    consumption v.b.consumption, and the trip/lifetime accumulators v.b.coulomb.used/.recd
+    (+ .total), v.b.energy.used.total / .recd.total, and v.c.kwh.grid.total. The driving HVAC
+    poll (0x106E) now runs at 1 Hz so the cabin-energy integral matches the battery integrator.
+    New metric:
+      xte.v.e.hvac.kwh.drive            -- Cabin/HVAC energy used during the current trip (kWh)
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): at the end of each charging session the module
+    now writes a self-contained HTML charge report to /store/charge-reports/<timestamp>.html
+    (SOC delta, energy delivered + from grid, peak/avg power, battery-temp range, AC/DC, outcome).
+    The newest 50 reports are kept. This first version covers single-phase, live-telemetry
+    sessions; multi-phase, sleep-survival and limiting-side attribution are planned follow-ups.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): new driver-input metrics while driving —
+    accelerator position, drive mode (Eco/Normal/Power), foot-brake pedal, and the electric
+    parking brake. Adds the Brake/EPB ECU (0x7B0) as a new poll target. AWD/X-MODE status is
+    exposed as a custom metric.
+  Populated standard metrics:
+    v.e.throttle                          -- Accelerator pedal position [%]
+    v.e.drivemode                         -- Drive mode select (0=Normal,1=Power,6=Eco)
+    v.e.footbrake                         -- Brake pedal position [%] (mapped from pedal stroke)
+    v.e.handbrake                         -- Electric parking brake applied
+  New metric:
+    xte.v.e.awd                           -- AWD / X-MODE status (0=Normal,2=Snow/Dirt,3=Deep Snow/Mud)
 
 2026-05-17 MB   3.3.006  OTA release
 - VW e-Up: extended battery health / aging info (with web UI integration): total battery age,

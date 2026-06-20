@@ -65,10 +65,22 @@ env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 500M
   CCACHE_COMPILERCHECK: content
+  # Firmware output goes to the self-hosted MinIO artifact store (reachable from
+  # the ovms3 runner) instead of GitHub Actions artifacts (account-wide 500MB
+  # Free-tier quota). Objects keyed by github.run_id; ovms-modern's network-flash
+  # vintage path downloads ovms3.bin from there by run_id. 30-day bucket lifecycle.
+  MINIO_ENDPOINT: http://10.20.5.228:9000
+  MC_VERSION: RELEASE.2025-08-13T08-35-41Z
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    # Self-hosted (SH K3s, the `ovms3` ARC scale set) so the firmware build can
+    # push its output to the in-cluster MinIO artifact store (10.20.5.228) — a
+    # private IP that GitHub-hosted runners can't reach. The runner image
+    # (ovms-ci-runner) runs as root with apt/sudo/python3/ccache/git present, so
+    # this legacy ESP-IDF 3.3 build (which fetches its own toolchain + esp-idf)
+    # runs unchanged. docs.yml (Pages) and web-assets-check.yml stay GitHub-hosted.
+    runs-on: ovms3
     steps:
       - name: Checkout (with submodules)
         uses: actions/checkout@v6
@@ -181,23 +193,26 @@ jobs:
 
           ccache --show-stats
 
-      - name: Upload firmware artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ovms3-firmware
-          # ovms3.bin is the app image (flash via `ota flash vfs`, as
-          # scripts/ovms-deploy.sh does). The other three .bin are also needed for
-          # a fresh serial flash (`make flash`). ovms3.elf + ovms3.map carry the
-          # debug symbols / link map needed to decode a crash backtrace
-          # (`boot status` on the module) back to functions and source lines.
-          # if-no-files-found: error so a silently-missing binary fails the job
-          # instead of producing an empty zip.
-          path: |
-            vehicle/OVMS.V3/build/ovms3.bin
-            vehicle/OVMS.V3/build/ovms3.elf
-            vehicle/OVMS.V3/build/ovms3.map
-            vehicle/OVMS.V3/build/bootloader/bootloader.bin
-            vehicle/OVMS.V3/build/partitions.bin
-            vehicle/OVMS.V3/build/ota_data_initial.bin
-          if-no-files-found: error
-          retention-days: 30
+      - name: Upload firmware to MinIO
+        # ovms3.bin is the app image (flash via `ota flash vfs`, as
+        # scripts/ovms-deploy.sh does). The other three .bin are also needed for a
+        # fresh serial flash (`make flash`). ovms3.elf + ovms3.map carry the debug
+        # symbols / link map needed to decode a crash backtrace (`boot status`)
+        # back to functions and source lines. All keyed by run_id under ovms3/.
+        env:
+          MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
+          MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://dl.min.io/client/mc/release/linux-amd64/archive/mc.${MC_VERSION}" -o "$RUNNER_TEMP/mc"
+          chmod +x "$RUNNER_TEMP/mc"
+          "$RUNNER_TEMP/mc" alias set sh "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
+          "$RUNNER_TEMP/mc" cp \
+            vehicle/OVMS.V3/build/ovms3.bin \
+            vehicle/OVMS.V3/build/ovms3.elf \
+            vehicle/OVMS.V3/build/ovms3.map \
+            vehicle/OVMS.V3/build/bootloader/bootloader.bin \
+            vehicle/OVMS.V3/build/partitions.bin \
+            vehicle/OVMS.V3/build/ota_data_initial.bin \
+            "sh/ci-artifacts/${RUN_ID}/ovms3/"

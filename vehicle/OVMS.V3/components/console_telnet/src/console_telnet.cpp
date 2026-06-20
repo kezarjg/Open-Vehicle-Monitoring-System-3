@@ -182,9 +182,10 @@ ConsoleTelnet::ConsoleTelnet(struct mg_connection* nc)
 
 ConsoleTelnet::~ConsoleTelnet()
   {
-  // Stop any follow-mode command task (e.g. "vfs tail") before freeing the
-  // transport it writes to, otherwise it would dereference a freed writer.
-  TerminateCommandTask();
+  // Clean up any interactive command (e.g. a "vfs tail" follow-mode task) bound
+  // to this console before freeing the transport it writes to, otherwise it
+  // would dereference a freed writer/transport.
+  RunTerminationCallback();
   telnet_t *telnet = m_telnet;
   m_telnet = NULL;
   telnet_free(telnet);

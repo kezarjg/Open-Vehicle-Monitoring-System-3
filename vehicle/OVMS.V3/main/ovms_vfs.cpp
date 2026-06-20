@@ -437,11 +437,22 @@ void vfs_stat(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, con
   OVMS_MD5_CTX* md5 = new OVMS_MD5_CTX;
   OVMS_MD5_Init(md5);
   int filesize = 0;
+  int sinceyield = 0;
   uint8_t *buf = new uint8_t[512];
   while(size_t n = fread(buf, sizeof(char), 512, f))
     {
     filesize += n;
     OVMS_MD5_Update(md5, buf, n);
+    // Hashing a large file is an unbroken read+compute loop.  Without periodically
+    // yielding it monopolises the CPU long enough to starve interrupt/UART servicing —
+    // observed as a flood of UART RX framing errors and, under that load, heap-corruption
+    // crashes when stat'ing a ~1 MB file.  Yield briefly every ~8 KB so other tasks and
+    // interrupts get serviced.
+    if ((sinceyield += n) >= 8192)
+      {
+      sinceyield = 0;
+      vTaskDelay(1);
+      }
     }
   uint8_t* rmd5 = new uint8_t[16];
   OVMS_MD5_Final(rmd5, md5);
@@ -455,6 +466,7 @@ void vfs_stat(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, con
 
   delete [] rmd5;
   delete [] buf;
+  delete md5;          // was leaked: the MD5 context was new'd but never freed
   fclose(f);
   }
 
@@ -753,7 +765,11 @@ class VfsTailCommand : public OvmsCommandTask
           }
         lseek(fd, fpos, SEEK_SET);
         while ((len = read(fd, buf, sizeof buf)) > 0)
+          {
           writer->write(buf, len);
+          if (m_state != OCS_RunLoop)   // stop/close requested: exit promptly
+            break;
+          }
         fpos = lseek(fd, 0, SEEK_CUR);
         close(fd);
         fd = -1;

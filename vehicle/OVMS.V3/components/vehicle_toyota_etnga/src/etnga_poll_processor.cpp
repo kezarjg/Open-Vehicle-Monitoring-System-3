@@ -55,9 +55,31 @@ void OvmsVehicleToyotaETNGA::IncomingPollReply(const OvmsPoller::poll_job_t &job
             IncomingTPMS(job.pid);
             break;
 
+        case BRAKE_EPB_RX:
+            IncomingBrakeEpb(job.pid);
+            break;
+
         default:
             ESP_LOGW(TAG, "Unknown module: %03" PRIx32, job.moduleid_rec);
             return;
+    }
+}
+
+void OvmsVehicleToyotaETNGA::IncomingPollError(const OvmsPoller::poll_job_t &job, int32_t code)
+{
+    // UDS negative responses and poll TX failures previously vanished silently.  Logged
+    // for diagnosis only (OBC lock-isolation NRCs, gateway refusals, and TX failures
+    // while the bus is wedged) — deliberately NO state/session action here; see the
+    // lock-isolation notes in HandleChargeAcState/HandleChargeDcState.
+    // A repeating identical error (e.g. one TX failure per poll on a wedged bus) logs
+    // at WARN once, then at debug level until the error signature changes.
+    // Non-overlapping fold: module low byte (bits 24-31), pid (8-23), code (0-7).
+    uint32_t sig = ((job.moduleid_rec & 0xFF) << 24) ^ ((job.pid & 0xFFFF) << 8) ^ (code & 0xFF);
+    if (sig != m_last_poll_error) {
+        m_last_poll_error = sig;
+        ESP_LOGW(TAG, "Poll error: module %03" PRIx32 " PID %04X code %d", job.moduleid_rec, job.pid, (int)code);
+    } else {
+        ESP_LOGD(TAG, "Poll error (repeat): module %03" PRIx32 " PID %04X code %d", job.moduleid_rec, job.pid, (int)code);
     }
 }
 
@@ -79,6 +101,19 @@ void OvmsVehicleToyotaETNGA::IncomingAirConditionerSystem(uint16_t pid)
         case PID_HVAC_SETPOINT: {
             float temperature = CalculateHVACSetpoint(m_rxbuf);
             SetHVACSetpoint(temperature);
+            break;
+        }
+
+        case PID_HEATER_POWER: {
+            // 0x1086 HV electric heater power (W, 2-byte cluster, split TBD): any draw => heating active.
+            StandardMetrics.ms_v_env_heating->SetValue(GetRxBUint16(m_rxbuf, 0) > 0);
+            break;
+        }
+
+        case PID_BLOWER_LEVEL: {
+            // 0x2801 blower level (u8 1-7) -> cabin fan percentage (standard metric unit is %).
+            int level = GetRxBByte(m_rxbuf, 0);
+            StandardMetrics.ms_v_env_cabinfan->SetValue(level * 100 / 7);
             break;
         }
 
@@ -105,6 +140,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
         }
 
         case PID_BATTERY_VOLTAGE_AND_CURRENT: {
+            if (m_rxbuf.size() < 6) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             float batVoltage = CalculateBatteryVoltage(m_rxbuf);
             float batCurrent = CalculateBatteryCurrent(m_rxbuf);
             float batPower = CalculateBatteryPower(batVoltage, batCurrent);
@@ -129,6 +165,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
         }
 
         case PID_ODOMETER: {
+            if (m_rxbuf.size() < 4) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             float odometer = CalculateOdometer(m_rxbuf);
             SetOdometer(odometer);
             break;
@@ -147,10 +184,44 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
             break;
         }
 
+        case PID_THROTTLE: {
+            SetThrottle(CalculateThrottle(m_rxbuf));
+            break;
+        }
+
+        case PID_DRIVE_MODE_SELECT: {
+            SetDriveMode(CalculateDriveMode(m_rxbuf));
+            break;
+        }
+
+        case PID_AWD_MODE: {
+            SetAwdMode(CalculateAwdMode(m_rxbuf));
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:
             // Handle unsupported PID
+            ESP_LOGW(TAG, "Unsupported PID: %04X", pid);
+            break;
+    }
+}
+
+void OvmsVehicleToyotaETNGA::IncomingBrakeEpb(uint16_t pid)
+{
+    switch (pid) {
+        case PID_BRAKE_PEDAL_STROKE: {
+            SetFootBrake(CalculateFootBrake(m_rxbuf));
+            break;
+        }
+
+        case PID_EPB_STATUS: {
+            SetParkBrake(CalculateParkBrake(m_rxbuf));
+            break;
+        }
+
+        default:
             ESP_LOGW(TAG, "Unsupported PID: %04X", pid);
             break;
     }
@@ -199,6 +270,9 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
         }
 
         case PID_BATTERY_CHARGING_POWER: {
+            // Biased u16: a zero-filled short reply decodes as -327.68 kW and would be
+            // integrated into ms_v_charge_kwh — guard before the gate.
+            if (m_rxbuf.size() < 2) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             // Only valid during AC or DC charging
             if (StandardMetrics.ms_v_charge_inprogress->AsBool()) {
                 float batteryChargingPower = CalculateBatteryChargingPower(m_rxbuf);
@@ -208,6 +282,8 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
         }
 
         case PID_CHARGER_INPUT_POWER: {
+            // Accumulates into the LIFETIME grid-energy total — guard against short replies.
+            if (m_rxbuf.size() < 2) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             // Only valid during AC charging
             if (m_poll_state == PollState::CHARGE_AC) {
                 float chargerInputPower = CalculateChargerInputPower(m_rxbuf);
@@ -255,18 +331,20 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
         }
 
         case PID_CHARGER_STATE_CLUSTER: {
+            if (m_rxbuf.size() < 5) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             SetAcTargetPower(CalculateAcTargetPower(m_rxbuf));
             SetChargerOpStatus(CalculateChargerOpStatus(m_rxbuf));
-            SetAcCurrentLimitRaw(CalculateAcCurrentLimitRaw(m_rxbuf));
+            SetAcCurrentLimit(CalculateAcCurrentLimit(m_rxbuf));
             break;
         }
         case PID_CHARGER_OUTPUT_POWER: {
-            SetChargerOutputRaw(CalculateChargerOutputRaw(m_rxbuf));
-            SetChargerOutputTargetRaw(CalculateChargerOutputTargetRaw(m_rxbuf));
+            if (m_rxbuf.size() < 4) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
+            SetChargerOutput(CalculateChargerOutput(m_rxbuf));
+            SetChargerOutputTarget(CalculateChargerOutputTarget(m_rxbuf));
             break;
         }
         case PID_AC_USABLE_POWER: {
-            SetAcUsableRaw(CalculateAcUsableRaw(m_rxbuf));
+            SetAcUsable(CalculateAcUsable(m_rxbuf));
             break;
         }
 
@@ -310,6 +388,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
         }
 
         case PID_BATTERY_TEMPERATURES: {
+            if (m_rxbuf.size() < 48) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             std::vector<float> temperatures = CalculateBatteryTemperatures(m_rxbuf);
             SetBatteryTemperatures(temperatures);
             SetBatteryTemperatureStatistics(temperatures);
@@ -317,6 +396,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
         }
 
         case PID_BATTERY_CELL_VOLTAGES: {
+            if (m_rxbuf.size() < 192) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             std::vector<float> voltages = CalculateBatteryCellVoltages(m_rxbuf);
             SetBatteryCellVoltages(voltages);
             SetBatteryCellVoltageStatistics(voltages);
@@ -324,6 +404,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
         }
 
         case PID_BATTERY_CAPACITY: {
+            if (m_rxbuf.size() < 16) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             std::vector<float> caps = CalculateBatteryCapacityArray(m_rxbuf);
             SetBatteryCapacityFull(caps);
             if (caps.size() >= 8)
@@ -333,6 +414,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
         }
 
         case PID_BATTERY_CAPACITY_ALT: {
+            if (m_rxbuf.size() < 16) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             std::vector<float> caps = CalculateBatteryCapacityArray(m_rxbuf);
             SetBatteryCapacityAlt(caps);
             if (caps.size() >= 8)
@@ -393,69 +475,4 @@ void OvmsVehicleToyotaETNGA::IncomingVINSuccess(uint16_t type, uint32_t module_s
 void OvmsVehicleToyotaETNGA::IncomingVINFail(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, int errorcode)
 {
     ESP_LOGW(TAG, "RequestVIN: Failed with error code %d", errorcode);
-}
-
-void OvmsVehicleToyotaETNGA::DiagnosticSession()
-{
-    std::string response;
-    int res = PollSingleRequest(
-        m_can2,
-        PLUG_IN_CONTROL_SYSTEM_TX,
-        PLUG_IN_CONTROL_SYSTEM_RX,
-        VEHICLE_POLL_TYPE_OBDIISESSION,
-        0x03,
-        response,
-        1000,
-        ISOTP_STD
-    );
-
-    if (res == POLLSINGLE_OK)
-    {
-        ESP_LOGW(TAG, "DiagnosticSession: Worked");
-    }
-    else
-    {
-        ESP_LOGW(TAG, "DiagnosticSession: Failed with error code %d", res);
-    }
-}
-
-void OvmsVehicleToyotaETNGA::RequestChargeType()
-{
-    std::string response;
-    int chargeType;
-    int maxRetries = 5;
-    int retryCount = 0;
-    int res = POLLSINGLE_TIMEOUT;  // non-OK sentinel so the retry loop runs at least once
-
-    while (retryCount < maxRetries && res != POLLSINGLE_OK)
-    {
-        res = PollSingleRequest(
-            m_can2,
-            PLUG_IN_CONTROL_SYSTEM_TX,
-            PLUG_IN_CONTROL_SYSTEM_RX,
-            VEHICLE_POLL_TYPE_READDATA,
-            PID_CHARGING_VOLTAGE_TYPE,
-            response,
-            1000,
-            ISOTP_STD
-        );
-
-        if (res == POLLSINGLE_OK)
-        {
-            // Request successful
-            chargeType = response[0] & 0xFF;
-            SetChargeType(chargeType);
-            break;
-        }
-        else
-        {
-            retryCount++;
-            ESP_LOGW(TAG, "RequestChargeType: Request failed with error code %d. Retrying (%d/%d)", res, retryCount, maxRetries);
-        }
-    }
-
-    if (res != POLLSINGLE_OK)
-    {
-        ESP_LOGE(TAG, "RequestChargeType: Maximum retries reached. Request failed with error code %d", res);
-    }
 }

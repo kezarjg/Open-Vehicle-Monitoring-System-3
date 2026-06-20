@@ -12,7 +12,14 @@
 #define __VEHICLE_TOYOTA_ETNGA_H__
 
 #include <string>
+#include <vector>
+#include <utility>
+#include <iosfwd>
+#include <time.h>
 #include "vehicle.h"
+#ifdef CONFIG_OVMS_COMP_WEBSERVER
+#include "ovms_webserver.h"
+#endif
 
 // Control states
 enum ControlState {
@@ -39,11 +46,26 @@ public:
     OvmsVehicleToyotaETNGA();
     ~OvmsVehicleToyotaETNGA();
 
-    void Ticker1(uint32_t ticker);
+    void Ticker1(uint32_t ticker) override;
 
     void IncomingPollReply(const OvmsPoller::poll_job_t &job, uint8_t* data, uint8_t length) override;
+    void IncomingPollError(const OvmsPoller::poll_job_t &job, int32_t code) override;
 
     void IncomingFrameCan2(CAN_frame_t* p_frame) override;
+
+#ifdef CONFIG_OVMS_COMP_WEBSERVER
+    // Webserver subsystem (implementation: etnga_web.cpp)
+    void WebInit();
+    void WebDeInit();
+    static void WebCfgFeatures(PageEntry_t& p, PageContext_t& c);
+    static void WebDispChgMetrics(PageEntry_t& p, PageContext_t& c);
+    static void WebChgRenderAc(PageContext_t& c, OvmsVehicleToyotaETNGA* v);   // AC charging panels
+    static void WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaETNGA* v);   // DC charging panels
+    static void WebChgChartJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc);          // live chart
+    static void WebChgStateHistoryJs(PageContext_t& c, OvmsVehicleToyotaETNGA* v, bool dc);   // live state history
+    static void WebChargeReports(PageEntry_t& p, PageContext_t& c);   // index of saved charge reports
+    static void WebChargeReport(PageEntry_t& p, PageContext_t& c);    // stream one report (raw HTML)
+#endif // CONFIG_OVMS_COMP_WEBSERVER
 
 protected:
     std::string m_rxbuf;
@@ -52,15 +74,52 @@ protected:
     int m_sleep_entry_time = 0;  // Used to track the time that cooldown timer started
     int m_sleep_cooldown_secs = 10;  // Cooldown window (s) for the current sleep; default must equal SLEEP_COOLDOWN_SECS[0]
     int m_sleep_backoff_idx = 0;     // Index into SLEEP_COOLDOWN_SECS; escalates on consecutive no-activity sleeps
+    bool m_12v_was_high = false;     // 12V-above-threshold latch: the SLEEP 12V wake fires on the rising edge only
+                                     // (level-triggering oscillated; seeded on each sleep entry in TransitionToSleepState)
 
     bool m_armed_for_charge = false;   // charge lid seen open since entering AWAKE
     int  m_cable_watch_start = 0;      // monotonic s when armed (15-min cable watch)
     int  m_charge_state_entry = 0;     // monotonic s of last charge-state entry (handshake 60s timer)
+    bool m_charge_wait_slept = false;  // true after Tier-2 CHARGE_WAIT sleep; selects the short re-sleep threshold
+    int  m_pisw_zero_count = 0;        // consecutive fresh AWAKE PISW==0x00 reads; debounces the OBC post-wake transient
+    uint32_t m_pisw_last_modified = 0;  // LastModified() of the last PISW reading counted, so the debounce counts distinct polls not 1s ticks
 
     struct ChargeSessionState {
-        bool in_session = false;
-        int  start_monotonic = 0;
-        int  start_soc = -1;
+        bool  in_session = false;
+        int   start_monotonic = 0;
+        int   start_soc = -1;
+        time_t start_utc = 0;
+        bool  is_dc = false;
+        float peak_power = 0.0f;
+        bool  temp_seen = false;
+        float temp_min = 0.0f;
+        float temp_max = 0.0f;
+        // v2: location + ambient captured at open
+        bool  has_loc = false;
+        float start_lat = 0.0f;
+        float start_lon = 0.0f;
+        bool  amb_seen = false;
+        float amb_min = 0.0f;
+        float amb_max = 0.0f;
+        // v2: charge-side coulomb counter (Ah) for the implied-capacity estimate
+        float delivered_ah = 0.0f;
+        float station_kwh = 0.0f;   // ∫ station_kw dt — energy drawn from the EVSE this session
+        int   last_sample_monotonic = 0;   // dt for delivered_ah + CSV row cadence
+        // v2: event log (monotonic seconds, static label string)
+        std::vector<std::pair<int,const char*>> events;
+        int   last_hlc = -1;               // last 0x1666 HLC state logged as an event (change detection)
+        int   last_acop = -1;              // last 0x1684 AC-Op state logged as an event (change detection)
+        // v2: downsampled chart buffer (per sample: delivered kW, SOC, station-offered + car-permitted kW)
+        struct Sample { int t_s; float kw; int soc; float sta_max; float car_perm; float station_kw; float hvac_kw; };
+        std::vector<Sample> svg;
+        int   svg_interval_s = 20;
+        int   last_svg_monotonic = 0;
+        // v2: file basename (resolved "<dir>/<timestamp>", no extension) + CSV state
+        std::string base;
+        bool  csv_started = false;        // header emitted (into csv_buf)
+        bool  csv_file_created = false;   // <base>.csv exists on disk (first flush truncates)
+        std::string csv_buf;              // rows pending flush (batched to limit flash write cycles)
+        int   last_csv_flush = 0;         // monotonic s of last flush
     };
     ChargeSessionState m_charge_session;
 
@@ -79,38 +138,66 @@ protected:
     OvmsMetricFloat* m_v_charge_sta_max_v;  // 0x1681 station max voltage (V)
     OvmsMetricFloat* m_v_charge_ac_tgt_p;  // 0x1619 b1-2 AC target power (kW)
     OvmsMetricInt*   m_v_charge_chgr_op;   // 0x1619 b3 charger op status (enum) — distinct from m_v_charge_ac_op (0x1684)
-    OvmsMetricInt*   m_v_charge_ac_ilim;   // 0x1619 b4-5 current upper limit (raw, scale deferred)
-    OvmsMetricInt*   m_v_charge_out;       // 0x161E b1-2 charger output (raw, scale deferred)
-    OvmsMetricInt*   m_v_charge_out_tgt;   // 0x161E b3-4 target-from-charger (raw, scale deferred)
-    OvmsMetricInt*   m_v_charge_ac_usable; // 0x1665 useable power (raw, scale deferred)
+    OvmsMetricFloat* m_v_charge_ac_ilim;   // 0x1619 b4-5 AC current limit (A)
+    OvmsMetricFloat* m_v_charge_out;       // 0x161E b1-2 charger output (kW, unit inferred)
+    OvmsMetricFloat* m_v_charge_out_tgt;   // 0x161E b3-4 target-from-charger (kW, unit inferred)
+    OvmsMetricFloat* m_v_charge_ac_usable; // 0x1665 useable power (kW, unit inferred)
     OvmsMetricBool*  m_v_charge_myroom;   // 0x1692 byte 2 (idx 1) bit 0 = My Room active
+    OvmsMetricFloat* m_v_charge_grid_power;  // 0x161D AC charger/grid input power (kW) — live, for CSV/efficiency
     OvmsMetricFloat* m_v_env_hvac_power;  // 0x106E HVAC/cabin power draw (kW): OBC view (0x745) while charging, hybrid-control view (0x7D2) while driving
     OvmsMetricFloat* m_v_env_hvac_kwh;    // My-Room cabin energy (kWh): time-integral of m_v_env_hvac_power over the My-Room-active interval
+    OvmsMetricFloat* m_v_env_hvac_kwh_drive;  // Driving cabin/HVAC energy (kWh): per-trip time-integral of m_v_env_hvac_power while DRIVING (reset in NotifyVehicleOn)
     OvmsMetricInt*   m_v_charge_outcome;  // 0x1688 charging history / outcome enum
     OvmsMetricInt*   m_v_charge_stopreq;  // 0x1667 charge seq stop request (enum, partial)
     OvmsMetricVector<float>* m_v_bat_cap_full;  // 0x1D3E 8x u16 x0.01 Ah — per-module full-charge capacity (data collection)
     OvmsMetricVector<float>* m_v_bat_cap_alt;   // 0x1D3F 8x u16 x0.01 Ah — parallel array, function unconfirmed (data collection)
     OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
-    OvmsMetricFloat* m_v_bat_speed_water_pump;
     OvmsMetricFloat* m_v_bat_temp_coolant;
     OvmsMetricFloat* m_v_bat_temp_heater;
-    OvmsMetricInt* m_v_env_awaketime;
-    OvmsMetricFloat* m_v_pos_trip_start;
+    // Internal bookkeeping (not exposed as metrics):
+    int   m_awake_entered = 0;        // ms_m_monotonic seconds when AWAKE was entered (awake-timeout watchdog)
+    float m_trip_start_odo = 0.0f;    // odometer baseline at trip start
+    bool  m_trip_start_valid = false; // false until the baseline is seeded; reset on transition to DRIVING
+    OvmsMetricInt* m_v_e_awd;   // 0x1087 b2 AWD / X-MODE status (custom; no standard OVMS metric)
     
-    void NotifyVehicleOn();
-    void NotifyChargeStart();
+    void NotifyVehicleOn() override;
+    // NotifyChargeStart deliberately not overridden — see vehicle_toyota_etnga.cpp;
+    // session counters reset at session open in TransitionToChargeHandshakeState.
 
 private:
     static constexpr const char* TAG = "v-toyota-etnga";
     static constexpr const char* CHARGING_TAG = "v-toyota-etnga-charging";
-    uint32_t lastBatteryEnergyLogTime;
-    uint32_t lastChargerEnergyLogTime;
-    uint32_t lastGridEnergyLogTime;
-    uint32_t lastHvacEnergyLogTime;
+    // Energy-integrator timestamps (esp_log_timestamp ms; 0 = interval not started).
+    // Must be zero-initialized: the first poll reply can arrive before NotifyVehicleOn /
+    // NotifyChargeStart reset them, and a garbage dt would corrupt the persistent *_total metrics.
+    uint32_t lastBatteryEnergyLogTime = 0;
+    uint32_t lastChargerEnergyLogTime = 0;
+    float m_charge_obc_kw = 0.0f;   // diagnostic: raw 0x10D4 OBC "battery charging power" (under-reads on DC, issue #109)
+    uint32_t lastGridEnergyLogTime = 0;
+    uint32_t lastHvacEnergyLogTime = 0;
+    uint32_t lastHvacDriveEnergyLogTime = 0;
+
+    // XOR-folded signature of the last poll error logged at WARN (module/pid/code — see
+    // IncomingPollError): repeats of the same error (e.g. one TX failure per poll while
+    // the bus is wedged) drop to debug level until the signature changes.
+    uint32_t m_last_poll_error = 0;
 
     void InitializeMetrics();  // Initializes the metrics specific to this vehicle module
     void ResetStaleMetrics();  // Checks if state transition metrics are stale (and resets them)
+
+    // Charge session report (etnga_charge_report.cpp)
+    void UpdateChargeSessionStats();   // live aggregation while charging (peak power, temp range, type)
+    void RenderPowerSvg(std::ostream& out);  // stream the inline SVG power(+SOC)-vs-time chart from m_charge_session.svg
+    void GenerateChargeReport();       // write the session-end HTML report to /store/charge-reports/
+    void LogChargeEvent(const char* label);            // append a timestamped event
+    void AppendChargeCsvRow();                          // buffer one CSV row (header on first call)
+    void FlushChargeCsv();                              // write buffered CSV rows to <base>.csv
+    std::string ChargeReportDir();                      // "/sd/charge-reports" if SD mounted else "/store/..."
+    static const char* ChargeOutcomeLabel(int code);    // 0x1688 enum -> human text
+    static const char* HlcStateLabel(int code);         // 0x1666 DC HLC state enum -> human text ("" if unknown)
+    static const char* AcOpStatusLabel(int code);       // 0x1684 AC-Op state enum -> human text ("" for Stop/unknown)
+    std::string LookupLocationName(float lat, float lon); // matching OVMS named-location (geofence), or ""
 
     // Incoming message handling functions
     void IncomingAirConditionerSystem(uint16_t pid);
@@ -118,6 +205,7 @@ private:
     void IncomingHybridBatterySystem(uint16_t pid);
     void IncomingHybridControlSystem(uint16_t pid);
     void IncomingPlugInControlSystem(uint16_t pid);
+    void IncomingBrakeEpb(uint16_t pid);
     void IncomingTPMS(uint16_t pid);
     void UpdateTPMSAlert();
     bool TPMSCornerMapValid();
@@ -149,10 +237,10 @@ private:
     float CalculateChargerInputPower(const std::string& data);
     float CalculateAcTargetPower(const std::string& data);
     int   CalculateChargerOpStatus(const std::string& data);
-    int   CalculateAcCurrentLimitRaw(const std::string& data);
-    int   CalculateChargerOutputRaw(const std::string& data);
-    int   CalculateChargerOutputTargetRaw(const std::string& data);
-    int   CalculateAcUsableRaw(const std::string& data);
+    float CalculateAcCurrentLimit(const std::string& data);
+    float CalculateChargerOutput(const std::string& data);
+    float CalculateChargerOutputTarget(const std::string& data);
+    float CalculateAcUsable(const std::string& data);
     bool  CalculateMyRoom(const std::string& data);
     float CalculateAcConsumption(const std::string& data);
     int   CalculateChargeOutcome(const std::string& data);
@@ -165,6 +253,11 @@ private:
     bool CalculateReadyStatus(const std::string& data);
     int CalculateShiftPosition(const std::string& data);
     float CalculateVehicleSpeed(const std::string& data);
+    float CalculateThrottle(const std::string& data);
+    int   CalculateDriveMode(const std::string& data);
+    int   CalculateAwdMode(const std::string& data);
+    float CalculateFootBrake(const std::string& data);
+    bool  CalculateParkBrake(const std::string& data);
 
     // Metric setter functions
     void SetAcOpStatus(int v);
@@ -208,20 +301,31 @@ private:
     void SetStationMaxVoltage(float volts);
     void SetAcTargetPower(float kw);
     void SetChargerOpStatus(int v);
-    void SetAcCurrentLimitRaw(int v);
-    void SetChargerOutputRaw(int v);
-    void SetChargerOutputTargetRaw(int v);
-    void SetAcUsableRaw(int v);
+    void SetAcCurrentLimit(float v);
+    void SetChargerOutput(float v);
+    void SetChargerOutputTarget(float v);
+    void SetAcUsable(float v);
     void SetMyRoom(bool active);
     void SetHvacPower(float kw);
     void SetChargeOutcome(int v);
     void SetChargeStopReq(int v);
+    void SetThrottle(float pct);
+    void SetDriveMode(int mode);
+    void SetAwdMode(int mode);
+    void SetFootBrake(float pct);
+    void SetParkBrake(bool applied);
 
-    void LogMetricChange(OvmsMetricBool* metric, bool newValue, const std::string& label, const std::string& valueLabel);
-    void LogMetricChange(OvmsMetricFloat* metric, float newValue, const std::string& label,const std::string& units);
-    void LogMetricChange(OvmsMetricInt* metric, int newValue, const std::string& label, const std::string& valueLabel);
-    void LogMetricChange(OvmsMetricString* metric, const std::string& newValue, const std::string& label);
-    
+    // const char* throughout: these run on every poll reply, and std::string
+    // parameters meant heap allocations per call even with logging filtered out.
+    void LogMetricChange(OvmsMetricBool* metric, bool newValue, const char* label, const char* valueLabel);
+    void LogMetricChange(OvmsMetricFloat* metric, float newValue, const char* label, const char* units);
+    void LogMetricChange(OvmsMetricInt* metric, int newValue, const char* label, const char* valueLabel);
+    void LogMetricChange(OvmsMetricString* metric, const std::string& newValue, const char* label);
+
+    // Hours since the last sample on an energy-integrator channel; updates the channel
+    // timestamp. Implementation: etnga_metrics.cpp.
+    float EnergyIntervalHours(uint32_t& lastSampleTime);
+
     // State transition functions
     void HandleSleepState();
     void HandleAwakeState();
@@ -242,9 +346,7 @@ private:
     void RequestVIN();
     void IncomingVINSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, CAN_frame_format_t format, const std::string &data);
     void IncomingVINFail(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, int errorcode);
-    void RequestChargeType();
-    void DiagnosticSession();
-    
+
 };
 
 // CAN bus addresses
@@ -259,6 +361,8 @@ enum CANAddress
     PLUG_IN_CONTROL_SYSTEM_TX = 0x745,
     PLUG_IN_CONTROL_SYSTEM_RX = 0x74D,
     HPCM_HYBRIDPTCTR_RX = 0x7EA,
+    BRAKE_EPB_TX = 0x7B0,    // Brake/EPB ECU (ABS/VSC/TRC + Electric Parking Brake) — direct-poll, standard ISO-TP
+    BRAKE_EPB_RX = 0x7B8,
     TPMS_GW_TX = 0x7502A,    // (0x750 << 8) | 0x2A  -> MsgID 0x750, sub 0x2A (ISOTP_EXTADR mixed addressing)
     TPMS_GW_RX = 0x7582A,    // (0x758 << 8) | 0x2A  -> MsgID 0x758, sub 0x2A
 };
@@ -289,6 +393,8 @@ enum CANPID
     PID_CHARGING_LID = 0x1625,
     PID_CHARGING_VOLTAGE_TYPE = 0x161C,
     PID_HVAC_SETPOINT = 0x1036,
+    PID_HEATER_POWER = 0x1086,            // HV electric heater power (W, 2-byte cluster, split TBD); >0 => v.e.heating
+    PID_BLOWER_LEVEL = 0x2801,            // Blower level (u8 1-7) => v.e.cabinfan %
     PID_ODOMETER = 0x1FA6,
     PID_PISW_STATUS = 0x1669,
     PID_READY_SIGNAL = 0x1076,
@@ -310,9 +416,9 @@ enum CANPID
     PID_DC_CHARGER_MAX_CURRENT = 0x1679,  // u16 BE x1 A; station advertised max current (CCS)
     PID_DC_CHARGER_MAX_VOLTAGE = 0x1681,  // u16 BE x1 V; station advertised max voltage (CCS)
 
-    PID_CHARGER_STATE_CLUSTER = 0x1619,   // AC-only: b1-2 target power (biased-32768 x0.01kW), b3 op status, b4-5 current limit (raw)
-    PID_CHARGER_OUTPUT_POWER = 0x161E,    // AC-only: b1-2 output (raw), b3-4 target-from-charger (raw)
-    PID_AC_USABLE_POWER = 0x1665,         // AC-only: u8 useable power (raw)
+    PID_CHARGER_STATE_CLUSTER = 0x1619,   // AC-only: b1-2 target power (biased-32768 x0.01 kW), b3 op status enum, b4-5 current limit (biased-32768 x0.01 A)
+    PID_CHARGER_OUTPUT_POWER = 0x161E,    // AC-only: b1-2 output (x5/1000 kW, unit inferred), b3-4 target-from-charger (x5/1000 kW, unit inferred)
+    PID_AC_USABLE_POWER = 0x1665,         // AC-only: u8 x0.01 kW (unit inferred)
 
     PID_AC_CONSUMPTION = 0x106E,    // A/C consumption power: u8 x0.05 kW/LSB (50 W/LSB) — cabin draw, OBC view
     PID_CHARGE_STOP_REQ = 0x1667,   // Charge Seq Stop Request from CCM: u8 enum (0x00 Normal / 0x06 HLC-error; partial)
@@ -322,13 +428,26 @@ enum CANPID
     PID_TPMS_TEMPS = 0x1004,      // gateway 0x2A: 5x u8;  C = raw - 40
     PID_TPMS_CORNERS = 0x2021,    // gateway 0x2A: 5x u8 corner enum (0 none/1 FL/2 FR/3 RL/4 RR)
 
+    // 2026-06-06 pins — EV ECU (0x7D2) driver-input signals
+    PID_THROTTLE = 0x1060,          // b1: accelerator position, u8 x0.5 %/LSB (0x00-0xC8 -> 0-100%)
+    PID_DRIVE_MODE_SELECT = 0x1004, // b1: Eco/Normal/Power enum. NOTE: same numeric value as PID_TPMS_TEMPS,
+                                    //     but dispatched on a different ECU (0x7DA vs TPMS gateway) so no conflict.
+    PID_AWD_MODE = 0x1087,          // b2: X-MODE/AWD status enum
+
+    // 2026-06-06 pins — Brake/EPB ECU (0x7B0) direct-poll
+    PID_BRAKE_PEDAL_STROKE = 0x104C, // b1: brake pedal stroke, u8 ~1 mm/LSB (0 rest .. ~67 full)
+    PID_EPB_STATUS = 0x1045,         // b1 = RH actuator status enum; handbrake applied = 0x00 (Park Applied)
+
 };
 
 // RX buffer access functions
 
 inline uint8_t GetRxBByte(const std::string& rxbuf, size_t index)
 {
-    return static_cast<uint8_t>(rxbuf[index]);
+    // Bounds-checked: a short/garbled UDS reply must not read past the buffer.
+    // Handlers should still length-check multi-byte payloads before decoding
+    // (a zero-fill is memory-safe but not valid data).
+    return (index < rxbuf.size()) ? static_cast<uint8_t>(rxbuf[index]) : 0;
 }
 
 inline uint16_t GetRxBUint16(const std::string& rxbuf, size_t index)
@@ -373,36 +492,13 @@ inline bool GetRxBBit(const std::string& rxbuf, size_t byteIndex, size_t bitInde
 }
 
 inline const char* ConvertPollStateToString(int state) {
-    const char* pollStateText;
-
-    switch (state) {
-        case (PollState::SLEEP):
-            pollStateText = "SLEEP";
-            break;
-        case (PollState::AWAKE):
-            pollStateText = "AWAKE";
-            break;
-        case (PollState::DRIVING):
-            pollStateText = "DRIVING";
-            break;
-        case (PollState::CHARGE_HANDSHAKE):
-            pollStateText = "CHARGE_HANDSHAKE";
-            break;
-        case (PollState::CHARGE_WAIT):
-            pollStateText = "CHARGE_WAIT";
-            break;
-        case (PollState::CHARGE_AC):
-            pollStateText = "CHARGE_AC";
-            break;
-        case (PollState::CHARGE_DC):
-            pollStateText = "CHARGE_DC";
-            break;
-        default:
-            pollStateText = "UNKNOWN";
-            break;
-    }
-
-    return pollStateText;
+    // Indexed by PollState (SLEEP..CHARGE_DC).
+    static const char* const names[] = {
+        "SLEEP", "AWAKE", "DRIVING", "CHARGE_HANDSHAKE", "CHARGE_WAIT", "CHARGE_AC", "CHARGE_DC"
+    };
+    if (state < 0 || state >= (int)(sizeof(names) / sizeof(names[0])))
+        return "UNKNOWN";
+    return names[state];
 }
 
 #endif // __VEHICLE_TOYOTA_ETNGA_H__
