@@ -289,41 +289,29 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
         FlushChargeCsv();
 }
 
-// Write the buffered CSV rows to <base>.csv (truncating on the first flush of a session).
+// Write the buffered CSV rows to <base>.csv via the async I/O worker.
+// FIFO order guarantees the first (truncate) write lands before later appends.
 void OvmsVehicleToyotaETNGA::FlushChargeCsv()
 {
     if (m_charge_session.csv_buf.empty() || m_charge_session.base.empty())
         return;
-    std::ofstream f(m_charge_session.base + ".csv", m_charge_session.csv_file_created
-        ? (std::ios::out | std::ios::app)
-        : (std::ios::out | std::ios::trunc));
-    if (!f) {
-        // Can't open (SD removed/unmounted mid-charge?): keep the rows for retry, but
-        // bound the pending buffer — at ~100 B/row this otherwise grows without limit
-        // for the rest of the session (heap safety).
-        if (m_charge_session.csv_buf.size() > 16384) {
-            ESP_LOGE(TAG, "Charge CSV unwritable, buffer over limit — discarding buffered rows: %s.csv",
-                m_charge_session.base.c_str());
-            m_charge_session.csv_buf.clear();
-        }
-        return;
+    // Hand the buffered rows to the async writer instead of writing on the Events task.
+    // FIFO order guarantees the first (truncate) write lands before later appends.
+    etnga_io_job* job = new etnga_io_job;
+    job->op   = m_charge_session.csv_file_created ? etnga_io_job::WRITE_APPEND
+                                                  : etnga_io_job::WRITE_TRUNCATE;
+    job->path = m_charge_session.base + ".csv";
+    job->data = m_charge_session.csv_buf;
+    if (ChargeIoEnqueue(job)) {
+        m_charge_session.csv_buf.clear();
+        m_charge_session.csv_file_created = true;
+        m_charge_session.last_csv_flush = StandardMetrics.ms_m_monotonic->AsInt();
+    } else if (m_charge_session.csv_buf.size() > 16384) {
+        // Worker persistently backlogged: bound the pending buffer (heap safety),
+        // matching the prior synchronous behavior.
+        ESP_LOGE(TAG, "Charge CSV buffer over limit — discarding buffered rows");
+        m_charge_session.csv_buf.clear();
     }
-    f << m_charge_session.csv_buf;
-    f.flush();
-    if (f.fail()) {
-        // Keep the rows for the next attempt (disk full / SD hiccup) — clearing here
-        // silently lost them. last_csv_flush stays old, so retry on the next row.
-        ESP_LOGE(TAG, "Charge CSV write failed (disk full?): %s.csv", m_charge_session.base.c_str());
-        if (m_charge_session.csv_buf.size() > 16384) {
-            // Filesystem persistently unwritable: bound the pending buffer (heap safety).
-            ESP_LOGE(TAG, "Charge CSV buffer over limit — discarding buffered rows");
-            m_charge_session.csv_buf.clear();
-        }
-        return;
-    }
-    m_charge_session.csv_buf.clear();
-    m_charge_session.csv_file_created = true;
-    m_charge_session.last_csv_flush = StandardMetrics.ms_m_monotonic->AsInt();
 }
 
 // Retain only the newest CHARGE_REPORT_MAX sessions; delete both .html and .csv for each pruned stem.
