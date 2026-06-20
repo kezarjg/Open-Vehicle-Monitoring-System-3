@@ -99,16 +99,18 @@ void OvmsVehicleToyotaETNGA::StartChargeIoTask()
     if (m_io_task) return;
     if (!m_io_queue)   m_io_queue   = xQueueCreate(8, sizeof(etnga_io_job*));
     if (!m_io_stopped) m_io_stopped = xSemaphoreCreateBinary();
-    if (m_io_queue)
-        xTaskCreatePinnedToCore(ChargeIoTaskEntry, "etnga_io", 4096, this, 3, &m_io_task, CORE(1));
+    if (m_io_queue && m_io_stopped)
+        xTaskCreatePinnedToCore(ChargeIoTaskEntry, "etnga_io", 4096, this, 2, &m_io_task, CORE(1));
+    else
+        ESP_LOGE(TAG, "charge-io: queue/semaphore alloc failed, worker not started");
 }
 
 bool OvmsVehicleToyotaETNGA::ChargeIoEnqueue(etnga_io_job* job)
 {
     StartChargeIoTask();
-    if (!m_io_queue || xQueueSend(m_io_queue, &job, 0) != pdTRUE) {
+    if (!m_io_queue || !m_io_task || xQueueSend(m_io_queue, &job, 0) != pdTRUE) {
         m_io_dropcnt++;
-        ESP_LOGW(TAG, "charge-io: queue full, dropped write to %s (dropcnt=%u)",
+        ESP_LOGW(TAG, "charge-io: queue full or worker not running, dropped write to %s (dropcnt=%u)",
             job->path.c_str(), m_io_dropcnt);
         delete job;
         return false;
@@ -122,6 +124,10 @@ void OvmsVehicleToyotaETNGA::StopChargeIoTask()
     etnga_io_job* job = new etnga_io_job;
     job->op = etnga_io_job::STOP;
     if (xQueueSend(m_io_queue, &job, pdMS_TO_TICKS(100)) != pdTRUE) { delete job; return; }
+    // Bounded residual: if the worker is wedged in an SD write past the 2s join (in-flight write
+    // + stalled SD during a no-reboot vehicle switch — near-impossible in practice, as the queue
+    // is empty between charges), it could outlive this object. We accept that over a vTaskDelete
+    // here, which risks a worse FATFS-lock wedge if the task is mid-fwrite.
     // Wait for the worker to drain and exit, but never block module shutdown forever.
     if (m_io_stopped) xSemaphoreTake(m_io_stopped, pdMS_TO_TICKS(2000));
 }
