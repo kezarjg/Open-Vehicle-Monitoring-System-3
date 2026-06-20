@@ -530,7 +530,12 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
           << "#map=17/" << m_charge_session.start_lat << "/" << m_charge_session.start_lon << "\">map</a>)</dd>\n";
     }
     if (m_charge_session.amb_seen) {
-        snprintf(b, sizeof(b), "%.0f&deg;C &rarr; %.0f&deg;C", m_charge_session.amb_min, m_charge_session.amb_max);
+        // Follow the user's configured temperature unit (°C or °F).
+        metric_unit_t tu = OvmsMetricGetUserUnit(GrpTemp, Celcius);
+        const char* tlabel = OvmsMetricUnitLabel(tu);
+        float amb_lo = UnitConvert(Celcius, tu, m_charge_session.amb_min);
+        float amb_hi = UnitConvert(Celcius, tu, m_charge_session.amb_max);
+        snprintf(b, sizeof(b), "%.0f%s &rarr; %.0f%s", amb_lo, tlabel, amb_hi, tlabel);
         f << "<dt>Ambient</dt><dd>" << b << "</dd>\n";
     }
     f << "<dt>Type</dt><dd>" << (m_charge_session.is_dc ? "DC fast" : "AC") << "</dd>\n";
@@ -558,7 +563,12 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
         f << acc;
     }
     if (m_charge_session.temp_seen) {
-        snprintf(b, sizeof(b), "%.0f&deg;C &rarr; %.0f&deg;C", m_charge_session.temp_min, m_charge_session.temp_max);
+        // Follow the user's configured temperature unit (°C or °F).
+        metric_unit_t tu = OvmsMetricGetUserUnit(GrpTemp, Celcius);
+        const char* tlabel = OvmsMetricUnitLabel(tu);
+        float bat_lo = UnitConvert(Celcius, tu, m_charge_session.temp_min);
+        float bat_hi = UnitConvert(Celcius, tu, m_charge_session.temp_max);
+        snprintf(b, sizeof(b), "%.0f%s &rarr; %.0f%s", bat_lo, tlabel, bat_hi, tlabel);
         f << "<dt>Battery temp</dt><dd>" << b << "</dd>\n";
     }
     {
@@ -581,7 +591,9 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
 
     f << "<h2 class=\"est\">Estimates</h2>\n<dl class=\"est\">\n";
     if (!m_charge_session.is_dc && grid_kwh > 0.01f) {   // efficiency needs grid energy (AC only)
-        snprintf(b, sizeof(b), "%.0f%% (%.2f kWh loss)", energy_kwh/grid_kwh*100.0f, grid_kwh-energy_kwh);
+        float loss = grid_kwh - energy_kwh;   // negative would imply delivered > grid (measurement skew)
+        snprintf(b, sizeof(b), "%.0f%% (%.2f kWh %s)", energy_kwh/grid_kwh*100.0f, fabsf(loss),
+            loss >= 0.0f ? "loss" : "gain?");
         f << "<dt>Charging efficiency</dt><dd>" << b << "</dd>\n";
     }
     if (start_soc >= 0 && end_soc > start_soc && m_charge_session.delivered_ah > 0.5f) {
