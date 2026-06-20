@@ -32,6 +32,8 @@
 #define __ESP32WIFI_H__
 
 #include <string>
+#include <vector>
+#include <climits>
 #include <stdint.h>
 #include "pcp.h"
 #include "esp_err.h"
@@ -106,6 +108,14 @@ class esp32wifi : public pcp, public InternalRamAllocated
     void SupportSummary(OvmsWriter* writer);
     void ConfigChanged(std::string event, void *data);
 
+    // --- Priority networks ---
+    void ParsePriorityList(const std::string& csv);   // fills m_priority_list
+    bool PriorityActive();                      // feature enabled + list + scanning mode + CLIENT/APCLIENT
+    int  GetNetworkPriority(const char* ssid);  // index in list (0=top); INT_MAX if unlisted
+    int  SelectPriorityAP(wifi_ap_record_t* list, int count, int betterThan, int rssiFloor);
+    bool CurrentIsTopPriority();                // connected SSID has priority index 0
+    void StartUpgradeScan();                    // non-blocking scan tagged as upgrade probe
+
   protected:
     bool m_poweredup;
     OvmsRecMutex m_mutex;
@@ -143,6 +153,14 @@ class esp32wifi : public pcp, public InternalRamAllocated
     int m_ap2client_timeout;                     //!< Wifi Mode APClient to client timeout in minutes
     bool m_ap2client_enabled;                    //!< Wifi Mode APClient to client enable/disable
     bool m_ap2client_active;                     //!< Wifi Mode APClient enabled and timeout not reached
+    // --- Priority networks ---
+    bool m_priority_enable;                      //!< network wifi.priority.enable
+    int  m_priority_interval;                    //!< upgrade-scan period [s], min 10
+    std::vector<std::string> m_priority_list;    //!< SSIDs, highest priority first (index 0 = top)
+    bool m_sta_upgrade_scan;                     //!< current in-flight scan is an upgrade probe
+    bool m_sta_switching;                        //!< deliberate switch in progress; suppress auto-reconnect
+    uint32_t m_upgrade_scan_next;                //!< monotonic time of next allowed upgrade scan
+    uint32_t m_sta_switch_deadline;              //!< failsafe: clear m_sta_switching after this time
   };
 
 #endif //#ifndef __ESP32WIFI_H__
