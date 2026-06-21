@@ -348,6 +348,17 @@ void OvmsVehicleToyotaETNGA::TransitionToSleepState()
         m_sleep_backoff_idx++;
     SetPollState(PollState::SLEEP);
     SetAwake(false);
+    // 12V aux metrics come only from the EV ECU (answers in READY/charging); clear the
+    // PID-sourced values when leaving those states so stale readings aren't shown while off.
+    StandardMetrics.ms_v_bat_12v_current->Clear();
+    StandardMetrics.ms_v_env_charging12v->SetValue(false);
+    StandardMetrics.ms_v_env_aux12v->SetValue(false);
+    m_v_bat_12v_voltage_pid->Clear();
+    m_v_bat_12v_temp->Clear();
+    m_v_bat_12v_cac->Clear();
+    m_v_bat_12v_charge_ah->Clear();
+    m_v_bat_12v_discharge_ah->Clear();
+    m_v_bat_12v_readyon_h->Clear();
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
@@ -367,6 +378,17 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
     // arm state is reset by TransitionToSleepState / TransitionToDrivingState.
     SetPollState(PollState::AWAKE);
     m_awake_entered = monotonic;
+    // 12V aux metrics come only from the EV ECU (answers in READY/charging); clear the
+    // PID-sourced values when leaving those states so stale readings aren't shown while off.
+    StandardMetrics.ms_v_bat_12v_current->Clear();
+    StandardMetrics.ms_v_env_charging12v->SetValue(false);
+    StandardMetrics.ms_v_env_aux12v->SetValue(false);
+    m_v_bat_12v_voltage_pid->Clear();
+    m_v_bat_12v_temp->Clear();
+    m_v_bat_12v_cac->Clear();
+    m_v_bat_12v_charge_ah->Clear();
+    m_v_bat_12v_discharge_ah->Clear();
+    m_v_bat_12v_readyon_h->Clear();
     // Leaving the charge sub-machine: close the session. ms_v_charge_state is "done" only
     // when energy was being delivered (AC/DC — normally these exit via CHARGE_WAIT; the
     // direct path is a safety net); HANDSHAKE/WAIT exits just clear it.

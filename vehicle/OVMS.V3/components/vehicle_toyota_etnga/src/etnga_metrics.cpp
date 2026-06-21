@@ -42,6 +42,12 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     m_v_bat_soc_bms = MyMetrics.InitFloat("xte.v.b.soc.bms", SM_STALE_MID, 0.0f, Percentage, true);  // This variable stores the SOC as reported by the BMS
     m_v_bat_temp_coolant = MyMetrics.InitFloat("xte.v.b.temp.coolant", SM_STALE_MID, 0.0f, Celcius);  // This variable stores the temperature of the battery coolant
     m_v_bat_temp_heater = MyMetrics.InitFloat("xte.v.b.temp.heater", SM_STALE_MID, 0.0f, Celcius);  // This variable stores the temperature of the battery coolant
+    m_v_bat_12v_voltage_pid = MyMetrics.InitFloat("xte.v.b.12v.voltage", SM_STALE_MID, 0.0f, Volts);  // 0x15EE EV-ECU PID 12V voltage (compare vs hardware v.b.12v.voltage)
+    m_v_bat_12v_temp = MyMetrics.InitFloat("xte.v.b.12v.temp", SM_STALE_MID, 0.0f, Celcius);   // 0x15F8 12V aux battery temperature
+    m_v_bat_12v_cac  = MyMetrics.InitFloat("xte.v.b.12v.cac",  SM_STALE_MID, 0.0f, AmpHours);  // 0x15E5 12V aux full-charge capacity
+    m_v_bat_12v_charge_ah    = MyMetrics.InitFloat("xte.v.b.12v.charge.ah",    SM_STALE_MAX, 0.0f, AmpHours); // 0x15E8 lifetime charge integral
+    m_v_bat_12v_discharge_ah = MyMetrics.InitFloat("xte.v.b.12v.discharge.ah", SM_STALE_MAX, 0.0f, AmpHours); // 0x15E8 lifetime discharge integral
+    m_v_bat_12v_readyon_h    = MyMetrics.InitFloat("xte.v.b.12v.readyon.h",    SM_STALE_MAX, 0.0f, Hours);    // 0x15E8 integrated Ready-ON time
     m_v_e_awd = MyMetrics.InitInt("xte.v.e.awd", SM_STALE_MID);  // 0x1087 b2 AWD / X-MODE status (custom)
 
     // Set initial values for metrics
@@ -499,6 +505,38 @@ void OvmsVehicleToyotaETNGA::SetParkBrake(bool applied)
     LogMetricChange(StandardMetrics.ms_v_env_handbrake, applied, "Park Brake", applied ? "Applied" : "Released");
     StandardMetrics.ms_v_env_handbrake->SetValue(applied);
 }
+
+// --- 12V auxiliary battery (EV ECU 0x7D2) ---
+
+float OvmsVehicleToyotaETNGA::CalculateAux12vCurrent(const std::string& data)     { return (static_cast<int>(GetRxBUint16(data, 0)) - 0x8000) * 0.0038147f; } // 0x15F7 biased-32768 (raw-0x8000) x0.0038147 A, bidirectional
+float OvmsVehicleToyotaETNGA::CalculateAux12vVoltage(const std::string& data)     { return GetRxBUint16(data, 0) * 5.0f / 4096.0f; }                        // 0x15EE u16 x5/4096 V
+float OvmsVehicleToyotaETNGA::CalculateAux12vTemperature(const std::string& data) { return static_cast<float>(GetRxBUint16(data, 0) - 400) * 0.1f; }          // 0x15F8 (raw-400) x0.1 C
+float OvmsVehicleToyotaETNGA::CalculateAux12vFullCharge(const std::string& data)  { return GetRxBByte(data, 0) * 0.5f; }                                     // 0x15E5 u8 x0.5 Ah
+
+void OvmsVehicleToyotaETNGA::DecodeAux12vIntegrators(const std::string& data)
+{
+    // 0x15E8 (EV ECU 0x7D2), 17-byte aux-battery cluster (1-indexed per solterra-can doc):
+    //   bytes 1-4   charging integrated current    u32 BE x0.1 Ah
+    //   bytes 5-8   discharging integrated current  u32 BE x0.1 Ah
+    //   bytes 11-12 Integrated Ready ON Time        u16 BE hours
+    if (data.size() < 12)
+        return;
+    m_v_bat_12v_charge_ah->SetValue(static_cast<float>(GetRxBUint32(data, 0)) / 10.0f);
+    m_v_bat_12v_discharge_ah->SetValue(static_cast<float>(GetRxBUint32(data, 4)) / 10.0f);
+    m_v_bat_12v_readyon_h->SetValue(static_cast<float>(GetRxBUint16(data, 10)));
+}
+
+void OvmsVehicleToyotaETNGA::SetAux12vCurrent(float v)
+{
+    StandardMetrics.ms_v_bat_12v_current->SetValue(v);
+    // Positive current = HV->12V DC-DC pushing charge into the aux battery.
+    StandardMetrics.ms_v_env_charging12v->SetValue(v > 0.5f);
+    // Any valid EV-ECU 12V reply means the aux system is energized.
+    StandardMetrics.ms_v_env_aux12v->SetValue(true);
+}
+void OvmsVehicleToyotaETNGA::SetAux12vVoltage(float v)     { m_v_bat_12v_voltage_pid->SetValue(v); }
+void OvmsVehicleToyotaETNGA::SetAux12vTemperature(float v) { m_v_bat_12v_temp->SetValue(v); }
+void OvmsVehicleToyotaETNGA::SetAux12vFullCharge(float v)  { m_v_bat_12v_cac->SetValue(v); }
 
 int OvmsVehicleToyotaETNGA::CalculateControlMode(const std::string& data)
 {

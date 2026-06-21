@@ -155,6 +155,12 @@ protected:
     OvmsMetricFloat* m_v_bat_soc_bms;
     OvmsMetricFloat* m_v_bat_temp_coolant;
     OvmsMetricFloat* m_v_bat_temp_heater;
+    OvmsMetricFloat* m_v_bat_12v_voltage_pid;  // xte.v.b.12v.voltage 0x15EE EV-ECU PID read (compare vs hardware v.b.12v.voltage)
+    OvmsMetricFloat* m_v_bat_12v_temp;     // xte.v.b.12v.temp 0x15F8 12V aux temperature (C)
+    OvmsMetricFloat* m_v_bat_12v_cac;      // xte.v.b.12v.cac 0x15E5 12V aux full-charge capacity (Ah)
+    OvmsMetricFloat* m_v_bat_12v_charge_ah;    // xte.v.b.12v.charge.ah    0x15E8 bytes 1-4  lifetime charge integral (Ah)
+    OvmsMetricFloat* m_v_bat_12v_discharge_ah; // xte.v.b.12v.discharge.ah 0x15E8 bytes 5-8  lifetime discharge integral (Ah)
+    OvmsMetricFloat* m_v_bat_12v_readyon_h;    // xte.v.b.12v.readyon.h    0x15E8 bytes 11-12 integrated Ready-ON time (h)
     // Internal bookkeeping (not exposed as metrics):
     int   m_awake_entered = 0;        // ms_m_monotonic seconds when AWAKE was entered (awake-timeout watchdog)
     float m_trip_start_odo = 0.0f;    // odometer baseline at trip start
@@ -276,6 +282,10 @@ private:
     int   CalculateAwdMode(const std::string& data);
     float CalculateFootBrake(const std::string& data);
     bool  CalculateParkBrake(const std::string& data);
+    float CalculateAux12vCurrent(const std::string& data);
+    float CalculateAux12vVoltage(const std::string& data);
+    float CalculateAux12vTemperature(const std::string& data);
+    float CalculateAux12vFullCharge(const std::string& data);
 
     // Metric setter functions
     void SetAcOpStatus(int v);
@@ -332,6 +342,11 @@ private:
     void SetAwdMode(int mode);
     void SetFootBrake(float pct);
     void SetParkBrake(bool applied);
+    void SetAux12vCurrent(float v);
+    void SetAux12vVoltage(float v);
+    void SetAux12vTemperature(float v);
+    void SetAux12vFullCharge(float v);
+    void DecodeAux12vIntegrators(const std::string& data);
 
     // const char* throughout: these run on every poll reply, and std::string
     // parameters meant heap allocations per call even with logging filtered out.
@@ -455,6 +470,13 @@ enum CANPID
     // 2026-06-06 pins — Brake/EPB ECU (0x7B0) direct-poll
     PID_BRAKE_PEDAL_STROKE = 0x104C, // b1: brake pedal stroke, u8 ~1 mm/LSB (0 rest .. ~67 full)
     PID_EPB_STATUS = 0x1045,         // b1 = RH actuator status enum; handbrake applied = 0x00 (Park Applied)
+
+    // 12V auxiliary battery — EV ECU (0x7D2 req / 0x7DA resp), READDATA 0x22
+    PID_AUX_BATTERY_CURRENT = 0x15F7,      // 12V aux: u16 BE biased-32768 (raw-0x8000) x0.0038147 A, bidirectional
+    PID_AUX_BATTERY_VOLTAGE = 0x15EE,      // 12V aux: u16 BE x5/4096 V
+    PID_AUX_BATTERY_TEMP = 0x15F8,         // 12V aux: u16 BE (raw-400) x0.1 C
+    PID_AUX_BATTERY_FULL_CHARGE = 0x15E5,  // 12V aux: u8 x0.5 Ah
+    PID_AUX_BATTERY_INTEGRATORS = 0x15E8,  // 12V aux cluster (EV ECU 0x7D2): lifetime charge/discharge Ah + ready-on hours
 
 };
 
