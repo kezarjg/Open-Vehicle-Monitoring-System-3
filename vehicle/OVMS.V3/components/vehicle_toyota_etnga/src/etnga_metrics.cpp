@@ -849,7 +849,9 @@ void OvmsVehicleToyotaETNGA::SetChargeType(int chargeType)
     // 0x161C "Charger Power Supply Voltage Type" enum (confirmed 2026-05-10):
     // 0 = None/unconnected, 1 = 100V Series, 2 = 200V Series. raw 0 must clear the
     // metric (no charge connected), NOT report "ccs" — that was the prior bug.
-    // DCFC value is still TBD pending a real DC charge.
+    // This DID encodes only the AC voltage type: a real DC fast-charge (2026-06-13) read 00
+    // here right up to engage, and 0x161C isn't polled in CHARGE_DC. The DC connector ("ccs")
+    // is therefore set from the charge state in TransitionToChargeDcState, not from this poll.
     switch (chargeType)
     {
         case 0x00:
