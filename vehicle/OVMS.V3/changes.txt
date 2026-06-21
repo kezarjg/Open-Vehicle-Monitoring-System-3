@@ -18,6 +18,10 @@ Open Vehicle Monitor System v3 - Change log
     and, after a sustained idle wait, sleeps until charging actually starts (waking
     automatically) — so a scheduled/overnight charge is captured in one session instead of
     being missed when the module previously browned out. No config changes.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): new 12V auxiliary battery health metrics from the EV ECU (0x7D2):
+    the standard v.b.12v.current trace and v.e.charging12v / v.e.aux12v indicators now populate the
+    "12V Battery History" chart, plus xte.v.b.12v.voltage (hi-res, alongside the module's own ADC
+    v.b.12v.voltage), .temp, .cac (capacity), and lifetime .charge.ah / .discharge.ah / .readyon.h.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): charge report v2 — each session now writes an
     HTML report (location, ambient, human-readable outcome, inline power-vs-time chart, event log,
     efficiency/implied-capacity estimates) plus a fine-grained per-sample CSV (delivered/offered/

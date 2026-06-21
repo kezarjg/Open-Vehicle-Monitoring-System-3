@@ -500,6 +500,56 @@ each column is the poll interval in seconds (``0`` = not polled in that state). 
      - 0
      - 0
      - TPMS temperatures; DRIVING @60 s
+   * - ``PID_AUX_BATTERY_CURRENT`` (``0x15F7``)
+     - EV ECU ``0x7D2``
+     - 0
+     - 0
+     - 10
+     - 0
+     - 0
+     - 10
+     - 10
+     - 12V aux current, ``(raw-0x8000)×0.0038147`` A (bidirectional) → ``v.b.12v.current`` + ``v.e.charging12v`` / ``v.e.aux12v``
+   * - ``PID_AUX_BATTERY_VOLTAGE`` (``0x15EE``)
+     - EV ECU ``0x7D2``
+     - 0
+     - 0
+     - 30
+     - 0
+     - 0
+     - 30
+     - 30
+     - 12V aux voltage (hi-res), ``u16×5/4096`` V → ``xte.v.b.12v.voltage``
+   * - ``PID_AUX_BATTERY_TEMP`` (``0x15F8``)
+     - EV ECU ``0x7D2``
+     - 0
+     - 0
+     - 120
+     - 0
+     - 0
+     - 120
+     - 120
+     - 12V aux temp, ``(raw-400)×0.1`` °C
+   * - ``PID_AUX_BATTERY_FULL_CHARGE`` (``0x15E5``)
+     - EV ECU ``0x7D2``
+     - 0
+     - 0
+     - 120
+     - 0
+     - 0
+     - 120
+     - 120
+     - 12V aux capacity (CAC), ``u8×0.5`` Ah
+   * - ``PID_AUX_BATTERY_INTEGRATORS`` (``0x15E8``)
+     - EV ECU ``0x7D2``
+     - 0
+     - 0
+     - 120
+     - 0
+     - 0
+     - 120
+     - 120
+     - 12V lifetime charge/discharge Ah + ready-on hours
 
 Column headers: **HS** = CHARGE_HANDSHAKE, **WAIT** = CHARGE_WAIT, **AC** = CHARGE_AC,
 **DC** = CHARGE_DC.  ``0`` = not polled in that state.

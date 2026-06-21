@@ -199,6 +199,35 @@ void OvmsVehicleToyotaETNGA::IncomingHybridControlSystem(uint16_t pid)
             break;
         }
 
+        case PID_AUX_BATTERY_CURRENT: {
+            if (m_rxbuf.size() < 2) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
+            SetAux12vCurrent(CalculateAux12vCurrent(m_rxbuf));
+            break;
+        }
+
+        case PID_AUX_BATTERY_VOLTAGE: {
+            if (m_rxbuf.size() < 2) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
+            SetAux12vVoltage(CalculateAux12vVoltage(m_rxbuf));
+            break;
+        }
+
+        case PID_AUX_BATTERY_TEMP: {
+            if (m_rxbuf.size() < 2) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
+            SetAux12vTemperature(CalculateAux12vTemperature(m_rxbuf));
+            break;
+        }
+
+        case PID_AUX_BATTERY_FULL_CHARGE: {
+            if (m_rxbuf.size() < 1) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
+            SetAux12vFullCharge(CalculateAux12vFullCharge(m_rxbuf));
+            break;
+        }
+
+        case PID_AUX_BATTERY_INTEGRATORS: {
+            DecodeAux12vIntegrators(m_rxbuf);
+            break;
+        }
+
         // Add more cases for other PIDs if needed
 
         default:
