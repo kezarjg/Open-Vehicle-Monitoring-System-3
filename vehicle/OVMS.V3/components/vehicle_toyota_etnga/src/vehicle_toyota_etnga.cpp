@@ -163,7 +163,11 @@ OvmsVehicleToyotaETNGA::OvmsVehicleToyotaETNGA()
         new OvmsPoller::StandardVehiclePollSeries(
             nullptr, GetPollerSignal(), static_cast<uint16_t>(PollState::CHARGE_HANDSHAKE)));
     charge_series->PollSetPidList(2 /* CAN2 bus index */, obdii_polls_charge);
-    PollRequest(m_can2, "!xte.charge", charge_series);
+    // The "!v." name prefix is the poller's documented contract (poller/docs/API.rst):
+    // series so named are auto-removed on vehicle shutdown. Without it this series held a
+    // raw signal aliasing the vehicle's m_pollsignal and was dereferenced after teardown
+    // freed it (use-after-free crash on a no-reboot vehicle switch).
+    PollRequest(m_can2, "!v.xte.charge", charge_series);
 
     PollSetThrottling(0);
 

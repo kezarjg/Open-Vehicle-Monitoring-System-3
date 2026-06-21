@@ -464,7 +464,9 @@ void OvmsVehicleToyotaETNGA::RequestVIN()
             HYBRID_CONTROL_SYSTEM_TX, HYBRID_CONTROL_SYSTEM_RX,
             VEHICLE_POLL_TYPE_READDATA, PID_VIN,
             ISOTP_STD, 0, /*retry_fail=*/3));
-    PollRequest(m_can2, "!xte.vin", entry);
+    // "!v." prefix => auto-removed on vehicle shutdown (poller/docs/API.rst). This OnceOffPoll
+    // binds 'this', so leaving it registered past teardown is a use-after-free.
+    PollRequest(m_can2, "!v.xte.vin", entry);
 }
 
 void OvmsVehicleToyotaETNGA::IncomingVINSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, CAN_frame_format_t format, const std::string &data)
