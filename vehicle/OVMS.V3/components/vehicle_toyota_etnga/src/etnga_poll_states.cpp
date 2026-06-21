@@ -396,6 +396,7 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
         bool delivered = (oldState == PollState::CHARGE_AC || oldState == PollState::CHARGE_DC);
         StandardMetrics.ms_v_charge_state->SetValue(delivered ? "done" : "");
         StandardMetrics.ms_v_charge_mode->SetValue("");   // clear AC/DC indicator on session end
+        StandardMetrics.ms_v_charge_type->SetValue("");   // clear connector type (DC sets "ccs" via state; AC safety-net)
         if (m_charge_session.in_session) {
             ESP_LOGI(TAG, "Charge session closed");
             LogChargeEvent("Unplugged");
@@ -507,5 +508,10 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
     SetChargingStatus(true);
     SetChargeState(PollState::CHARGE_DC);
     StandardMetrics.ms_v_charge_mode->SetValue("performance");   // DC fast charge -> ABRP is_dcfc (v.c.mode == "performance")
+    // v.c.type is the connector/standard axis (type1/type2/ccs/...), separate from v.c.mode.
+    // 0x161C only encodes the AC voltage type (reads 00 on DC, and isn't polled in CHARGE_DC),
+    // so the DC connector can't come from the poll — set it from the state we already detect.
+    // The e-TNGA DC inlet is CCS. Cleared on session end in TransitionToAwakeState.
+    StandardMetrics.ms_v_charge_type->SetValue("ccs");
     LogChargeEvent("DC charging started");
 }
