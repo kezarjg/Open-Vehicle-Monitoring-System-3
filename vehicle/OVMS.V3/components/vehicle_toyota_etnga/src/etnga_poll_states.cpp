@@ -35,6 +35,15 @@ static const int SLEEP_COOLDOWN_STEPS  = (int)(sizeof(SLEEP_COOLDOWN_SECS) / siz
 static const int CHARGE_WAIT_SLEEP_SECS   = 600;  // first wait, no charge -> sleep
 static const int CHARGE_WAIT_RESLEEP_SECS = 15;   // re-entered after a wait-sleep -> sleep fast
 
+// Aux-12V rising-edge wake detection (volts above the learned 12V reference). The latch sets
+// above ref+SET and clears only below ref+CLEAR; the hysteresis band stops a level hovering at
+// the threshold (ADC noise) from producing repeated edges/CAN resets. See HandleSleepState().
+static const float AUX_12V_WAKE_SET_V   = 0.2f;   // v12 > ref + this  -> rising edge / latch high
+static const float AUX_12V_WAKE_CLEAR_V = 0.1f;   // v12 < ref + this  -> latch clears
+
+// AWAKE with the charge door never opening for this long forces sleep (door-watch timeout).
+static const int AWAKE_NO_ACTIVITY_TIMEOUT_S = 300;
+
 void OvmsVehicleToyotaETNGA::ResetSleepBackoff()
 {
     m_sleep_backoff_idx = 0;
@@ -64,7 +73,7 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
         // also restarted the cooldown, so frame-wake never re-enabled until 12V decayed.
         float v12 = StandardMetrics.ms_v_bat_12v_voltage->AsFloat();
         float ref = StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat();
-        bool high = v12 > ref + 0.2f;
+        bool high = v12 > ref + AUX_12V_WAKE_SET_V;
         if (high && !m_12v_was_high) {
             // Voltage just jumped: real power-up (DC-DC came on) — wake even during cooldown.
             ESP_LOGI(TAG, "Aux 12V has exceeded the threshold");
@@ -82,11 +91,11 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
             m_allow_wake = true;
             TransitionToAwakeState();
         }
-        // Hysteresis on the latch: set above ref+0.2, clear only below ref+0.1 — a level
+        // Hysteresis on the latch: set above ref+SET, clear only below ref+CLEAR — a level
         // hovering at the threshold (ADC noise) must not produce repeated edges/CAN resets.
         if (high)
             m_12v_was_high = true;
-        else if (v12 < ref + 0.1f)
+        else if (v12 < ref + AUX_12V_WAKE_CLEAR_V)
             m_12v_was_high = false;
     }
 }
@@ -173,9 +182,10 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
             m_armed_for_charge = true;
             m_cable_watch_start = monotonic;
             ResetSleepBackoff();   // deliberate user action — resume responsive cooldowns
-        } else if (monotonic - m_awake_entered > 300) {
+        } else if (monotonic - m_awake_entered > AWAKE_NO_ACTIVITY_TIMEOUT_S) {
             // Door watch expired (5 min in AWAKE, charge door never opened) → sleep
-            ESP_LOGI(TAG, "Vehicle awake for over 300s with no activity — forcing sleep state");
+            ESP_LOGI(TAG, "Vehicle awake for over %ds with no activity — forcing sleep state",
+                     AWAKE_NO_ACTIVITY_TIMEOUT_S);
             TransitionToSleepState();
             return;
         }
@@ -343,7 +353,7 @@ void OvmsVehicleToyotaETNGA::TransitionToSleepState()
     // Seed the 12V edge latch from the current reading: entering sleep with 12V still
     // elevated (post-drive/post-charge surface charge) must not count as a rising edge.
     m_12v_was_high = StandardMetrics.ms_v_bat_12v_voltage->AsFloat()
-                     > (StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat() + 0.2f);
+                     > (StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat() + AUX_12V_WAKE_SET_V);
     if (m_sleep_backoff_idx < SLEEP_COOLDOWN_STEPS - 1)
         m_sleep_backoff_idx++;
     SetPollState(PollState::SLEEP);
