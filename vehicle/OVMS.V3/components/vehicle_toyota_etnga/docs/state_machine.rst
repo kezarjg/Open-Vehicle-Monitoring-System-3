@@ -18,7 +18,7 @@ Two parallel states
      - Type
      - Source
      - Values
-   * - ``PollState`` (``m_s_pollstate``)
+   * - ``PollState`` (base-class ``m_poll_state``)
      - Driver-owned; selects which OBD-II PIDs are polled
      - Internal transitions in ``etnga_poll_states.cpp``
      - ``SLEEP``, ``AWAKE``, ``DRIVING``, ``CHARGE_HANDSHAKE``,
