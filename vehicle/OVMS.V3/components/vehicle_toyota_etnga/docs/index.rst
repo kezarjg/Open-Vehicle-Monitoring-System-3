@@ -46,8 +46,8 @@ Others                      VIN
    (DID ``0x1814``) **are** polled while driving and during DC charging — but without a pack
    arrangement they are stored directly in the cell-voltage/temperature vector metrics rather
    than being routed through the BMS min/max/deviation API.  Subclasses that declare the pack
-   arrangement (notably the Subaru Solterra) therefore show ``BMS v+t Display: Yes`` and get
-   full per-cell history, deviation flags, and pack statistics automatically.
+   arrangement (the Subaru Solterra and Toyota bZ4X) therefore show ``BMS v+t Display: Yes`` and
+   get full per-cell history, deviation flags, and pack statistics automatically.
 
 PID Polling Logic
 =================
@@ -575,9 +575,9 @@ Solterra" or "Toyota bZ4X").
      - Purpose
    * - ``/bms/cellmon``
      - Vehicle
-     - BMS cell monitor — per-cell voltage and temperature display.  Populated only for
-       vehicles that declare a BMS pack arrangement (e.g. Solterra); empty for the base
-       e-TNGA and bZ4X.
+     - BMS cell monitor — per-cell voltage and temperature display.  Populated for
+       vehicles that declare a BMS pack arrangement (Solterra, bZ4X); empty for the
+       bare e-TNGA base.
    * - ``/xte/charge``
      - Vehicle
      - Live charging metrics dashboard — key charge telemetry during a session.

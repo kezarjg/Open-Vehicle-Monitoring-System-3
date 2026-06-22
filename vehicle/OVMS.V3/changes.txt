@@ -13,6 +13,10 @@ Open Vehicle Monitor System v3 - Change log
                                               password configured under wifi.ssid
     [network] wifi.priority.interval       -- upgrade-scan period in seconds while on a non-top
                                               network (default: 60, minimum: 10)
+- Toyota bZ4X: per-cell BMS monitoring is now enabled. The /bms/cellmon page and the per-cell
+    voltage/temperature, deviation, and pack-statistics metrics now populate (matching the Subaru
+    Solterra), using the shared 96S CATL pack arrangement. Not yet validated on bZ4X hardware; a
+    bZ4X variant with a differently-sized pack would report an incorrect cell count. No config changes.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the module no longer drains the 12V battery
     while plugged in waiting for a scheduled charge. The charge-wait state now polls sparsely
     and, after a sustained idle wait, sleeps until charging actually starts (waking

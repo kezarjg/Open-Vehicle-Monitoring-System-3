@@ -22,17 +22,24 @@ Vehicle identity
 Vehicle-specific support
 ------------------------
 
-The bZ4X currently adds no behavioural overrides on top of the e-TNGA platform, so its supported functions
-match the e-TNGA baseline. In particular it does not declare a BMS pack arrangement, so per-cell BMS
-voltage/temperature monitoring is not enabled — unlike the
-:doc:`Subaru Solterra </components/vehicle_subaru_solterra/docs/index>`.
+The only behaviour the bZ4X adds on top of the e-TNGA platform is its BMS pack arrangement; everything
+else matches the e-TNGA baseline. Being mechanically the Subaru Solterra's twin, it declares the same
+96S CATL ("Type B") pack arrangement (96 cells in 4 stacks of 24; 24 temperature sensors, 6 per stack),
+which enables per-cell BMS voltage/temperature monitoring via the standard ``/bms/cellmon`` page — just
+like the :doc:`Subaru Solterra </components/vehicle_subaru_solterra/docs/index>`.
+
+.. note::
+
+   The per-cell BMS support has been validated on the Solterra but is **not yet validated on bZ4X
+   hardware**. It assumes the bZ4X carries the same 96-cell pack; a variant with a differently-sized
+   pack would report an incorrect cell count.
 
 Web UI
 ------
 
 All e-TNGA web UI pages are available on the bZ4X; see the
 :doc:`e-TNGA index </components/vehicle_toyota_etnga/docs/index>` for the
-full list.  Note that ``/bms/cellmon`` will appear in the menu but shows
-no cell data because the bZ4X does not declare a BMS pack arrangement.
-The charging pages (``/xte/charge``, ``/xte/reports``) and the TPMS
-configuration page (``/xte/config``) work normally.
+full list.  The per-cell ``/bms/cellmon`` page is populated because the
+bZ4X declares a BMS pack arrangement (see above).  The charging pages
+(``/xte/charge``, ``/xte/reports``) and the TPMS configuration page
+(``/xte/config``) work normally.
