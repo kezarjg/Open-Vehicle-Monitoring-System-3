@@ -13,6 +13,10 @@ Open Vehicle Monitor System v3 - Change log
                                               password configured under wifi.ssid
     [network] wifi.priority.interval       -- upgrade-scan period in seconds while on a non-top
                                               network (default: 60, minimum: 10)
+- Toyota e-TNGA: BMS per-cell handling now derives the cell and temperature-sensor counts from the
+    0x182E / 0x1814 reply length instead of a fixed 96-cell / 24-sensor pack, and auto-aligns the BMS
+    arrangement total to match. This makes per-cell BMS index-safe across e-TNGA pack variants. No
+    change for the existing 96-cell pack (Solterra / bZ4X); short replies are still rejected. No config changes.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the module no longer drains the 12V battery
     while plugged in waiting for a scheduled charge. The charge-wait state now polls sparsely
     and, after a sustained idle wait, sleeps until charging actually starts (waking

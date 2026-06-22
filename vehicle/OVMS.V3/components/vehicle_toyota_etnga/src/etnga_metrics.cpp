@@ -153,11 +153,13 @@ float OvmsVehicleToyotaETNGA::CalculateBatterySOCBMS(const std::string& data)
 
 std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryCellVoltages(const std::string& data)
 {
-    // 0x182E payload: 96 cells × uint16 BE; each LSB = 5/65535 V (~76 µV).
+    // 0x182E payload: N cells × uint16 BE; each LSB = 5/65535 V (~76 µV).
+    // Cell count is taken from the reply length so differently-sized e-TNGA
+    // packs (bZ4X / Solterra / RZ) are index-safe — there is no cell-count PID.
     std::vector<float> voltages;
-    voltages.reserve(96);
+    voltages.reserve(data.size() / 2);
 
-    for (size_t i = 0; i < 192; i += 2) {
+    for (size_t i = 0; i + 1 < data.size(); i += 2) {
         uint16_t raw = GetRxBUint16(data, i);
         voltages.push_back(static_cast<float>(raw) * 5.0f / 65535.0f);
     }
@@ -183,9 +185,12 @@ std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryCapacityArray(const s
 
 std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryTemperatures(const std::string& data)
 {
+    // 0x1814 payload: N sensors × int16 BE Q8.8, −50 °C. Sensor count from reply
+    // length (no sensor-count PID) so all e-TNGA pack variants are index-safe.
     std::vector<float> temperatures;
+    temperatures.reserve(data.size() / 2);
 
-    for (size_t i = 0; i < 48; i += 2) {
+    for (size_t i = 0; i + 1 < data.size(); i += 2) {
         int16_t temperatureRaw = GetRxBInt16(data, i);
         float temperature = static_cast<float>(temperatureRaw) / 256.0f - 50.0f;
         temperatures.push_back(temperature);
@@ -743,6 +748,10 @@ void OvmsVehicleToyotaETNGA::SetBatteryCellVoltages(const std::vector<float>& vo
     // BMS API so it can maintain per-cell history, deviation flags, and pack stats.
     // Otherwise fall back to a direct vector set.
     if (BmsGetCellArangementVoltage() > 0) {
+        // Auto-detect: align the BMS voltage arrangement total with the actual
+        // reply size. 0 = keep the subclass-declared cells-per-module grouping.
+        // No-op (returns false) when the count already matches, e.g. Solterra 96.
+        BmsCheckChangeCellArrangementVoltage(static_cast<int>(voltages.size()), 0);
         BmsRestartCellVoltages();
         for (size_t i = 0; i < voltages.size(); ++i) {
             BmsSetCellVoltage(static_cast<int>(i), voltages[i]);
@@ -799,6 +808,9 @@ void OvmsVehicleToyotaETNGA::SetBatteryTemperatures(const std::vector<float>& te
     // the BMS API so it can maintain per-cell history, deviation flags, and pack stats.
     // Otherwise fall back to a direct vector set (legacy / un-arranged subclasses).
     if (BmsGetCellArangementTemperature() > 0) {
+        // Auto-detect: align the BMS temperature arrangement total with the actual
+        // reply size. 0 = keep the subclass-declared sensors-per-module grouping.
+        BmsCheckChangeCellArrangementTemperature(static_cast<int>(temperatures.size()), 0);
         BmsRestartCellTemperatures();
         for (size_t i = 0; i < temperatures.size(); ++i) {
             BmsSetCellTemperature(static_cast<int>(i), temperatures[i]);
