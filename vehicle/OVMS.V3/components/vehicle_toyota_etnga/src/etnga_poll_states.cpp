@@ -199,7 +199,25 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
 
 void OvmsVehicleToyotaETNGA::HandleDrivingState()
 {
-    if (m_s_controlstate->AsInt() != ControlState::CS_DRIVING) {
+    // Exit DRIVING on the FIRST of two drive-end signals:
+    //   1. Ready FALLING-EDGE (0x1076, Hybrid Control 0x7D2) — Ready clears the moment the
+    //      power button is pressed, ~2 s before HV actually drops, so it is the snappier
+    //      trigger. We require Ready to have been seen true this drive (m_ready_seen_in_drive)
+    //      before honouring its clear: AWAKE->DRIVING is entered on control mode, not Ready,
+    //      and 0x1076 is DRIVING-only, so ms_v_env_on is still false on the first tick and a
+    //      level check would immediately bounce back to AWAKE.
+    //   2. Control mode leaving Driving (0x10D1, OBC 0x745) — flips at the true key-off
+    //      instant (synchronous with the 0x4E0 HV-active broadcast ceasing) and comes from an
+    //      always-on-in-AWAKE ECU, so it is the reliable backstop.
+    // Both are already polled DRIVING@1s. Ready is only read while 0x7D2 is still awake (it
+    // does not sleep until ~4-7 s after key-off), and a 0x1076 timeout leaves ms_v_env_on
+    // unchanged (IncomingPollError takes no state action) — so #1 fires only on a clean
+    // NotReady, never on a timeout, and #2 backstops if Ready is missed. See issue #78.
+    if (StandardMetrics.ms_v_env_on->AsBool())
+        m_ready_seen_in_drive = true;
+
+    if ((m_ready_seen_in_drive && !StandardMetrics.ms_v_env_on->AsBool()) ||
+        m_s_controlstate->AsInt() != ControlState::CS_DRIVING) {
         TransitionToAwakeState();
         SetReadyStatus(false);
         SetVehicleSpeed(0);
@@ -420,6 +438,7 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
 void OvmsVehicleToyotaETNGA::TransitionToDrivingState()
 {
     m_armed_for_charge = false;
+    m_ready_seen_in_drive = false;   // arm the Ready falling-edge exit fresh for this drive (#78)
     ResetSleepBackoff();   // real drive — resume responsive cooldowns
     SetPollState(PollState::DRIVING);
     m_trip_start_valid = false;

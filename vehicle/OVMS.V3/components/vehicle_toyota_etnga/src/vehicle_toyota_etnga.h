@@ -77,6 +77,9 @@ protected:
     bool m_12v_was_high = false;     // 12V-above-threshold latch: the SLEEP 12V wake fires on the rising edge only
                                      // (level-triggering oscillated; seeded on each sleep entry in TransitionToSleepState)
 
+    bool m_ready_seen_in_drive = false;  // Ready (0x1076) confirmed true since entering DRIVING; arms the
+                                         // Ready-falling-edge fast exit so the still-false entry value can't bounce us out (#78)
+
     bool m_armed_for_charge = false;   // charge lid seen open since entering AWAKE
     int  m_cable_watch_start = 0;      // monotonic s when armed (15-min cable watch)
     int  m_charge_state_entry = 0;     // monotonic s of last charge-state entry (handshake 60s timer)
