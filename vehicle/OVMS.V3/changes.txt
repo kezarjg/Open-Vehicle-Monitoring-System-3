@@ -13,6 +13,11 @@ Open Vehicle Monitor System v3 - Change log
                                               password configured under wifi.ssid
     [network] wifi.priority.interval       -- upgrade-scan period in seconds while on a non-top
                                               network (default: 60, minimum: 10)
+- New experimental vehicle type "LEXRZ" (Lexus RZ), built on the Toyota e-TNGA base. Inherits the
+    e-TNGA CAN polling, charging state machine, and support baseline, and declares a best-guess
+    shared-EV-core pack (same 96S CATL arrangement as the Solterra/bZ4X). EXPERIMENTAL and NOT
+    validated on a real Lexus RZ; compiled into the fork build but disabled by default in menuconfig
+    (CONFIG_OVMS_VEHICLE_LEXUS_RZ). No config changes.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the module no longer drains the 12V battery
     while plugged in waiting for a scheduled charge. The charge-wait state now polls sparsely
     and, after a sustained idle wait, sleeps until charging actually starts (waking
