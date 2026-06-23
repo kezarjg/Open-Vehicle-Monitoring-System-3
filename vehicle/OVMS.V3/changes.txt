@@ -49,6 +49,12 @@ Open Vehicle Monitor System v3 - Change log
     charging (HCS 0x1F46 — the A/C ambient sensor's ECU sleeps while charging), and "kWh from grid"
     / charging-efficiency are shown for AC sessions only (not meaningful on DC). The "Charging
     metrics" vehicle-menu page is renamed "Charging monitor".
+- Toyota e-TNGA: per-cell BMS now works across HV pack variants. The cell and temperature-sensor
+    counts are derived from the battery reply length and the module grouping is selected from the
+    pack (96-cell 2022-24 = 4x24; 78-cell 2025/26 FWD = 3x26; 104-cell 2025/26 AWD = 4x26), instead
+    of assuming a fixed 96-cell pack. /bms/cellmon is now populated on all e-TNGA vehicles
+    (including bZ4X). No change for the 96-cell pack (Solterra/bZ4X today). The 78/104 packs are
+    reasoned from spec and NOT yet validated on hardware. No config changes.
 - hw3.1: Fix random crash (abort in esp_sha_read_digest_state) during TLS handshakes by disabling
     mbedTLS hardware SHA acceleration (CONFIG_MBEDTLS_HARDWARE_SHA). The shared ESP32 SHA engine
     could return an all-zero digest state when mbedtls_sha256_clone() snapshotted it mid-handshake,

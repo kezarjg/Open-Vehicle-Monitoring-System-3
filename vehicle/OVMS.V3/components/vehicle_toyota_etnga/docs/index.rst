@@ -28,7 +28,7 @@ Range Display               No
 GPS Location                Yes
 Speed Display               Yes
 Temperature Display         Yes
-BMS v+t Display             No (base class only; see note below)
+BMS v+t Display             Yes (see note below)
 TPMS Display                Yes
 Charge Status Display       Yes
 Charge Interruption Alerts  No
@@ -41,13 +41,11 @@ Others                      VIN
 
 .. note::
 
-   **BMS v+t Display** is ``No`` for the bare e-TNGA baseline because the base class does not
-   declare a pack arrangement.  Raw per-cell voltages (DID ``0x182E``) and temperatures
-   (DID ``0x1814``) **are** polled while driving and during DC charging — but without a pack
-   arrangement they are stored directly in the cell-voltage/temperature vector metrics rather
-   than being routed through the BMS min/max/deviation API.  Subclasses that declare the pack
-   arrangement (notably the Subaru Solterra) therefore show ``BMS v+t Display: Yes`` and get
-   full per-cell history, deviation flags, and pack statistics automatically.
+   **BMS v+t Display** is ``Yes`` for all e-TNGA vehicles: the base class declares the HV pack
+   arrangement (Toyota EM "Type B" chemistry, shared across the platform) and derives the actual
+   cell and temperature-sensor counts from the ``0x182E`` / ``0x1814`` reply length at runtime, so
+   per-cell history, deviation flags, and pack statistics work across pack variants (96-cell
+   2022-24; 78-cell and 104-cell 2025/26 refresh). Only the 96-cell pack is on-vehicle validated.
 
 PID Polling Logic
 =================
@@ -575,9 +573,8 @@ Solterra" or "Toyota bZ4X").
      - Purpose
    * - ``/bms/cellmon``
      - Vehicle
-     - BMS cell monitor — per-cell voltage and temperature display.  Populated only for
-       vehicles that declare a BMS pack arrangement (e.g. Solterra); empty for the base
-       e-TNGA and bZ4X.
+     - BMS cell monitor — per-cell voltage and temperature display.  Populated for all e-TNGA
+       vehicles (the base declares the pack arrangement).
    * - ``/xte/charge``
      - Vehicle
      - Live charging metrics dashboard — key charge telemetry during a session.

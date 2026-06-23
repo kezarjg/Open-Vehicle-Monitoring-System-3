@@ -14,13 +14,13 @@
 // Constructor for the OvmsVehicleToyotaBz4x class
 OvmsVehicleToyotaBz4x::OvmsVehicleToyotaBz4x()
 {
-ESP_LOGI(TAG, "Toyota bZ4X vehicle module");  // Log an informational message
+  ESP_LOGI(TAG, "Toyota bZ4X vehicle module");  // Log an informational message
 }
 
 // Destructor for the OvmsVehicleToyotaBz4x class
 OvmsVehicleToyotaBz4x::~OvmsVehicleToyotaBz4x()
 {
-ESP_LOGI(TAG, "Toyota bZ4X vehicle module");  // Log an informational message
+  ESP_LOGI(TAG, "Shutdown Toyota bZ4X vehicle module");  // Log an informational message
 }
 
 // Initialization class for the Toyota bZ4X vehicle module
