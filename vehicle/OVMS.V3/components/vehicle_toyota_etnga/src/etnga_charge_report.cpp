@@ -227,6 +227,21 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
         if (!ph.temp_seen) { ph.temp_min = ph.temp_max = t; ph.temp_seen = true; }
         else if (t < ph.temp_min) ph.temp_min = t;
         else if (t > ph.temp_max) ph.temp_max = t;
+        // INC-2: track the DC limiting caps. Station advertised max (0x166A) is DC-only and
+        // reads ~0 on AC; car permission (0x16A1) is forward-filled (inactive sentinel skipped
+        // upstream). Only meaningful while is_dc — AC classification is deferred.
+        if (ph.is_dc) {
+            float sta = m_v_charge_sta_max_p->AsFloat();        // 0x166A advertised station max kW
+            if (sta > 0.1f) {
+                if (!ph.cap_station_seen || sta > ph.cap_station_max) ph.cap_station_max = sta;
+                ph.cap_station_seen = true;
+            }
+            float car = fabsf(m_v_charge_perm->AsFloat());      // 0x16A1 magnitude = car charge limit kW
+            if (car > 0.1f) {
+                if (!ph.cap_car_seen || car < ph.cap_car_min) ph.cap_car_min = car;
+                ph.cap_car_seen = true;
+            }
+        }
     }
 
     m_charge_session.is_dc = (static_cast<PollState>(m_poll_state) == PollState::CHARGE_DC);
