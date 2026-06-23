@@ -55,6 +55,10 @@ Open Vehicle Monitor System v3 - Change log
     of assuming a fixed 96-cell pack. /bms/cellmon is now populated on all e-TNGA vehicles
     (including bZ4X). No change for the 96-cell pack (Solterra/bZ4X today). The 78/104 packs are
     reasoned from spec and NOT yet validated on hardware. No config changes.
+- New experimental vehicle type "LEXRZ" (Lexus RZ), built on the Toyota e-TNGA base. Inherits the
+    e-TNGA logic and BMS wholesale (the base owns the pack arrangement). EXPERIMENTAL and NOT
+    validated on a real Lexus RZ; compiled into the fork build but disabled by default in menuconfig
+    (CONFIG_OVMS_VEHICLE_LEXUS_RZ). No config changes.
 - hw3.1: Fix random crash (abort in esp_sha_read_digest_state) during TLS handshakes by disabling
     mbedTLS hardware SHA acceleration (CONFIG_MBEDTLS_HARDWARE_SHA). The shared ESP32 SHA engine
     could return an all-zero digest state when mbedtls_sha256_clone() snapshotted it mid-handshake,
