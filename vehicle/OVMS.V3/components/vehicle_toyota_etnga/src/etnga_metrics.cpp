@@ -151,6 +151,18 @@ float OvmsVehicleToyotaETNGA::CalculateBatterySOCBMS(const std::string& data)
     return GetRxBByte(data, 0) * 100.0f / 255.0f;
 }
 
+int OvmsVehicleToyotaETNGA::PackModuleCount(int cellCount)
+{
+    // e-TNGA HV pack variants (documented 2026-06-23). 96-cell is on-vehicle validated;
+    // 78/104 are reasoned from spec and UNVALIDATED (no such hardware available).
+    switch (cellCount) {
+        case 96:  return 4;   // 2022-24            : 4 modules x 24 cells
+        case 78:  return 3;   // 2025/26 FWD        : 3 modules x 26 cells (UNVALIDATED)
+        case 104: return 4;   // 2025/26 AWD/high   : 4 modules x 26 cells (UNVALIDATED)
+        default:  return 0;   // unrecognised -> caller keeps last good arrangement
+    }
+}
+
 std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryCellVoltages(const std::string& data)
 {
     // 0x182E payload: 96 cells × uint16 BE; each LSB = 5/65535 V (~76 µV).

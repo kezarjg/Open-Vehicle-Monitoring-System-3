@@ -179,6 +179,20 @@ OvmsVehicleToyotaETNGA::OvmsVehicleToyotaETNGA()
     // freed it (use-after-free crash on a no-reboot vehicle switch).
     PollRequest(m_can2, "!v.xte.charge", charge_series);
 
+    // BMS pack: owned by the e-TNGA platform (not per-badge). All e-TNGA EVs share the
+    // Toyota EM "Type B" cell chemistry; only the cell/sensor counts and module grouping
+    // vary by model year, and those are resolved per-reply from the bus (see PackModuleCount
+    // + SetBatteryCellVoltages/SetBatteryTemperatures). Declare a bootstrap 96-cell
+    // arrangement here so per-cell BMS routing is active from boot, before the first reply.
+    BmsSetCellArrangementVoltage(96, 24);
+    BmsSetCellArrangementTemperature(24, 6);
+
+    BmsSetCellLimitsVoltage(2.5f, 4.3f);
+    BmsSetCellLimitsTemperature(-30.0f, 60.0f);
+
+    BmsSetCellDefaultThresholdsVoltage(0.020f, 0.030f);     // 20 mV warn / 30 mV alert
+    BmsSetCellDefaultThresholdsTemperature(4.0f, 8.0f);     // 4 °C warn / 8 °C alert
+
     PollSetThrottling(0);
 
 #ifdef CONFIG_OVMS_COMP_WEBSERVER

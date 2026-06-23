@@ -166,6 +166,7 @@ protected:
     float m_trip_start_odo = 0.0f;    // odometer baseline at trip start
     bool  m_trip_start_valid = false; // false until the baseline is seeded; reset on transition to DRIVING
     OvmsMetricInt* m_v_e_awd;   // 0x1087 b2 AWD / X-MODE status (custom; no standard OVMS metric)
+    int m_bms_modules = 4;   // resolved HV pack module count (bootstrap = 96-cell / 4 modules)
     
     void NotifyVehicleOn() override;
     // NotifyChargeStart deliberately not overridden — see vehicle_toyota_etnga.cpp;
@@ -237,6 +238,10 @@ private:
     // Data calculation functions
     float CalculateAmbientTemperature(const std::string& data);
     float CalculateAmbientTemperatureEV(const std::string& data);
+    // Resolve the e-TNGA HV pack module count from the per-reply cell count.
+    // Known packs: 96 (2022-24, 4x24), 78 (2025/26 FWD, 3x26), 104 (2025/26 AWD, 4x26).
+    // Returns 0 for an unrecognised count so callers keep the last good arrangement.
+    int PackModuleCount(int cellCount);
     std::vector<float> CalculateBatteryCellVoltages(const std::string& data);
     std::vector<float> CalculateBatteryCapacityArray(const std::string& data);
     float CalculateBatteryChargingPower(const std::string& data);
