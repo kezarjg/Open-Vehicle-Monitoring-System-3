@@ -417,16 +417,29 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
         }
 
         case PID_BATTERY_TEMPERATURES: {
-            if (m_rxbuf.size() < 48) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
+            // Temperature sensor count has no whitelist (it varies with the pack and is
+            // grouped via m_bms_modules); reject only an empty/odd reply.
             std::vector<float> temperatures = CalculateBatteryTemperatures(m_rxbuf);
+            if (temperatures.empty() || (m_rxbuf.size() % 2) != 0) {
+                ESP_LOGW(TAG, "0x1814: invalid reply (%d bytes), skipping BMS temperature update",
+                         (int)m_rxbuf.size());
+                break;
+            }
             SetBatteryTemperatures(temperatures);
             SetBatteryTemperatureStatistics(temperatures);
             break;
         }
 
         case PID_BATTERY_CELL_VOLTAGES: {
-            if (m_rxbuf.size() < 192) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
+            // Dispatch only happens on a COMPLETE ISOTP reply (mlremain==0), so the length
+            // reflects the pack, not a truncation. Accept any recognised pack; reject the
+            // rest (no fixed 192-byte floor -- that rejected the smaller 78-cell pack).
             std::vector<float> voltages = CalculateBatteryCellVoltages(m_rxbuf);
+            if (voltages.empty() || PackModuleCount(static_cast<int>(voltages.size())) == 0) {
+                ESP_LOGW(TAG, "0x182E: unrecognised reply (%d bytes), skipping BMS voltage update",
+                         (int)m_rxbuf.size());
+                break;
+            }
             SetBatteryCellVoltages(voltages);
             SetBatteryCellVoltageStatistics(voltages);
             break;

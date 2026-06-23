@@ -151,13 +151,27 @@ float OvmsVehicleToyotaETNGA::CalculateBatterySOCBMS(const std::string& data)
     return GetRxBByte(data, 0) * 100.0f / 255.0f;
 }
 
+int OvmsVehicleToyotaETNGA::PackModuleCount(int cellCount)
+{
+    // e-TNGA HV pack variants (documented 2026-06-23). 96-cell is on-vehicle validated;
+    // 78/104 are reasoned from spec and UNVALIDATED (no such hardware available).
+    switch (cellCount) {
+        case 96:  return 4;   // 2022-24            : 4 modules x 24 cells
+        case 78:  return 3;   // 2025/26 FWD        : 3 modules x 26 cells (UNVALIDATED)
+        case 104: return 4;   // 2025/26 AWD/high   : 4 modules x 26 cells (UNVALIDATED)
+        default:  return 0;   // unrecognised -> caller keeps last good arrangement
+    }
+}
+
 std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryCellVoltages(const std::string& data)
 {
-    // 0x182E payload: 96 cells × uint16 BE; each LSB = 5/65535 V (~76 µV).
+    // 0x182E payload (Hybrid Battery ECU): N cells x uint16 BE; each LSB = 5/65535 V (~76 uV).
+    // Cell count is taken from the reply length so differently-sized e-TNGA packs are
+    // index-safe -- there is no cell-count PID.
     std::vector<float> voltages;
-    voltages.reserve(96);
+    voltages.reserve(data.size() / 2);
 
-    for (size_t i = 0; i < 192; i += 2) {
+    for (size_t i = 0; i + 1 < data.size(); i += 2) {
         uint16_t raw = GetRxBUint16(data, i);
         voltages.push_back(static_cast<float>(raw) * 5.0f / 65535.0f);
     }
@@ -183,9 +197,12 @@ std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryCapacityArray(const s
 
 std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryTemperatures(const std::string& data)
 {
+    // 0x1814 payload (Hybrid Battery ECU): N sensors x int16 BE Q8.8, -50 C. Sensor count
+    // from reply length (no sensor-count PID) so all e-TNGA pack variants are index-safe.
     std::vector<float> temperatures;
+    temperatures.reserve(data.size() / 2);
 
-    for (size_t i = 0; i < 48; i += 2) {
+    for (size_t i = 0; i + 1 < data.size(); i += 2) {
         int16_t temperatureRaw = GetRxBInt16(data, i);
         float temperature = static_cast<float>(temperatureRaw) / 256.0f - 50.0f;
         temperatures.push_back(temperature);
@@ -739,10 +756,19 @@ void OvmsVehicleToyotaETNGA::SetBatterySOCBMS(float soc)
 
 void OvmsVehicleToyotaETNGA::SetBatteryCellVoltages(const std::vector<float>& voltages)
 {
-    // If the subclass declared a BMS voltage arrangement, route per-cell through the
-    // BMS API so it can maintain per-cell history, deviation flags, and pack stats.
-    // Otherwise fall back to a direct vector set.
+    // The e-TNGA base always declares an arrangement (bootstrap in the ctor), so per-cell
+    // data routes through the BMS API. Re-arrange to the actual pack on each reply.
     if (BmsGetCellArangementVoltage() > 0) {
+        int cells = static_cast<int>(voltages.size());
+        int modules = PackModuleCount(cells);
+        if (modules == 0) {
+            ESP_LOGW(TAG, "0x182E: unrecognised cell count %d, keeping current BMS arrangement", cells);
+            return;
+        }
+        m_bms_modules = modules;
+        // Align the arrangement total + per-module grouping with the detected pack.
+        // No-op (returns false) when both already match, e.g. the 96-cell pack (4x24).
+        BmsCheckChangeCellArrangementVoltage(cells, cells / modules);
         BmsRestartCellVoltages();
         for (size_t i = 0; i < voltages.size(); ++i) {
             BmsSetCellVoltage(static_cast<int>(i), voltages[i]);
@@ -795,10 +821,22 @@ void OvmsVehicleToyotaETNGA::SetBatteryCellVoltageStatistics(const std::vector<f
 
 void OvmsVehicleToyotaETNGA::SetBatteryTemperatures(const std::vector<float>& temperatures)
 {
-    // If the subclass declared a BMS temperature arrangement, route per-sensor through
-    // the BMS API so it can maintain per-cell history, deviation flags, and pack stats.
-    // Otherwise fall back to a direct vector set (legacy / un-arranged subclasses).
+    // Group temperature sensors using the module count resolved from the cell-voltage
+    // reply (m_bms_modules). If the sensor count does not divide evenly, fall back to a
+    // single group so the cell data stays correct and only the display grouping degrades.
     if (BmsGetCellArangementTemperature() > 0) {
+        int sensors = static_cast<int>(temperatures.size());
+        if (sensors == 0) {
+            return;
+        }
+        int perModule = (m_bms_modules > 0 && (sensors % m_bms_modules) == 0)
+                        ? sensors / m_bms_modules
+                        : sensors;
+        if (perModule == sensors && m_bms_modules > 1) {
+            ESP_LOGW(TAG, "0x1814: %d sensors not divisible by %d modules; using one group",
+                     sensors, m_bms_modules);
+        }
+        BmsCheckChangeCellArrangementTemperature(sensors, perModule);
         BmsRestartCellTemperatures();
         for (size_t i = 0; i < temperatures.size(); ++i) {
             BmsSetCellTemperature(static_cast<int>(i), temperatures[i]);
