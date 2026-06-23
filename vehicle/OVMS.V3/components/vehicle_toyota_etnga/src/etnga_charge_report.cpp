@@ -289,7 +289,7 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
         //                     plus raw station_grid_kw / station_present_v / station_present_a
         //   obc_kw          : diagnostic — raw 0x10D4 (under-reads on DC, issue #109)
         m_charge_session.csv_buf =
-            "elapsed_s,soc_pct,bms_soc_pct,station_kw,battery_kw,hvac_kw,pack_v,pack_a,"
+            "phase,elapsed_s,soc_pct,bms_soc_pct,station_kw,battery_kw,hvac_kw,pack_v,pack_a,"
             "batt_temp_c,ambient_c,state,station_max_kw,station_max_a,station_max_v,"
             "car_perm_kw,car_target_a,station_grid_kw,station_present_v,station_present_a,obc_kw\n";
         m_charge_session.csv_started = true;
@@ -307,9 +307,11 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
     float present_a = StandardMetrics.ms_v_charge_current->AsFloat();
     float grid_kw   = m_v_charge_grid_power->AsFloat();
     float station_kw = m_charge_session.is_dc ? (present_v * present_a / 1000.0f) : grid_kw;
+    int phase_no = (m_charge_session.cur >= 0) ? (m_charge_session.cur + 1) : 0;
     snprintf(row, sizeof(row),
-        "%d,%.0f,%.1f,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%s,%s,"
+        "%d,%d,%.0f,%.1f,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%s,%s,"
         "%.2f,%.0f,%.0f,%.2f,%.0f,%.3f,%.0f,%.0f,%.3f\n",
+        phase_no,
         elapsed,
         StandardMetrics.ms_v_bat_soc->AsFloat(),
         m_v_bat_soc_bms->AsFloat(),
