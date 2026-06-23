@@ -414,6 +414,23 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
     snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", W-PADR, PADT, W-PADR, H-PADB); out << b;
     snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, H-PADB, W-PADR, H-PADB); out << b;
 
+    // INC-1: phase-boundary markers (vertical dashed lines at each phase start/end),
+    // mapped from monotonic seconds onto the same time axis the traces use.
+    for (size_t i = 0; i < m_charge_session.phases.size(); i++) {
+        const ChargeSessionState::ChargePhase& ph = m_charge_session.phases[i];
+        int bounds[2] = { ph.start_monotonic - m_charge_session.start_monotonic,
+                          ph.end_monotonic   - m_charge_session.start_monotonic };
+        for (int k = 0; k < 2; k++) {
+            int ts = bounds[k];
+            if (ts <= 0 || ts > tmax) continue;   // off-chart / unset end
+            float x = PADL + (float)PW * ts / tmax;
+            snprintf(b, sizeof(b),
+                "<line x1=\"%.1f\" y1=\"%d\" x2=\"%.1f\" y2=\"%d\" stroke=\"#bbb\" "
+                "stroke-width=\"0.7\" stroke-dasharray=\"2 2\"/>\n", x, PADT, x, H - PADB);
+            out << b;
+        }
+    }
+
     // SOC overlay (right axis, 0-100).
     out << "<polyline fill=\"none\" stroke=\"#39c\" stroke-width=\"1\" stroke-dasharray=\"1 3\" points=\"";
     for (size_t i = 0; i < s.size(); i++) {
