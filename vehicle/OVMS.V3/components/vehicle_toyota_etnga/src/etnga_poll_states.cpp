@@ -497,6 +497,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeWaitState()
     SetChargingStatus(false);
     SetChargeState(PollState::CHARGE_WAIT);
     LogChargeEvent("Charging paused / phase ended");
+    CloseChargePhase();       // INC-1: close the active phase (pause / phase end)
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
@@ -508,6 +509,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
     SetChargeState(PollState::CHARGE_AC);
     StandardMetrics.ms_v_charge_mode->SetValue("standard");      // AC charging (OVMS-standard v.c.mode)
     LogChargeEvent("AC charging started");
+    OpenChargePhase(false);   // INC-1: AC phase
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
@@ -524,4 +526,5 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
     // The e-TNGA DC inlet is CCS. Cleared on session end in TransitionToAwakeState.
     StandardMetrics.ms_v_charge_type->SetValue("ccs");
     LogChargeEvent("DC charging started");
+    OpenChargePhase(true);    // INC-1: DC phase
 }

@@ -152,6 +152,41 @@ void OvmsVehicleToyotaETNGA::LogChargeEvent(const char* label)
         std::make_pair(StandardMetrics.ms_m_monotonic->AsInt(), label));
 }
 
+// INC-1: open a new charge phase on CHARGE_AC / CHARGE_DC entry. No-op if a phase is
+// already open (guards a 1 s state flap from double-opening). Snapshots the session
+// kWh meter so the phase energy is a delta at close.
+void OvmsVehicleToyotaETNGA::OpenChargePhase(bool is_dc)
+{
+    if (!m_charge_session.in_session || m_charge_session.cur >= 0)
+        return;
+    ChargeSessionState::ChargePhase ph;
+    ph.is_dc          = is_dc;
+    ph.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
+    ph.start_utc      = StandardMetrics.ms_m_timeutc->AsInt();
+    ph.start_soc      = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
+    ph.kwh_at_open    = StandardMetrics.ms_v_charge_kwh->AsFloat();
+    m_charge_session.phases.push_back(ph);
+    m_charge_session.cur = (int) m_charge_session.phases.size() - 1;
+    ESP_LOGD(TAG, "Charge phase %d open (%s)", m_charge_session.cur + 1, is_dc ? "DC" : "AC");
+}
+
+// INC-1: close the open phase on CHARGE_WAIT entry (or defensively at report time).
+// No-op if no phase is open. Energy is the kWh-meter delta since open; outcome latches 0x1688.
+void OvmsVehicleToyotaETNGA::CloseChargePhase()
+{
+    if (m_charge_session.cur < 0)
+        return;
+    ChargeSessionState::ChargePhase& ph = m_charge_session.phases[m_charge_session.cur];
+    ph.end_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
+    ph.end_soc       = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
+    ph.energy_kwh    = StandardMetrics.ms_v_charge_kwh->AsFloat() - ph.kwh_at_open;
+    if (ph.energy_kwh < 0.0f) ph.energy_kwh = 0.0f;
+    ph.outcome       = m_v_charge_outcome->AsInt();
+    ESP_LOGD(TAG, "Charge phase %d closed (%.2f kWh, %d%%->%d%%)",
+             m_charge_session.cur + 1, ph.energy_kwh, ph.start_soc, ph.end_soc);
+    m_charge_session.cur = -1;
+}
+
 // Live aggregation while charging: peak power, battery-temp range, ambient range,
 // delivered-Ah, per-tick CSV row, and downsampled SVG buffer.
 // Called every tick from HandleChargeAcState / HandleChargeDcState.
