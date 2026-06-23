@@ -498,6 +498,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeWaitState()
     SetChargeState(PollState::CHARGE_WAIT);
     LogChargeEvent("Charging paused / phase ended");
     CloseChargePhase();       // INC-1: close the active phase (pause / phase end)
+    MaybeStartChargeFaultDump();   // INC-3: if a fault was flagged, snapshot the OBC diagnostic DIDs
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
