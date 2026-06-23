@@ -722,6 +722,36 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
         f << "</dl>\n";
     }
 
+    // INC-3: diagnostic DID dump (fault-triggered; empty in normal sessions).
+    {
+        OvmsMutexLock lock(&m_dump_mutex);
+        if (!m_dump_results.empty()) {
+            f << "<h2>Diagnostic DID dump</h2>\n";
+            char db[64];
+            snprintf(db, sizeof(db), "Phase %d fault (outcome 0x%02X) — OBC 0x745, raw UDS 0x22 responses.",
+                     m_dump_phase_idx + 1, m_dump_outcome & 0xFF);
+            f << "<p>" << db << "</p>\n";
+            f << "<table><tr><th>DID</th><th>raw response (hex)</th></tr>\n";
+            for (std::map<uint16_t,std::string>::const_iterator it = m_dump_results.begin();
+                 it != m_dump_results.end(); ++it) {
+                char did[8];
+                snprintf(did, sizeof(did), "0x%04X", it->first);
+                f << "<tr><td>" << did << "</td><td>";
+                if (it->second.empty()) {
+                    f << "(no reply)";
+                } else {
+                    char hx[4];
+                    for (size_t k = 0; k < it->second.size(); k++) {
+                        snprintf(hx, sizeof(hx), "%02X ", (uint8_t) it->second[k]);
+                        f << hx;
+                    }
+                }
+                f << "</td></tr>\n";
+            }
+            f << "</table>\n";
+        }
+    }
+
     f << "<h2>Session events</h2>\n<table><tr><th>Time</th><th>Event</th></tr>\n";
     for (size_t i = 0; i < m_charge_session.events.size(); i++) {
         int rel = m_charge_session.events[i].first - m_charge_session.start_monotonic; if (rel < 0) rel = 0;
@@ -766,4 +796,12 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     ChargeIoEnqueue(job);
     ESP_LOGI(TAG, "Charge report queued: %s.html (%.2f kWh, %d%%->%d%%)",
         m_charge_session.base.c_str(), energy_kwh, start_soc, end_soc);
+    // INC-3: dump state is session-scoped; clear after the report consumes it.
+    {
+        OvmsMutexLock lock(&m_dump_mutex);
+        m_dump_results.clear();
+    }
+    m_dump_phase_idx = -1;
+    m_dump_outcome = -1;
+    m_dump_remaining = 0;
 }

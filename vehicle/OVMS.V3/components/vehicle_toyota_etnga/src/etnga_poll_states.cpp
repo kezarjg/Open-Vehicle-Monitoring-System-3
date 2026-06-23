@@ -484,6 +484,16 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
             mkdir(ChargeReportDir().c_str(), 0755);
             m_charge_session.base = ChargeReportDir() + "/" + ts;
         }
+        // INC-3: dump state is session-scoped — clear at session open so a fault dump from a
+        // prior (possibly <0.05 kWh, report-skipped) session can never leak into this report.
+        {
+            OvmsMutexLock lock(&m_dump_mutex);
+            m_dump_results.clear();
+        }
+        m_dump_phase_idx = -1;
+        m_dump_outcome = -1;
+        m_dump_remaining = 0;
+        m_charge_fault_pending = false;
         LogChargeEvent("Plugged in — handshake");
         ESP_LOGI(TAG, "Charge session opened (SOC %d%%)", m_charge_session.start_soc);
     }
