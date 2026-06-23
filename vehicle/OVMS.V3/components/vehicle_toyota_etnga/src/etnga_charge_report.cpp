@@ -126,6 +126,16 @@ const char* OvmsVehicleToyotaETNGA::AcOpStatusLabel(int code)
     }
 }
 
+// INC-2: LimSide enum -> short human label. Empty string for unknown (caller omits the row).
+const char* OvmsVehicleToyotaETNGA::LimSideLabel(int side)
+{
+    switch (side) {
+        case LIM_STATION: return "station";
+        case LIM_CAR:     return "car";
+        default:          return "";
+    }
+}
+
 // Return the name of the first defined OVMS location (geofence) that contains (lat,lon),
 // or "" if none match. Used to show a friendly place name in the report alongside coords.
 std::string OvmsVehicleToyotaETNGA::LookupLocationName(float lat, float lon)
@@ -170,6 +180,46 @@ void OvmsVehicleToyotaETNGA::OpenChargePhase(bool is_dc)
     ESP_LOGD(TAG, "Charge phase %d open (%s)", m_charge_session.cur + 1, is_dc ? "DC" : "AC");
 }
 
+// INC-2: classify who capped the DC charge rate for the open phase. DC-only: compares the
+// station's advertised max (0x166A) against the car's min permission (0x16A1). The smaller is
+// the binding side. AC phases and phases with no caps seen stay LIM_UNKNOWN (report omits the
+// row). Thresholds are provisional pending on-vehicle DC-charge tuning.
+void OvmsVehicleToyotaETNGA::ClassifyLimitingSide()
+{
+    if (m_charge_session.cur < 0)
+        return;
+    ChargeSessionState::ChargePhase& ph = m_charge_session.phases[m_charge_session.cur];
+    if (!ph.is_dc)
+        return;   // AC attribution deferred (needs unconfirmed OBC-max / cable DID)
+
+    const float LIM_MARGIN_KW = 2.0f;    // provisional: ignore near-equal caps as noise
+    const float COLD_BATT_C   = 25.0f;   // provisional: car-limit below this reads as cold-battery derate
+
+    if (ph.cap_car_seen && ph.cap_station_seen) {
+        if (ph.cap_car_min < ph.cap_station_max - LIM_MARGIN_KW) {
+            ph.limiting_side  = LIM_CAR;
+            ph.limiting_value = ph.cap_car_min;
+            ph.cold_battery   = (ph.temp_seen && ph.temp_min < COLD_BATT_C);
+        } else {
+            ph.limiting_side  = LIM_STATION;
+            ph.limiting_value = ph.cap_station_max;
+        }
+    } else if (ph.cap_station_seen) {
+        ph.limiting_side  = LIM_STATION;   // station cap seen, car never bound
+        ph.limiting_value = ph.cap_station_max;
+    } else if (ph.cap_car_seen) {
+        ph.limiting_side  = LIM_CAR;       // car cap seen, station unknown
+        ph.limiting_value = ph.cap_car_min;
+        ph.cold_battery   = (ph.temp_seen && ph.temp_min < COLD_BATT_C);
+    }
+    // else: neither seen -> remains LIM_UNKNOWN
+
+    if (ph.limiting_side != LIM_UNKNOWN)
+        ESP_LOGI(TAG, "Phase %d limited by %s (%.1f kW)%s", m_charge_session.cur + 1,
+                 LimSideLabel(ph.limiting_side), ph.limiting_value,
+                 ph.cold_battery ? " [cold battery]" : "");
+}
+
 // INC-1: close the open phase on CHARGE_WAIT entry (or defensively at report time).
 // No-op if no phase is open. Energy is the kWh-meter delta since open; outcome latches 0x1688.
 void OvmsVehicleToyotaETNGA::CloseChargePhase()
@@ -182,6 +232,7 @@ void OvmsVehicleToyotaETNGA::CloseChargePhase()
     ph.energy_kwh    = StandardMetrics.ms_v_charge_kwh->AsFloat() - ph.kwh_at_open;
     if (ph.energy_kwh < 0.0f) ph.energy_kwh = 0.0f;
     ph.outcome       = m_v_charge_outcome->AsInt();
+    ClassifyLimitingSide();   // INC-2: attribute the limiting side while cur still points at this phase
     ESP_LOGD(TAG, "Charge phase %d closed (%.2f kWh, %d%%->%d%%)",
              m_charge_session.cur + 1, ph.energy_kwh, ph.start_soc, ph.end_soc);
     m_charge_session.cur = -1;
