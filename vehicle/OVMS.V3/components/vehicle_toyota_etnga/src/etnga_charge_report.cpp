@@ -474,6 +474,9 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
 
 void OvmsVehicleToyotaETNGA::GenerateChargeReport()
 {
+    if (m_charge_session.report_written)
+        return;                 // defensive idempotency
+    CloseChargePhase();         // close any still-open phase (direct AC/DC->AWAKE safety net)
     const float energy_kwh = StandardMetrics.ms_v_charge_kwh->AsFloat();
     if (energy_kwh < 0.05f || m_charge_session.base.empty()) {
         ESP_LOGD(TAG, "Charge report skipped (%.3f kWh)", energy_kwh);
@@ -543,6 +546,11 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
         f << "<dt>Ambient</dt><dd>" << b << "</dd>\n";
     }
     f << "<dt>Type</dt><dd>" << (m_charge_session.is_dc ? "DC fast" : "AC") << "</dd>\n";
+    {
+        char pc[48];
+        snprintf(pc, sizeof(pc), "%u", (unsigned) m_charge_session.phases.size());
+        f << "<dt>Phases</dt><dd>" << pc << "</dd>\n";
+    }
     snprintf(b, sizeof(b), "%d%% &rarr; %d%% (+%d%%)", start_soc, end_soc, start_soc>=0?end_soc-start_soc:0);
     f << "<dt>SOC</dt><dd>" << b << "</dd>\n";
     // "From grid" is an AC-charge concept (the 0x161D grid-input poll only answers on AC);
@@ -585,6 +593,47 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     f << "<h2>Charging power</h2>\n";
     RenderPowerSvg(f);
 
+    // INC-1: per-phase summary blocks (Option A — no per-phase sample tables; the full
+    // timeline stays in the single CSV with its phase column).
+    for (size_t i = 0; i < m_charge_session.phases.size(); i++) {
+        const ChargeSessionState::ChargePhase& ph = m_charge_session.phases[i];
+        int pdur = ph.end_monotonic - ph.start_monotonic; if (pdur < 0) pdur = 0;
+        float pavg = (pdur > 0) ? ph.energy_kwh / (pdur / 3600.0f) : 0.0f;
+        char pb[96];
+        f << "<h2>Phase " << (i + 1) << " &mdash; " << (ph.is_dc ? "DC fast" : "AC") << "</h2>\n<dl>\n";
+        if (ph.start_utc > 1000000000) {
+            time_t st = (time_t) ph.start_utc, et = st + pdur; struct tm tmv;
+            char ps[40], pe[40];
+            gmtime_r(&st, &tmv); strftime(ps, sizeof(ps), "%H:%M:%S", &tmv);
+            gmtime_r(&et, &tmv); strftime(pe, sizeof(pe), "%H:%M:%S", &tmv);
+            snprintf(pb, sizeof(pb), "%s &rarr; %s UTC (%dh %02dm %02ds)", ps, pe,
+                     pdur/3600, (pdur%3600)/60, pdur%60);
+            f << "<dt>Active</dt><dd>" << pb << "</dd>\n";
+        }
+        snprintf(pb, sizeof(pb), "%d%% &rarr; %d%% (+%d%%)", ph.start_soc, ph.end_soc,
+                 ph.start_soc >= 0 ? ph.end_soc - ph.start_soc : 0);
+        f << "<dt>SOC</dt><dd>" << pb << "</dd>\n";
+        snprintf(pb, sizeof(pb), "%.2f kWh; %.1f kW peak / %.2f kW avg",
+                 ph.energy_kwh, ph.peak_power, pavg);
+        f << "<dt>Energy</dt><dd>" << pb << "</dd>\n";
+        if (ph.temp_seen) {
+            metric_unit_t tu = OvmsMetricGetUserUnit(GrpTemp, Celcius);
+            const char* tlabel = OvmsMetricUnitLabel(tu);
+            float lo = UnitConvert(Celcius, tu, ph.temp_min), hi = UnitConvert(Celcius, tu, ph.temp_max);
+            snprintf(pb, sizeof(pb), "%.0f%s &rarr; %.0f%s", lo, tlabel, hi, tlabel);
+            f << "<dt>Battery temp</dt><dd>" << pb << "</dd>\n";
+        }
+        {
+            const char* lbl = ChargeOutcomeLabel(ph.outcome);
+            if (lbl[0]) f << "<dt>Outcome</dt><dd>" << lbl << "</dd>\n";
+            else if (ph.outcome >= 0) {
+                snprintf(pb, sizeof(pb), "0x%02X (raw)", ph.outcome & 0xFF);
+                f << "<dt>Outcome</dt><dd>" << pb << "</dd>\n";
+            }
+        }
+        f << "</dl>\n";
+    }
+
     f << "<h2>Session events</h2>\n<table><tr><th>Time</th><th>Event</th></tr>\n";
     for (size_t i = 0; i < m_charge_session.events.size(); i++) {
         int rel = m_charge_session.events[i].first - m_charge_session.start_monotonic; if (rel < 0) rel = 0;
@@ -617,8 +666,9 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
           << "\">Download per-sample CSV</a></p>\n";
     }
 
-    f << "<p class=\"note\">Generated on-module by OVMS (Toyota e-TNGA). Single-phase; avg power is over the "
-         "whole plug-in interval. Estimates are provisional.</p>\n</body></html>\n";
+    f << "<p class=\"note\">Generated on-module by OVMS (Toyota e-TNGA). Multi-phase; per-phase "
+         "avg power is over each active interval. Estimates are provisional.</p>\n</body></html>\n";
+    m_charge_session.report_written = true;
     // Hand the rendered HTML to the async writer; it writes the file and prunes off-thread.
     etnga_io_job* job = new etnga_io_job;
     job->op        = etnga_io_job::WRITE_TRUNCATE;
