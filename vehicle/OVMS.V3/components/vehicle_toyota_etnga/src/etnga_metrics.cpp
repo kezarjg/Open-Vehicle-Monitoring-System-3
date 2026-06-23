@@ -756,10 +756,19 @@ void OvmsVehicleToyotaETNGA::SetBatterySOCBMS(float soc)
 
 void OvmsVehicleToyotaETNGA::SetBatteryCellVoltages(const std::vector<float>& voltages)
 {
-    // If the subclass declared a BMS voltage arrangement, route per-cell through the
-    // BMS API so it can maintain per-cell history, deviation flags, and pack stats.
-    // Otherwise fall back to a direct vector set.
+    // The e-TNGA base always declares an arrangement (bootstrap in the ctor), so per-cell
+    // data routes through the BMS API. Re-arrange to the actual pack on each reply.
     if (BmsGetCellArangementVoltage() > 0) {
+        int cells = static_cast<int>(voltages.size());
+        int modules = PackModuleCount(cells);
+        if (modules == 0) {
+            ESP_LOGW(TAG, "0x182E: unrecognised cell count %d, keeping current BMS arrangement", cells);
+            return;
+        }
+        m_bms_modules = modules;
+        // Align the arrangement total + per-module grouping with the detected pack.
+        // No-op (returns false) when both already match, e.g. the 96-cell pack (4x24).
+        BmsCheckChangeCellArrangementVoltage(cells, cells / modules);
         BmsRestartCellVoltages();
         for (size_t i = 0; i < voltages.size(); ++i) {
             BmsSetCellVoltage(static_cast<int>(i), voltages[i]);
@@ -812,10 +821,22 @@ void OvmsVehicleToyotaETNGA::SetBatteryCellVoltageStatistics(const std::vector<f
 
 void OvmsVehicleToyotaETNGA::SetBatteryTemperatures(const std::vector<float>& temperatures)
 {
-    // If the subclass declared a BMS temperature arrangement, route per-sensor through
-    // the BMS API so it can maintain per-cell history, deviation flags, and pack stats.
-    // Otherwise fall back to a direct vector set (legacy / un-arranged subclasses).
+    // Group temperature sensors using the module count resolved from the cell-voltage
+    // reply (m_bms_modules). If the sensor count does not divide evenly, fall back to a
+    // single group so the cell data stays correct and only the display grouping degrades.
     if (BmsGetCellArangementTemperature() > 0) {
+        int sensors = static_cast<int>(temperatures.size());
+        if (sensors == 0) {
+            return;
+        }
+        int perModule = (m_bms_modules > 0 && (sensors % m_bms_modules) == 0)
+                        ? sensors / m_bms_modules
+                        : sensors;
+        if (perModule == sensors && m_bms_modules > 1) {
+            ESP_LOGW(TAG, "0x1814: %d sensors not divisible by %d modules; using one group",
+                     sensors, m_bms_modules);
+        }
+        BmsCheckChangeCellArrangementTemperature(sensors, perModule);
         BmsRestartCellTemperatures();
         for (size_t i = 0; i < temperatures.size(); ++i) {
             BmsSetCellTemperature(static_cast<int>(i), temperatures[i]);
