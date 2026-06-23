@@ -699,6 +699,11 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
         snprintf(pb, sizeof(pb), "%.2f kWh; %.1f kW peak / %.2f kW avg",
                  ph.energy_kwh, ph.peak_power, pavg);
         f << "<dt>Energy</dt><dd>" << pb << "</dd>\n";
+        if (ph.limiting_side != LIM_UNKNOWN) {
+            snprintf(pb, sizeof(pb), "%s &mdash; %.1f kW%s", LimSideLabel(ph.limiting_side),
+                     ph.limiting_value, ph.cold_battery ? " (cold battery)" : "");
+            f << "<dt>Limiting</dt><dd>" << pb << "</dd>\n";
+        }
         if (ph.temp_seen) {
             metric_unit_t tu = OvmsMetricGetUserUnit(GrpTemp, Celcius);
             const char* tlabel = OvmsMetricUnitLabel(tu);
