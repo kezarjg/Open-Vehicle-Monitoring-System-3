@@ -219,6 +219,16 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
         else if (amb > m_charge_session.amb_max) m_charge_session.amb_max = amb;
     }
 
+    // INC-1: mirror peak power + battery-temp range into the open phase (additive to the
+    // session-level aggregates above). cur < 0 between phases (WAIT) — skip then.
+    if (m_charge_session.cur >= 0) {
+        ChargeSessionState::ChargePhase& ph = m_charge_session.phases[m_charge_session.cur];
+        if (p > ph.peak_power) ph.peak_power = p;
+        if (!ph.temp_seen) { ph.temp_min = ph.temp_max = t; ph.temp_seen = true; }
+        else if (t < ph.temp_min) ph.temp_min = t;
+        else if (t > ph.temp_max) ph.temp_max = t;
+    }
+
     m_charge_session.is_dc = (static_cast<PollState>(m_poll_state) == PollState::CHARGE_DC);
 
     // Delivered-Ah (charge-side coulomb): integrate pack current over dt.
@@ -226,6 +236,9 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
         int dt = now - m_charge_session.last_sample_monotonic;
         if (dt > 0 && dt <= 10) {   // ignore gaps (pause / lock-isolation / sleep) so delivered_ah stays accurate
             m_charge_session.delivered_ah += fabsf(StandardMetrics.ms_v_bat_current->AsFloat()) * (dt / 3600.0f);
+            if (m_charge_session.cur >= 0)
+                m_charge_session.phases[m_charge_session.cur].delivered_ah +=
+                    fabsf(StandardMetrics.ms_v_bat_current->AsFloat()) * (dt / 3600.0f);
             float pv = StandardMetrics.ms_v_charge_voltage->AsFloat();
             float pa = StandardMetrics.ms_v_charge_current->AsFloat();
             float skw = m_charge_session.is_dc ? (pv * pa / 1000.0f) : m_v_charge_grid_power->AsFloat();
