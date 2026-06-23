@@ -155,6 +155,7 @@ jobs:
           ENABLE_VEHICLES: >-
             CONFIG_OVMS_VEHICLE_SUBARU_SOLTERRA
             CONFIG_OVMS_VEHICLE_TOYOTA_BZ4X
+            CONFIG_OVMS_VEHICLE_LEXUS_RZ
         run: |
           # Route the cross-compilers through ccache via a PATH shim: invoked as
           # e.g. xtensa-esp32-elf-gcc, ccache finds the real compiler next on PATH.
