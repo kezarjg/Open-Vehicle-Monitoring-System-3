@@ -6,6 +6,10 @@ Open Vehicle Monitor System v3 - Change log
     reported as separate phases, each with its own SOC delta, energy, peak/avg power,
     temperature range and outcome. The power chart marks phase boundaries; the per-sample CSV
     gains a leading "phase" column. Single-phase charges are unchanged.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the charge report now attributes the DC
+    charge-rate limit per phase — whether the car (battery taper, flagged "cold battery" when
+    the pack was cold) or the station capped the rate, with the binding kW shown. AC phases are
+    not yet attributed.
 - WiFi: optional priority network list. When enabled, the module prefers known WiFi networks in a
     user-defined order and, while connected to a lower-priority network, periodically scans and
     upgrades to a higher-priority one when it is in range with good signal (>= network wifi.sq.good).
