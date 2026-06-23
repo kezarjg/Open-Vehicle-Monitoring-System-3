@@ -120,6 +120,27 @@ protected:
         bool  csv_file_created = false;   // <base>.csv exists on disk (first flush truncates)
         std::string csv_buf;              // rows pending flush (batched to limit flash write cycles)
         int   last_csv_flush = 0;         // monotonic s of last flush
+        // INC-1: per-phase tracking. phases[] is additive — the session-level
+        // aggregates above stay authoritative for the Summary block.
+        struct ChargePhase {
+            bool   is_dc = false;
+            int    start_monotonic = 0;
+            time_t start_utc = 0;
+            int    start_soc = -1;
+            int    end_monotonic = 0;
+            int    end_soc = -1;
+            float  kwh_at_open = 0.0f;   // ms_v_charge_kwh snapshot at phase open
+            float  energy_kwh = 0.0f;    // computed at close (delta)
+            float  peak_power = 0.0f;    // kW into battery
+            float  delivered_ah = 0.0f;  // phase-local coulomb count
+            bool   temp_seen = false;
+            float  temp_min = 0.0f;
+            float  temp_max = 0.0f;
+            int    outcome = -1;         // 0x1688 latched at close
+        };
+        std::vector<ChargePhase> phases;
+        int   cur = -1;                  // index of the open phase in phases, -1 = none
+        bool  report_written = false;    // idempotency guard for GenerateChargeReport
     };
     ChargeSessionState m_charge_session;
 
@@ -197,6 +218,8 @@ private:
     void UpdateChargeSessionStats();   // live aggregation while charging (peak power, temp range, type)
     void RenderPowerSvg(std::ostream& out);  // stream the inline SVG power(+SOC)-vs-time chart from m_charge_session.svg
     void GenerateChargeReport();       // write the session-end HTML report to /store/charge-reports/
+    void OpenChargePhase(bool is_dc);   // INC-1: start a new charge phase on AC/DC entry
+    void CloseChargePhase();            // INC-1: close the open phase on WAIT / report time
     void LogChargeEvent(const char* label);            // append a timestamped event
     void AppendChargeCsvRow();                          // buffer one CSV row (header on first call)
     void FlushChargeCsv();                              // write buffered CSV rows to <base>.csv
