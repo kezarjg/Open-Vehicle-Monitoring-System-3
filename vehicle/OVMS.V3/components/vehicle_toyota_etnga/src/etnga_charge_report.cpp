@@ -513,53 +513,37 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
         }
     }
 
-    // SOC overlay (right axis, 0-100).
-    out << "<polyline fill=\"none\" stroke=\"#39c\" stroke-width=\"1\" stroke-dasharray=\"1 3\" points=\"";
-    for (size_t i = 0; i < s.size(); i++) {
-        float x = PADL + (float)PW * s[i].t_s / tmax;
-        float soc = s[i].soc < 0 ? 0.0f : (s[i].soc > 100 ? 100.0f : (float)s[i].soc);
-        float y = PADT + (float)PH * (1.0f - soc / 100.0f);
-        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
-    }
-    out << "\"/>\n";
-
-    // Car-permitted limit (the BMS taper curve).
-    out << "<polyline fill=\"none\" stroke=\"#0a0\" stroke-width=\"1\" stroke-dasharray=\"5 3\" points=\"";
-    for (size_t i = 0; i < s.size(); i++) {
-        float x = PADL + (float)PW * s[i].t_s / tmax;
-        float v = s[i].car_perm; if (v < 0) v = 0; if (v > pmax) v = pmax;
-        float y = PADT + (float)PH * (1.0f - v / pmax);
-        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
-    }
-    out << "\"/>\n";
-
-    // Station power (actual from EVSE).
-    out << "<polyline fill=\"none\" stroke=\"#e80\" stroke-width=\"1.5\" points=\"";
-    for (size_t i = 0; i < s.size(); i++) {
-        float x = PADL + (float)PW * s[i].t_s / tmax;
-        float v = s[i].station_kw; if (v < 0) v = 0; if (v > pmax) v = pmax;
-        float y = PADT + (float)PH * (1.0f - v / pmax);
-        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
-    }
-    out << "\"/>\n";
-    // HVAC power (into cabin / My-Room).
-    out << "<polyline fill=\"none\" stroke=\"#a0a\" stroke-width=\"1.5\" points=\"";
-    for (size_t i = 0; i < s.size(); i++) {
-        float x = PADL + (float)PW * s[i].t_s / tmax;
-        float v = s[i].hvac_kw; if (v < 0) v = 0; if (v > pmax) v = pmax;
-        float y = PADT + (float)PH * (1.0f - v / pmax);
-        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
-    }
-    out << "\"/>\n";
-    // Delivered power (primary trace).
-    out << "<polyline fill=\"none\" stroke=\"#06c\" stroke-width=\"2\" points=\"";
-    for (size_t i = 0; i < s.size(); i++) {
-        float x = PADL + (float)PW * s[i].t_s / tmax;
-        float v = s[i].kw; if (v < 0) v = 0; if (v > pmax) v = pmax;
-        float y = PADT + (float)PH * (1.0f - v / pmax);
-        snprintf(b, sizeof(b), "%.1f,%.1f ", x, y); out << b;
-    }
-    out << "\"/>\n";
+    // #138 follow-up: render each trace with breaks at time gaps. When the sample time jumps by
+    // more than ~2 sample intervals — a CAN-stale window (logging suspended) or an inter-phase WAIT
+    // pause — start a new polyline segment instead of drawing a straight line across the missing
+    // data, so the chart shows an honest gap. Each trace clamps its value to [0, scale] and maps to y.
+    const int svg_iv = m_charge_session.svg_interval_s > 0 ? m_charge_session.svg_interval_s : 20;
+    const int gap_threshold = 2 * svg_iv;
+    auto emitTrace = [&](const char* poly, float scale, float (*pick)(const ChargeSessionState::Sample&)) {
+        out << poly << " points=\"";
+        int prev = -1; char bb[32];
+        for (size_t i = 0; i < s.size(); i++) {
+            if (prev >= 0 && s[i].t_s - prev > gap_threshold)   // gap -> break the line
+                out << "\"/>\n" << poly << " points=\"";
+            prev = s[i].t_s;
+            float x = PADL + (float)PW * s[i].t_s / tmax;
+            float v = pick(s[i]); if (v < 0) v = 0; if (v > scale) v = scale;
+            float y = PADT + (float)PH * (1.0f - v / scale);
+            snprintf(bb, sizeof(bb), "%.1f,%.1f ", x, y); out << bb;
+        }
+        out << "\"/>\n";
+    };
+    // SOC overlay (right axis, 0-100), car-permitted limit, station power, HVAC power, delivered (primary).
+    emitTrace("<polyline fill=\"none\" stroke=\"#39c\" stroke-width=\"1\" stroke-dasharray=\"1 3\"", 100.0f,
+              [](const ChargeSessionState::Sample& smp)->float { return (float)smp.soc; });
+    emitTrace("<polyline fill=\"none\" stroke=\"#0a0\" stroke-width=\"1\" stroke-dasharray=\"5 3\"", pmax,
+              [](const ChargeSessionState::Sample& smp)->float { return smp.car_perm; });
+    emitTrace("<polyline fill=\"none\" stroke=\"#e80\" stroke-width=\"1.5\"", pmax,
+              [](const ChargeSessionState::Sample& smp)->float { return smp.station_kw; });
+    emitTrace("<polyline fill=\"none\" stroke=\"#a0a\" stroke-width=\"1.5\"", pmax,
+              [](const ChargeSessionState::Sample& smp)->float { return smp.hvac_kw; });
+    emitTrace("<polyline fill=\"none\" stroke=\"#06c\" stroke-width=\"2\"", pmax,
+              [](const ChargeSessionState::Sample& smp)->float { return smp.kw; });
 
     // Legend (bottom).
     int ly = H - 6;
