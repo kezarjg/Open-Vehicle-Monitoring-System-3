@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <atomic>
+#include <map>
 #include <iosfwd>
 #include <time.h>
 #include "vehicle.h"
@@ -157,6 +159,16 @@ protected:
     };
     ChargeSessionState m_charge_session;
 
+    // INC-3: charge-fault diagnostic DID dump (raw one-shot snapshot of OBC DIDs on a fault).
+    std::atomic<bool> m_charge_fault_pending{false};   // set on poller task (0x1688 fault), consumed on Events task
+    std::atomic<int>  m_dump_remaining{0};             // OnceOffPolls still outstanding
+    std::map<uint16_t,std::string> m_dump_results;     // pid -> raw response bytes ("" = no reply)
+    OvmsMutex         m_dump_mutex;                     // guards m_dump_results (poller task writes, Events task reads)
+    int               m_dump_phase_idx = -1;           // which phase faulted (index into m_charge_session.phases)
+    int               m_dump_outcome = -1;             // the 0x1688 code that triggered the dump
+    int               m_dump_trigger_outcome = -1;     // latched at fault-flag time (poller task); avoids stale code at dump-kickoff
+    int               m_dump_trigger_phase   = -1;     // latched phase index at fault-flag time
+
     static constexpr int TPMS_SLOT_COUNT = 5;
     int8_t m_tpms_corner[TPMS_SLOT_COUNT] = {0};   // slot->corner cache: 0=unread/none, 1=FL,2=FR,3=RL,4=RR
 
@@ -260,6 +272,7 @@ private:
     static const char* ChargeOutcomeLabel(int code);    // 0x1688 enum -> human text
     static const char* HlcStateLabel(int code);         // 0x1666 DC HLC state enum -> human text ("" if unknown)
     static const char* AcOpStatusLabel(int code);       // 0x1684 AC-Op state enum -> human text ("" for Stop/unknown)
+    std::string DumpDidDecode(uint16_t did, const std::string& raw);  // INC-3: human-readable decode for the confident DID subset; "" = raw only
     std::string LookupLocationName(float lat, float lon); // matching OVMS named-location (geofence), or ""
 
     // Incoming message handling functions
@@ -422,6 +435,18 @@ private:
     void RequestVIN();
     void IncomingVINSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, CAN_frame_format_t format, const std::string &data);
     void IncomingVINFail(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, int errorcode);
+
+    static bool IsChargeFaultCode(int code);   // INC-3: true for abnormal 0x1688 stop codes
+    void MaybeStartChargeFaultDump();          // INC-3: kick off the OnceOffPoll burst (Events task)
+    void IncomingDumpSuccess(uint16_t type, uint32_t module_sent, uint32_t module_rec,
+                             uint16_t pid, CAN_frame_format_t format, const std::string& data);
+    void IncomingDumpFail(uint16_t type, uint32_t module_sent, uint32_t module_rec,
+                          uint16_t pid, int errorcode);
+    // INC-3: deferred report finalization (Events task only)
+    void FinalizeChargeSession();              // write the report + reset m_charge_session
+    bool m_report_pending = false;             // true while waiting for a fault dump to complete
+    int  m_report_pending_deadline = 0;        // monotonic s: give up and finalize after this
+    static const int DUMP_WAIT_SECS = 10;      // max seconds to wait for the dump before finalizing anyway
 
 };
 

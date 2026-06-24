@@ -104,6 +104,19 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
 {
     int monotonic = StandardMetrics.ms_m_monotonic->AsInt();
 
+    // INC-3: deferred-report completion check. When a fault dump was in flight at session
+    // close, we hold off on GenerateChargeReport until all DIDs are captured (or a timeout
+    // elapses). This runs first so normal AWAKE handling (including the PISW-reconcile
+    // below) cannot double-finalize while the deferred report is still pending.
+    if (m_report_pending) {
+        if (m_dump_remaining.load() <= 0 || monotonic >= m_report_pending_deadline) {
+            ESP_LOGI(TAG, "Fault dump done (or timed out) — finalizing deferred report");
+            FinalizeChargeSession();
+            m_report_pending = false;
+        }
+        return;   // hold normal AWAKE handling (incl. the PISW-reconcile) until the deferred report is written
+    }
+
     // Wake-reconcile: if a charge session was open and the cable is now gone (confirmed
     // fresh read — not stale/transient), the cable was removed while we slept.
     // Guard: only act on a non-stale PISW value to avoid the ~30s OBC post-wake transient
@@ -139,10 +152,17 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
         ESP_LOGI(TAG, "Charge session ended during sleep — finalizing");
         StandardMetrics.ms_v_charge_state->SetValue("done");
         LogChargeEvent("Unplugged (during sleep)");
-        GenerateChargeReport();   // flushes the CSV; no-op + stub-CSV cleanup if no energy delivered
-        m_charge_session = ChargeSessionState{};
+        if (m_dump_remaining.load() > 0) {       // a fault dump is still capturing — wait for it
+            m_report_pending = true;
+            m_report_pending_deadline = monotonic + DUMP_WAIT_SECS;
+            ESP_LOGI(TAG, "Report deferred — waiting for fault dump (%d DIDs left)", m_dump_remaining.load());
+            m_pisw_zero_count = 0;   // consumed — reset the debounce
+            return;   // exit now; next tick will complete via m_report_pending check at top
+        } else {
+            FinalizeChargeSession();
+        }
         m_pisw_zero_count = 0;   // consumed — reset the debounce
-        // fall through to normal AWAKE handling
+        // fall through to normal AWAKE handling (finalize path only)
     }
 
     if (!StandardMetrics.ms_v_env_awake->AsBool()) {
@@ -410,9 +430,16 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
         if (m_charge_session.in_session) {
             ESP_LOGI(TAG, "Charge session closed");
             LogChargeEvent("Unplugged");
-            GenerateChargeReport();   // write the session-end HTML report (no-op if no energy delivered)
+            if (m_dump_remaining.load() > 0) {       // a fault dump is still capturing — wait for it
+                m_report_pending = true;
+                m_report_pending_deadline = monotonic + DUMP_WAIT_SECS;
+                ESP_LOGI(TAG, "Report deferred — waiting for fault dump (%d DIDs left)", m_dump_remaining.load());
+            } else {
+                FinalizeChargeSession();
+            }
+        } else {
+            m_charge_session = ChargeSessionState{};   // not in session — nothing to finalize
         }
-        m_charge_session = ChargeSessionState{};   // reset (clears in_session)
         m_charge_wait_slept = false;   // leaving the charge sub-machine — clear wait flag
     }
 }
@@ -484,6 +511,16 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
             mkdir(ChargeReportDir().c_str(), 0755);
             m_charge_session.base = ChargeReportDir() + "/" + ts;
         }
+        // INC-3: dump state is session-scoped — clear at session open so a fault dump from a
+        // prior (possibly <0.05 kWh, report-skipped) session can never leak into this report.
+        {
+            OvmsMutexLock lock(&m_dump_mutex);
+            m_dump_results.clear();
+        }
+        m_dump_phase_idx = -1;
+        m_dump_outcome = -1;
+        m_dump_remaining = 0;
+        m_charge_fault_pending = false;
         LogChargeEvent("Plugged in — handshake");
         ESP_LOGI(TAG, "Charge session opened (SOC %d%%)", m_charge_session.start_soc);
     }
@@ -498,6 +535,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeWaitState()
     SetChargeState(PollState::CHARGE_WAIT);
     LogChargeEvent("Charging paused / phase ended");
     CloseChargePhase();       // INC-1: close the active phase (pause / phase end)
+    MaybeStartChargeFaultDump();   // INC-3: if a fault was flagged, snapshot the OBC diagnostic DIDs
 }
 
 void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
