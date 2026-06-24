@@ -248,6 +248,22 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
 
     int now = StandardMetrics.ms_m_monotonic->AsInt();
 
+    // #138: if the CAN poll path has gone quiet (e.g. car locked → OBD gateway isolated from the
+    // OBC), the charge metrics are frozen. Suspend per-sample logging + accumulation so we don't
+    // record/integrate stale values; resume automatically when polls return.
+    const int CHARGE_STALE_SECS = 3;   // charge poll path runs at 1s; 3 missed = clearly stale but quick
+    if (m_last_poll_monotonic == 0 || now - m_last_poll_monotonic > CHARGE_STALE_SECS) {
+        // Display honesty: zero the live power/current so the app/server/CSV don't show a frozen value.
+        // (Does not touch the energy integrals; v.c.kwh recomputes from pack V×I on the next reply.)
+        StandardMetrics.ms_v_charge_power->SetValue(0);
+        StandardMetrics.ms_v_bat_power->SetValue(0);
+        StandardMetrics.ms_v_bat_current->SetValue(0);
+        // Keep the dt baselines current so resume doesn't bridge the gap into delivered_ah / station_kwh / SVG.
+        m_charge_session.last_sample_monotonic = now;
+        m_charge_session.last_svg_monotonic = now;
+        return;   // skip peak/temp/ambient, station_kwh/delivered_ah, CSV row, SVG sample
+    }
+
     float p = StandardMetrics.ms_v_charge_power->AsFloat();
     if (p > m_charge_session.peak_power)
         m_charge_session.peak_power = p;
