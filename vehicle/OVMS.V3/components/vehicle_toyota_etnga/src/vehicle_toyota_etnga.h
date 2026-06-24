@@ -272,6 +272,7 @@ private:
     static const char* ChargeOutcomeLabel(int code);    // 0x1688 enum -> human text
     static const char* HlcStateLabel(int code);         // 0x1666 DC HLC state enum -> human text ("" if unknown)
     static const char* AcOpStatusLabel(int code);       // 0x1684 AC-Op state enum -> human text ("" for Stop/unknown)
+    std::string DumpDidDecode(uint16_t did, const std::string& raw);  // INC-3: human-readable decode for the confident DID subset; "" = raw only
     std::string LookupLocationName(float lat, float lon); // matching OVMS named-location (geofence), or ""
 
     // Incoming message handling functions

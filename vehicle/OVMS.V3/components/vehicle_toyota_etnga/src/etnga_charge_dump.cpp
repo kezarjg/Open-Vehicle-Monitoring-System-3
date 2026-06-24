@@ -68,6 +68,24 @@ void OvmsVehicleToyotaETNGA::IncomingDumpFail(uint16_t type, uint32_t module_sen
         ESP_LOGI(TAG, "Charge-fault DID dump complete (%d DIDs)", (int) m_dump_results.size());
 }
 
+// Human-readable decode for the confident DID subset. "" = no confident decode (raw-only).
+std::string OvmsVehicleToyotaETNGA::DumpDidDecode(uint16_t did, const std::string& raw)
+{
+    auto u8  = [&](size_t i)->int { return (i < raw.size()) ? (uint8_t)raw[i] : -1; };
+    auto u16 = [&](size_t i)->int { return (i+1 < raw.size()) ? (((uint8_t)raw[i]<<8)|(uint8_t)raw[i+1]) : -1; };
+    char b[64];
+    switch (did) {
+        case 0x1688: { const char* l = ChargeOutcomeLabel(u8(0)); return l[0] ? l : ""; }
+        case 0x1666: { const char* l = HlcStateLabel(u8(0));     return l[0] ? l : ""; }
+        case 0x1684: { const char* l = AcOpStatusLabel(u8(0));   return l[0] ? l : ""; }
+        case 0x10D4: { int v=u16(0); if(v<0)return ""; snprintf(b,sizeof(b),"%.2f kW", (v-0x8000)*0.01f); return b; }
+        case 0x1829: case 0x182A: { int v=u16(0); if(v<0)return ""; snprintf(b,sizeof(b),"%.1f °C", v/256.0f-50.0f); return b; }  // batt max/min temp, Q8.8 -50
+        case 0x1657: case 0x1658: { int v=u8(0);  if(v<0)return ""; snprintf(b,sizeof(b),"%d °C", v-50); return b; }              // PFC / DC-DC temp, u8 -50
+        case 0x1669: { int v=u8(0); if(v<0)return ""; snprintf(b,sizeof(b),"PISW 0x%02X", v); return b; }
+        default: return "";   // uncertain — raw only
+    }
+}
+
 // Events task (called from TransitionToChargeWaitState after CloseChargePhase). If a fault was
 // flagged and no dump is already running, fire a OnceOffPoll for every diagnostic DID. Each
 // auto-removes after one reply; "!v." prefix => reclaimed on teardown (poller naming contract).
