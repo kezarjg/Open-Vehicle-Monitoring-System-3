@@ -1,6 +1,11 @@
 Open Vehicle Monitor System v3 - Change log
 
 ????-??-?? ???  ???????  OTA release
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): if the CAN bus goes quiet mid-charge (e.g. the
+    car is locked, isolating the diagnostic gateway from the OBC), the charge report no longer
+    records frozen/stale telemetry — the per-sample log, energy accounting and chart pause until
+    the bus responds again, so the reported station energy and efficiency stay honest. Live charge
+    power reads 0 during such a gap.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the charge-fault diagnostic DID dump now labels
     each DID with a human-readable name (e.g. "PFC Temperature", "HLC Comm Sequence Status")
     alongside the raw bytes and decoded value.

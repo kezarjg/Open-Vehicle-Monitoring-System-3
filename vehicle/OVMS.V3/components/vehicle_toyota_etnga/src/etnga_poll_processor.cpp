@@ -13,6 +13,8 @@
 
 void OvmsVehicleToyotaETNGA::IncomingPollReply(const OvmsPoller::poll_job_t &job, uint8_t* data, uint8_t length)
 {
+    m_last_poll_monotonic = StandardMetrics.ms_m_monotonic->AsInt();   // #138: bus-alive timestamp for charge-stale detection
+
     // Check if this is the first frame of the multi-frame response
     if (job.mlframe == 0) {
         m_rxbuf.clear();
