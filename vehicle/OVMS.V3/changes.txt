@@ -6,6 +6,9 @@ Open Vehicle Monitor System v3 - Change log
     records frozen/stale telemetry — the per-sample log, energy accounting and chart pause until
     the bus responds again, so the reported station energy and efficiency stay honest. Live charge
     power reads 0 during such a gap.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the charge-fault diagnostic DID dump now labels
+    each DID with a human-readable name (e.g. "PFC Temperature", "HLC Comm Sequence Status")
+    alongside the raw bytes and decoded value.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): charge-session report is now multi-phase —
     a single plug-in-to-unplug session that charges, pauses (scheduled wait), then tops off is
     reported as separate phases, each with its own SOC delta, energy, peak/avg power,
