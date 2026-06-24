@@ -152,6 +152,41 @@ void OvmsVehicleToyotaETNGA::LogChargeEvent(const char* label)
         std::make_pair(StandardMetrics.ms_m_monotonic->AsInt(), label));
 }
 
+// INC-1: open a new charge phase on CHARGE_AC / CHARGE_DC entry. No-op if a phase is
+// already open (guards a 1 s state flap from double-opening). Snapshots the session
+// kWh meter so the phase energy is a delta at close.
+void OvmsVehicleToyotaETNGA::OpenChargePhase(bool is_dc)
+{
+    if (!m_charge_session.in_session || m_charge_session.cur >= 0)
+        return;
+    ChargeSessionState::ChargePhase ph;
+    ph.is_dc          = is_dc;
+    ph.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
+    ph.start_utc      = StandardMetrics.ms_m_timeutc->AsInt();
+    ph.start_soc      = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
+    ph.kwh_at_open    = StandardMetrics.ms_v_charge_kwh->AsFloat();
+    m_charge_session.phases.push_back(ph);
+    m_charge_session.cur = (int) m_charge_session.phases.size() - 1;
+    ESP_LOGD(TAG, "Charge phase %d open (%s)", m_charge_session.cur + 1, is_dc ? "DC" : "AC");
+}
+
+// INC-1: close the open phase on CHARGE_WAIT entry (or defensively at report time).
+// No-op if no phase is open. Energy is the kWh-meter delta since open; outcome latches 0x1688.
+void OvmsVehicleToyotaETNGA::CloseChargePhase()
+{
+    if (m_charge_session.cur < 0)
+        return;
+    ChargeSessionState::ChargePhase& ph = m_charge_session.phases[m_charge_session.cur];
+    ph.end_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
+    ph.end_soc       = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
+    ph.energy_kwh    = StandardMetrics.ms_v_charge_kwh->AsFloat() - ph.kwh_at_open;
+    if (ph.energy_kwh < 0.0f) ph.energy_kwh = 0.0f;
+    ph.outcome       = m_v_charge_outcome->AsInt();
+    ESP_LOGD(TAG, "Charge phase %d closed (%.2f kWh, %d%%->%d%%)",
+             m_charge_session.cur + 1, ph.energy_kwh, ph.start_soc, ph.end_soc);
+    m_charge_session.cur = -1;
+}
+
 // Live aggregation while charging: peak power, battery-temp range, ambient range,
 // delivered-Ah, per-tick CSV row, and downsampled SVG buffer.
 // Called every tick from HandleChargeAcState / HandleChargeDcState.
@@ -184,6 +219,16 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
         else if (amb > m_charge_session.amb_max) m_charge_session.amb_max = amb;
     }
 
+    // INC-1: mirror peak power + battery-temp range into the open phase (additive to the
+    // session-level aggregates above). cur < 0 between phases (WAIT) — skip then.
+    if (m_charge_session.cur >= 0) {
+        ChargeSessionState::ChargePhase& ph = m_charge_session.phases[m_charge_session.cur];
+        if (p > ph.peak_power) ph.peak_power = p;
+        if (!ph.temp_seen) { ph.temp_min = ph.temp_max = t; ph.temp_seen = true; }
+        else if (t < ph.temp_min) ph.temp_min = t;
+        else if (t > ph.temp_max) ph.temp_max = t;
+    }
+
     m_charge_session.is_dc = (static_cast<PollState>(m_poll_state) == PollState::CHARGE_DC);
 
     // Delivered-Ah (charge-side coulomb): integrate pack current over dt.
@@ -191,6 +236,9 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
         int dt = now - m_charge_session.last_sample_monotonic;
         if (dt > 0 && dt <= 10) {   // ignore gaps (pause / lock-isolation / sleep) so delivered_ah stays accurate
             m_charge_session.delivered_ah += fabsf(StandardMetrics.ms_v_bat_current->AsFloat()) * (dt / 3600.0f);
+            if (m_charge_session.cur >= 0)
+                m_charge_session.phases[m_charge_session.cur].delivered_ah +=
+                    fabsf(StandardMetrics.ms_v_bat_current->AsFloat()) * (dt / 3600.0f);
             float pv = StandardMetrics.ms_v_charge_voltage->AsFloat();
             float pa = StandardMetrics.ms_v_charge_current->AsFloat();
             float skw = m_charge_session.is_dc ? (pv * pa / 1000.0f) : m_v_charge_grid_power->AsFloat();
@@ -241,7 +289,7 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
         //                     plus raw station_grid_kw / station_present_v / station_present_a
         //   obc_kw          : diagnostic — raw 0x10D4 (under-reads on DC, issue #109)
         m_charge_session.csv_buf =
-            "elapsed_s,soc_pct,bms_soc_pct,station_kw,battery_kw,hvac_kw,pack_v,pack_a,"
+            "phase,elapsed_s,soc_pct,bms_soc_pct,station_kw,battery_kw,hvac_kw,pack_v,pack_a,"
             "batt_temp_c,ambient_c,state,station_max_kw,station_max_a,station_max_v,"
             "car_perm_kw,car_target_a,station_grid_kw,station_present_v,station_present_a,obc_kw\n";
         m_charge_session.csv_started = true;
@@ -259,9 +307,11 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
     float present_a = StandardMetrics.ms_v_charge_current->AsFloat();
     float grid_kw   = m_v_charge_grid_power->AsFloat();
     float station_kw = m_charge_session.is_dc ? (present_v * present_a / 1000.0f) : grid_kw;
+    int phase_no = (m_charge_session.cur >= 0) ? (m_charge_session.cur + 1) : 0;
     snprintf(row, sizeof(row),
-        "%d,%.0f,%.1f,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%s,%s,"
+        "%d,%d,%.0f,%.1f,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%s,%s,"
         "%.2f,%.0f,%.0f,%.2f,%.0f,%.3f,%.0f,%.0f,%.3f\n",
+        phase_no,
         elapsed,
         StandardMetrics.ms_v_bat_soc->AsFloat(),
         m_v_bat_soc_bms->AsFloat(),
@@ -364,6 +414,23 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
     snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", W-PADR, PADT, W-PADR, H-PADB); out << b;
     snprintf(b, sizeof(b), "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ccc\"/>\n", PADL, H-PADB, W-PADR, H-PADB); out << b;
 
+    // INC-1: phase-boundary markers (vertical dashed lines at each phase start/end),
+    // mapped from monotonic seconds onto the same time axis the traces use.
+    for (size_t i = 0; i < m_charge_session.phases.size(); i++) {
+        const ChargeSessionState::ChargePhase& ph = m_charge_session.phases[i];
+        int bounds[2] = { ph.start_monotonic - m_charge_session.start_monotonic,
+                          ph.end_monotonic   - m_charge_session.start_monotonic };
+        for (int k = 0; k < 2; k++) {
+            int ts = bounds[k];
+            if (ts <= 0 || ts > tmax) continue;   // off-chart / unset end
+            float x = PADL + (float)PW * ts / tmax;
+            snprintf(b, sizeof(b),
+                "<line x1=\"%.1f\" y1=\"%d\" x2=\"%.1f\" y2=\"%d\" stroke=\"#bbb\" "
+                "stroke-width=\"0.7\" stroke-dasharray=\"2 2\"/>\n", x, PADT, x, H - PADB);
+            out << b;
+        }
+    }
+
     // SOC overlay (right axis, 0-100).
     out << "<polyline fill=\"none\" stroke=\"#39c\" stroke-width=\"1\" stroke-dasharray=\"1 3\" points=\"";
     for (size_t i = 0; i < s.size(); i++) {
@@ -424,6 +491,9 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
 
 void OvmsVehicleToyotaETNGA::GenerateChargeReport()
 {
+    if (m_charge_session.report_written)
+        return;                 // defensive idempotency
+    CloseChargePhase();         // close any still-open phase (direct AC/DC->AWAKE safety net)
     const float energy_kwh = StandardMetrics.ms_v_charge_kwh->AsFloat();
     if (energy_kwh < 0.05f || m_charge_session.base.empty()) {
         ESP_LOGD(TAG, "Charge report skipped (%.3f kWh)", energy_kwh);
@@ -493,6 +563,11 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
         f << "<dt>Ambient</dt><dd>" << b << "</dd>\n";
     }
     f << "<dt>Type</dt><dd>" << (m_charge_session.is_dc ? "DC fast" : "AC") << "</dd>\n";
+    {
+        char pc[48];
+        snprintf(pc, sizeof(pc), "%u", (unsigned) m_charge_session.phases.size());
+        f << "<dt>Phases</dt><dd>" << pc << "</dd>\n";
+    }
     snprintf(b, sizeof(b), "%d%% &rarr; %d%% (+%d%%)", start_soc, end_soc, start_soc>=0?end_soc-start_soc:0);
     f << "<dt>SOC</dt><dd>" << b << "</dd>\n";
     // "From grid" is an AC-charge concept (the 0x161D grid-input poll only answers on AC);
@@ -535,6 +610,47 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     f << "<h2>Charging power</h2>\n";
     RenderPowerSvg(f);
 
+    // INC-1: per-phase summary blocks (Option A — no per-phase sample tables; the full
+    // timeline stays in the single CSV with its phase column).
+    for (size_t i = 0; i < m_charge_session.phases.size(); i++) {
+        const ChargeSessionState::ChargePhase& ph = m_charge_session.phases[i];
+        int pdur = ph.end_monotonic - ph.start_monotonic; if (pdur < 0) pdur = 0;
+        float pavg = (pdur > 0) ? ph.energy_kwh / (pdur / 3600.0f) : 0.0f;
+        char pb[96];
+        f << "<h2>Phase " << (i + 1) << " &mdash; " << (ph.is_dc ? "DC fast" : "AC") << "</h2>\n<dl>\n";
+        if (ph.start_utc > 1000000000) {
+            time_t st = (time_t) ph.start_utc, et = st + pdur; struct tm tmv;
+            char ps[40], pe[40];
+            gmtime_r(&st, &tmv); strftime(ps, sizeof(ps), "%H:%M:%S", &tmv);
+            gmtime_r(&et, &tmv); strftime(pe, sizeof(pe), "%H:%M:%S", &tmv);
+            snprintf(pb, sizeof(pb), "%s &rarr; %s UTC (%dh %02dm %02ds)", ps, pe,
+                     pdur/3600, (pdur%3600)/60, pdur%60);
+            f << "<dt>Active</dt><dd>" << pb << "</dd>\n";
+        }
+        snprintf(pb, sizeof(pb), "%d%% &rarr; %d%% (+%d%%)", ph.start_soc, ph.end_soc,
+                 ph.start_soc >= 0 ? ph.end_soc - ph.start_soc : 0);
+        f << "<dt>SOC</dt><dd>" << pb << "</dd>\n";
+        snprintf(pb, sizeof(pb), "%.2f kWh; %.1f kW peak / %.2f kW avg",
+                 ph.energy_kwh, ph.peak_power, pavg);
+        f << "<dt>Energy</dt><dd>" << pb << "</dd>\n";
+        if (ph.temp_seen) {
+            metric_unit_t tu = OvmsMetricGetUserUnit(GrpTemp, Celcius);
+            const char* tlabel = OvmsMetricUnitLabel(tu);
+            float lo = UnitConvert(Celcius, tu, ph.temp_min), hi = UnitConvert(Celcius, tu, ph.temp_max);
+            snprintf(pb, sizeof(pb), "%.0f%s &rarr; %.0f%s", lo, tlabel, hi, tlabel);
+            f << "<dt>Battery temp</dt><dd>" << pb << "</dd>\n";
+        }
+        {
+            const char* lbl = ChargeOutcomeLabel(ph.outcome);
+            if (lbl[0]) f << "<dt>Outcome</dt><dd>" << lbl << "</dd>\n";
+            else if (ph.outcome >= 0) {
+                snprintf(pb, sizeof(pb), "0x%02X (raw)", ph.outcome & 0xFF);
+                f << "<dt>Outcome</dt><dd>" << pb << "</dd>\n";
+            }
+        }
+        f << "</dl>\n";
+    }
+
     f << "<h2>Session events</h2>\n<table><tr><th>Time</th><th>Event</th></tr>\n";
     for (size_t i = 0; i < m_charge_session.events.size(); i++) {
         int rel = m_charge_session.events[i].first - m_charge_session.start_monotonic; if (rel < 0) rel = 0;
@@ -567,8 +683,9 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
           << "\">Download per-sample CSV</a></p>\n";
     }
 
-    f << "<p class=\"note\">Generated on-module by OVMS (Toyota e-TNGA). Single-phase; avg power is over the "
-         "whole plug-in interval. Estimates are provisional.</p>\n</body></html>\n";
+    f << "<p class=\"note\">Generated on-module by OVMS (Toyota e-TNGA). Multi-phase; per-phase "
+         "avg power is over each active interval. Estimates are provisional.</p>\n</body></html>\n";
+    m_charge_session.report_written = true;
     // Hand the rendered HTML to the async writer; it writes the file and prunes off-thread.
     etnga_io_job* job = new etnga_io_job;
     job->op        = etnga_io_job::WRITE_TRUNCATE;
