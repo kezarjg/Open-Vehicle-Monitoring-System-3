@@ -166,6 +166,8 @@ protected:
     OvmsMutex         m_dump_mutex;                     // guards m_dump_results (poller task writes, Events task reads)
     int               m_dump_phase_idx = -1;           // which phase faulted (index into m_charge_session.phases)
     int               m_dump_outcome = -1;             // the 0x1688 code that triggered the dump
+    int               m_dump_trigger_outcome = -1;     // latched at fault-flag time (poller task); avoids stale code at dump-kickoff
+    int               m_dump_trigger_phase   = -1;     // latched phase index at fault-flag time
 
     static constexpr int TPMS_SLOT_COUNT = 5;
     int8_t m_tpms_corner[TPMS_SLOT_COUNT] = {0};   // slot->corner cache: 0=unread/none, 1=FL,2=FR,3=RL,4=RR

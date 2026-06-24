@@ -389,8 +389,13 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
             int outcome_code = CalculateChargeOutcome(m_rxbuf);
             SetChargeOutcome(outcome_code);
             // INC-3: flag a diagnostic dump on a genuine charge fault (consumed on CHARGE_WAIT entry).
-            if (IsChargeFaultCode(outcome_code))
+            if (IsChargeFaultCode(outcome_code)) {
                 m_charge_fault_pending = true;
+                m_dump_trigger_outcome = outcome_code;                          // the code that IS the fault
+                m_dump_trigger_phase   = (m_charge_session.cur >= 0)
+                                         ? m_charge_session.cur
+                                         : (int) m_charge_session.phases.size() - 1;  // phase whose fault flagged
+            }
             break;
         }
         case PID_CHARGE_STOP_REQ: {

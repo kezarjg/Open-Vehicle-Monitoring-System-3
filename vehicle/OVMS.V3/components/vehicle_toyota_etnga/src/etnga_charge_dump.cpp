@@ -85,8 +85,9 @@ void OvmsVehicleToyotaETNGA::MaybeStartChargeFaultDump()
         OvmsMutexLock lock(&m_dump_mutex);
         m_dump_results.clear();
     }
-    m_dump_phase_idx = (int) m_charge_session.phases.size() - 1;   // the phase that just closed/faulted
-    m_dump_outcome   = m_v_charge_outcome->AsInt();
+    m_dump_outcome   = m_dump_trigger_outcome;                       // the triggering fault code, not current
+    m_dump_phase_idx = (m_dump_trigger_phase >= 0) ? m_dump_trigger_phase
+                                                   : (int) m_charge_session.phases.size() - 1;
     m_dump_remaining = ETNGA_DUMP_DID_COUNT;
 
     char name[24];
