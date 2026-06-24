@@ -84,6 +84,10 @@ protected:
     int  m_pisw_zero_count = 0;        // consecutive fresh AWAKE PISW==0x00 reads; debounces the OBC post-wake transient
     uint32_t m_pisw_last_modified = 0;  // LastModified() of the last PISW reading counted, so the debounce counts distinct polls not 1s ticks
 
+    // INC-2: charge-rate limiting side (who capped the rate). DC-only in this increment;
+    // AC/cable/obc/grid/thermal are deferred (unconfirmed DIDs/constants).
+    enum LimSide { LIM_UNKNOWN = 0, LIM_STATION, LIM_CAR };
+
     struct ChargeSessionState {
         bool  in_session = false;
         int   start_monotonic = 0;
@@ -137,6 +141,15 @@ protected:
             float  temp_min = 0.0f;
             float  temp_max = 0.0f;
             int    outcome = -1;         // 0x1688 latched at close
+            // INC-2: limiting-side attribution (DC car-vs-station). Defaults = unknown/inert.
+            int    limiting_side = 0;       // LimSide; 0 = unknown / not classified
+            float  limiting_value = 0.0f;   // the binding cap (kW)
+            bool   cold_battery = false;    // sub-attribution: car-limited while battery cold
+            // per-phase cap trackers (DC), filled live in UpdateChargeSessionStats:
+            bool   cap_car_seen = false;
+            float  cap_car_min = 0.0f;      // min active fabsf(0x16A1) over the phase
+            bool   cap_station_seen = false;
+            float  cap_station_max = 0.0f;  // max 0x166A advertised station power over the phase
         };
         std::vector<ChargePhase> phases;
         int   cur = -1;                  // index of the open phase in phases, -1 = none
@@ -220,6 +233,8 @@ private:
     void GenerateChargeReport();       // write the session-end HTML report to /store/charge-reports/
     void OpenChargePhase(bool is_dc);   // INC-1: start a new charge phase on AC/DC entry
     void CloseChargePhase();            // INC-1: close the open phase on WAIT / report time
+    void ClassifyLimitingSide();                        // INC-2: set the open phase's limiting side at close
+    static const char* LimSideLabel(int side);          // INC-2: LimSide enum -> human text
     void LogChargeEvent(const char* label);            // append a timestamped event
     void AppendChargeCsvRow();                          // buffer one CSV row (header on first call)
     void FlushChargeCsv();                              // write buffered CSV rows to <base>.csv
