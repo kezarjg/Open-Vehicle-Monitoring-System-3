@@ -82,6 +82,7 @@ protected:
     bool m_armed_for_charge = false;   // charge lid seen open since entering AWAKE
     int  m_cable_watch_start = 0;      // monotonic s when armed (15-min cable watch)
     int  m_charge_state_entry = 0;     // monotonic s of last charge-state entry (handshake 60s timer)
+    int m_last_poll_monotonic = 0;   // #138: monotonic s of the last poll reply (any ECU); charge-stale detection
     bool m_charge_wait_slept = false;  // true after Tier-2 CHARGE_WAIT sleep; selects the short re-sleep threshold
     int  m_pisw_zero_count = 0;        // consecutive fresh AWAKE PISW==0x00 reads; debounces the OBC post-wake transient
     uint32_t m_pisw_last_modified = 0;  // LastModified() of the last PISW reading counted, so the debounce counts distinct polls not 1s ticks
