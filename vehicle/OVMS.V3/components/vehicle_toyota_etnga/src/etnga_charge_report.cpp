@@ -555,6 +555,14 @@ void OvmsVehicleToyotaETNGA::RenderPowerSvg(std::ostream& out)
     out << "</svg>\n";
 }
 
+// Events-task: write the report and reset the session. Used both for the immediate close
+// path and the deferred (wait-for-dump) path.
+void OvmsVehicleToyotaETNGA::FinalizeChargeSession()
+{
+    GenerateChargeReport();
+    m_charge_session = ChargeSessionState{};
+}
+
 void OvmsVehicleToyotaETNGA::GenerateChargeReport()
 {
     if (m_charge_session.report_written)

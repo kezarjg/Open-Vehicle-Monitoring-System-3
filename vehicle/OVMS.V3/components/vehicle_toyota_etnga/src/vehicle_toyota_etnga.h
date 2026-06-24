@@ -441,6 +441,11 @@ private:
                              uint16_t pid, CAN_frame_format_t format, const std::string& data);
     void IncomingDumpFail(uint16_t type, uint32_t module_sent, uint32_t module_rec,
                           uint16_t pid, int errorcode);
+    // INC-3: deferred report finalization (Events task only)
+    void FinalizeChargeSession();              // write the report + reset m_charge_session
+    bool m_report_pending = false;             // true while waiting for a fault dump to complete
+    int  m_report_pending_deadline = 0;        // monotonic s: give up and finalize after this
+    static const int DUMP_WAIT_SECS = 10;      // max seconds to wait for the dump before finalizing anyway
 
 };
 
