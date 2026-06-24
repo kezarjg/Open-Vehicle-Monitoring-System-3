@@ -86,6 +86,44 @@ std::string OvmsVehicleToyotaETNGA::DumpDidDecode(uint16_t did, const std::strin
     }
 }
 
+// Human-readable name for a dump DID (solterra-can RE labels). "" for an unexpected DID.
+const char* OvmsVehicleToyotaETNGA::DumpDidName(uint16_t did)
+{
+    switch (did) {
+        case 0x1666: return "HLC Comm Sequence Status";
+        case 0x1684: return "AC Charging Operation Status";
+        case 0x1688: return "Charging History Information";
+        case 0x1664: return "Charging Control Signal Status";
+        case 0x1667: return "CCM Charge Stop Request";
+        case 0x1668: return "DC Charging Control Status";
+        case 0x1736: return "DC Operation Mode";
+        case 0x16AA: return "DC Fault / Trip-Flag Register";
+        case 0x16A9: return "DC Power-Limit History Flags";
+        case 0x161B: return "Charge-Limit Status Flags";
+        case 0x1806: return "AC Charging Relay Flags";
+        case 0x1702: return "HV Charging Relay Flags";
+        case 0x1669: return "PISW Status";
+        case 0x1602: return "Connector Connect Status";
+        case 0x1601: return "Connector Status Voltage";
+        case 0x1625: return "Charging Lid Switch Status";
+        case 0x1670: return "Hood Switch Signal";
+        case 0x164A: return "HV Circuit Shutdown Signal";
+        case 0x10D4: return "Battery Charging Power";
+        case 0x1654: return "AC Input Current";
+        case 0x166C: return "Station Present Output Current";
+        case 0x1621: return "HV Battery Total Voltage";
+        case 0x166B: return "Station Present Output Voltage";
+        case 0x165E: return "PFC Boost Output Voltage";
+        case 0x1632: return "AC Inlet Temperature Cluster";
+        case 0x1705: return "DC Inlet Temperature Cluster";
+        case 0x1829: return "Battery Maximum Temperature";
+        case 0x182A: return "Battery Minimum Temperature";
+        case 0x1657: return "PFC Temperature";
+        case 0x1658: return "DC/DC Converter Temperature";
+        default:     return "";
+    }
+}
+
 // Events task (called from TransitionToChargeWaitState after CloseChargePhase). If a fault was
 // flagged and no dump is already running, fire a OnceOffPoll for every diagnostic DID. Each
 // auto-removes after one reply; "!v." prefix => reclaimed on teardown (poller naming contract).

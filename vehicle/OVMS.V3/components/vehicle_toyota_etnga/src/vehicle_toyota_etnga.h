@@ -273,6 +273,7 @@ private:
     static const char* HlcStateLabel(int code);         // 0x1666 DC HLC state enum -> human text ("" if unknown)
     static const char* AcOpStatusLabel(int code);       // 0x1684 AC-Op state enum -> human text ("" for Stop/unknown)
     std::string DumpDidDecode(uint16_t did, const std::string& raw);  // INC-3: human-readable decode for the confident DID subset; "" = raw only
+    static const char* DumpDidName(uint16_t did);   // solterra-can RE label for a dump DID; "" if unknown
     std::string LookupLocationName(float lat, float lon); // matching OVMS named-location (geofence), or ""
 
     // Incoming message handling functions
