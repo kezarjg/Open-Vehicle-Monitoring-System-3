@@ -10,9 +10,11 @@ Open Vehicle Monitor System v3 - Change log
     charge-rate limit per phase — whether the car (battery taper, flagged "cold battery" when
     the pack was cold) or the station capped the rate, with the binding kW shown. AC phases are
     not yet attributed.
-- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): when a charge ends abnormally (an OBC fault
-    stop), the charge report now includes a raw diagnostic snapshot of ~30 OBC DIDs captured at
-    the fault, to aid offline diagnosis. Normal charges are unaffected.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): when a charge ends with an OBC fault, the
+    charge report now includes a diagnostic snapshot of ~30 OBC DIDs with human-readable
+    decoded values alongside the raw bytes, labelled with the triggering fault. The report is
+    produced for a faulted session even if almost no energy was delivered. Normal charges are
+    unaffected.
 - WiFi: optional priority network list. When enabled, the module prefers known WiFi networks in a
     user-defined order and, while connected to a lower-priority network, periodically scans and
     upgrades to a higher-priority one when it is in range with good signal (>= network wifi.sq.good).
