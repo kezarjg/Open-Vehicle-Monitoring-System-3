@@ -561,7 +561,8 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
         return;                 // defensive idempotency
     CloseChargePhase();         // close any still-open phase (direct AC/DC->AWAKE safety net)
     const float energy_kwh = StandardMetrics.ms_v_charge_kwh->AsFloat();
-    if (energy_kwh < 0.05f || m_charge_session.base.empty()) {
+    bool have_dump = (m_dump_phase_idx >= 0) || (m_dump_remaining.load() > 0);
+    if ((energy_kwh < 0.05f || m_charge_session.base.empty()) && !have_dump) {
         ESP_LOGD(TAG, "Charge report skipped (%.3f kWh)", energy_kwh);
         if (m_charge_session.csv_file_created) {  // remove the streamed stub CSV via the worker
             etnga_io_job* j = new etnga_io_job;
