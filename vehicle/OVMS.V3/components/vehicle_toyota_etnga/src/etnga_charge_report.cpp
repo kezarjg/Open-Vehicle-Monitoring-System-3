@@ -736,11 +736,11 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
         OvmsMutexLock lock(&m_dump_mutex);
         if (!m_dump_results.empty()) {
             f << "<h2>Diagnostic DID dump</h2>\n";
-            char db[64];
-            snprintf(db, sizeof(db), "Phase %d fault (outcome 0x%02X) — OBC 0x745, raw UDS 0x22 responses.",
-                     m_dump_phase_idx + 1, m_dump_outcome & 0xFF);
+            char db[96];
+            snprintf(db, sizeof(db), "Phase %d fault (outcome 0x%02X \"%s\") — OBC 0x745, raw UDS 0x22 responses.",
+                     m_dump_phase_idx + 1, m_dump_outcome & 0xFF, ChargeOutcomeLabel(m_dump_outcome));
             f << "<p>" << db << "</p>\n";
-            f << "<table><tr><th>DID</th><th>raw response (hex)</th></tr>\n";
+            f << "<table><tr><th>DID</th><th>raw (hex)</th><th>decoded</th></tr>\n";
             for (std::map<uint16_t,std::string>::const_iterator it = m_dump_results.begin();
                  it != m_dump_results.end(); ++it) {
                 char did[8];
@@ -755,7 +755,7 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
                         f << hx;
                     }
                 }
-                f << "</td></tr>\n";
+                f << "</td><td>" << DumpDidDecode(it->first, it->second) << "</td></tr>\n";
             }
             f << "</table>\n";
         }
