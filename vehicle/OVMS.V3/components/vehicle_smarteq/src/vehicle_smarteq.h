@@ -33,14 +33,14 @@
 #ifndef __VEHICLE_SMARTEQ_H__
 #define __VEHICLE_SMARTEQ_H__
 
-
 // --- Constants ---
 #define VERSION "2.2.0"
-#define PRESET_VERSION 20260623 // Configuration preset version
+#define PRESET_VERSION 20260706        // Configuration preset version
+#define PRESET_VERSION_12VREF 20260706 // Configuration preset version for 12V reference migration, defined separately to allow setting 12V reference migration
 #define DEFAULT_BATTERY_CAPACITY 16700 // <- net 16700 Wh, gross 17600 Wh
 #define MAX_POLL_DATA_LEN 126
 #define CELLCOUNT 96
-#define SQ_CANDATA_TIMEOUT 10   // seconds until car goes to sleep without CAN activity
+#define SQ_CANDATA_TIMEOUT 10          // seconds until car goes to sleep without CAN activity
 
 #include "ovms_log.h"
 
@@ -227,14 +227,14 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     // --- Inline state helpers ---
     bool UsesTpmsSensorMapping() override { return true; } // using m_tpms_index[]
     bool IsOffEQ() { return m_poll_state == POLLSTATE_OFF; }
-    bool IsAwakeEQ() { return can_awake || can_charge_inprogress || can_env_on || can_hvac; }
+    bool IsAwakeEQ() { return can_awake || can_charge_inprogress || can_env_on || can_hvac || m_cmd_wakeup; }
     bool IsHVonEQ() { return can_battery_on && IsAwakeEQ(); }
     bool IsOnEQ() { return can_env_on; }
     bool IsChargingEQ() { return can_charge_inprogress; }
     bool IsOnHVACEQ() { return can_hvac; }
     bool IsCANwrite() { return m_enable_write || m_enable_write_caron; }
     bool Is12VchargeEQ() { return StdMetrics.ms_v_bat_12v_voltage->AsFloat(0.0f) >= 13.1f || 
-                                  (StdMetrics.ms_v_charge_12v_voltage->AsFloat(0.0f) >= 13.1f ) || 
+                                  (m_can_active && StdMetrics.ms_v_charge_12v_voltage->AsFloat(0.0f) >= 13.1f ) || 
                                   (m_can_active && can_charging12v); }
 
   // =========================================================================
@@ -449,6 +449,7 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     bool m_12v_charge_state = false;        // 12V charge state
     bool m_extendedStats = false;           // extended stats for trip and maintenance data
     bool m_enable_calcADCfactor = false;    // enable calculation of ADC factor
+    bool m_cmd_wakeup = false;              // wakeup command issued
     int m_reboot_ticker = 0;                // ticker for network restart
     int m_reboot_time = 30;                 // Restart Network time
     int m_TPMS_FL = 0;                      // TPMS Sensor Front Left
@@ -467,9 +468,10 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     std::string m_hl_canbyte = "";          // canbyte variable for unv
     std::deque<float> m_adc_factor_history;     // ring buffer (max 10) for ADC factors
     std::deque<float> m_12v_undervolt_history;  // ring buffer (max 10) for 12V undervoltage measurements
-    float m_ref12V = 12.6f;                 // reference 12V (12.6V)
-    float m_alert12V = 0.8f;                // alert threshold 12V (0.8V)
+    float m_ref12V = 12.5f;                 // reference 12V (12.5V)
+    float m_alert12V = 0.9f;                // alert threshold 12V (0.9V)
     bool m_12v_alerted = false;             // 12V undervolt alert triggered
+    int m_12v_alerted_ticker = -1;          // cooldown ticker for 12V undervolt alert reset
 
     // --- Internal state variables ---
     bool m_indicator = false;               // activate indicator e.g. 7 times or whatever
@@ -544,7 +546,7 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     float can_speed = 0.0f;
     float can_odometer = 0.0f;
     float can_odometer_trip = 0.0f;
-    float can_soc = 0.0f;
+    float can_soc = StdMetrics.ms_v_bat_soc->AsFloat(0.0f);
     float can_range_est = 0.0f;
     float can_range_full = 0.0f;
     float can_range_ideal = 0.0f;

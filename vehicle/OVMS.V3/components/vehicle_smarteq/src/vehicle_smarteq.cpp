@@ -218,7 +218,7 @@ OvmsVehicleSmartEQ::OvmsVehicleSmartEQ() {
   StdMetrics.ms_v_bat_12v_voltage_alert->SetValue(false);      // set 12V alert to false
   StdMetrics.ms_v_env_charging12v->SetValue(false);            // set 12V charging state to false
   StdMetrics.ms_v_env_aux12v->SetValue(false);
-  StdMetrics.ms_v_env_hvac->SetValue(false);  
+  StdMetrics.ms_v_env_hvac->SetValue(false);
 
   if (mt_pos_odometer_trip_total->AsFloat(0) < 1.0f)           // reset at boot
     {
@@ -257,8 +257,8 @@ void OvmsVehicleSmartEQ::ConfigChanged(OvmsConfigParam* param) {
   if (param && param->GetName() == "vehicle")
     {
     setTPMSValue();   // update TPMS metrics
-    m_ref12V = MyConfig.GetParamValueFloat("vehicle", "12v.ref", 12.6f);
-    m_alert12V = MyConfig.GetParamValueFloat("vehicle", "12v.alert", 0.8f);
+    m_ref12V = MyConfig.GetParamValueFloat("vehicle", "12v.ref", 12.5f);
+    m_alert12V = MyConfig.GetParamValueFloat("vehicle", "12v.alert", 0.9f);
     }
   if (param && param->GetName() != "xsq")
     return;
