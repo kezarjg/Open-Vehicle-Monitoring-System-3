@@ -699,7 +699,7 @@ void OvmsVehicleSmartEQ::PollReply_BMS_BattState(const char* data, uint16_t repl
 
   // P = V × I (in kW)
   float pack_power_kw = (v_pack_term * i_pack) / 1000.0f;
-  StdMetrics.ms_v_bat_voltage->SetValue(v_pack_term);
+  //StdMetrics.ms_v_bat_voltage->SetValue(v_pack_term);
   StdMetrics.ms_v_bat_current->SetValue(i_pack * -1.0f); // invert to charge(+)/discharge(-) convention
   StdMetrics.ms_v_bat_power->SetValue(pack_power_kw);
 
@@ -812,12 +812,14 @@ void OvmsVehicleSmartEQ::PollReply_BCM_TPMS_InputCapt(const char* data, uint16_t
     {
     // Pressure: big-endian 16 bit *0.75 kPa
     uint16_t praw = CAN_UINT(8 + (i*2));
-    if (praw != 0xffff)
-      m_tpms_pressure[i] = (float)praw * 0.75f;    // only valid values, 0xffff = invalid
+    float pressure_kpa = (float)praw * 0.75f;
+    if (pressure_kpa >= 10.0f && pressure_kpa <= 500.0f)
+      m_tpms_pressure[i] = pressure_kpa;    // only valid values
     // Temperature: raw byte + offset -30.0
     uint16_t traw = (uint16_t)(uint8_t)CAN_BYTE(16 + i);
-    if (traw != 0xffff)
-      m_tpms_temperature[i] = (float)traw - 30.0f; // only valid values, 0xffff = invalid
+    float temp = (float)traw - 30.0f;
+    if (temp <= 100.0f)
+      m_tpms_temperature[i] = temp; // only valid values
     m_tpms_lowbatt[i] = static_cast<bool>((raw >> i) & 0x01);
     }
 }
@@ -890,7 +892,7 @@ void OvmsVehicleSmartEQ::PollReply_EVC_DCDC_Volt(const char* data, uint16_t repl
   // POSITIVE RESPONSE FORMAT: 62 30 24 <Byte>
   REQUIRE_LEN(1);
   uint8_t raw = CAN_BYTE(0);
-  float value = 4.0f + raw * 0.1f;     // offset 4.0, step 0.1
+  float value = 4.0f + raw * 0.1f;      // offset 4.0, step 0.1
   mt_evc_dcdc->SetElemValue(1, value);  // dcdc_volt
   StdMetrics.ms_v_charge_12v_voltage->SetValue(value);
 }
@@ -1001,7 +1003,18 @@ void OvmsVehicleSmartEQ::PollReply_OBL_ChargerAC(const char* data, uint16_t repl
   }
   UpdateChargeMetrics();
 }
-
+// #1 poll fast charger 3-phase
+void OvmsVehicleSmartEQ::PollReply_OBL_JB2AC_Ph_RMS_V(const char* data, uint16_t reply_len, int idx) {
+  REQUIRE_LEN(2);
+  mt_obl_main_volts->SetElemValue(idx, CAN_UINT(0) / 2.0);
+}
+//#2 poll fast charger 3-phase
+void OvmsVehicleSmartEQ::PollReply_OBL_JB2AC_Ph_RMS_A(const char* data, uint16_t reply_len, int idx) {
+  REQUIRE_LEN(2);
+  float value = ((CAN_UINT(0) * 0.625) - 2000) / 10.0;
+  mt_obl_main_amps->SetElemValue(idx, value);
+}
+//#3 poll + charge metrics update #1, #2, #3
 void OvmsVehicleSmartEQ::PollReply_OBL_JB2AC_Power(const char* data, uint16_t reply_len) {
   // POSITIVE RESPONSE FORMAT: 62 50 4A <Byte> <Byte>
   // Spec: offset -20000.0, bytescount 2, unit W
@@ -1012,21 +1025,6 @@ void OvmsVehicleSmartEQ::PollReply_OBL_JB2AC_Power(const char* data, uint16_t re
   mt_obl_main_CHGpower->SetElemValue(0, power_kw);
   mt_obl_main_CHGpower->SetElemValue(1, 0);
   UpdateChargeMetrics();
-}
-
-void OvmsVehicleSmartEQ::PollReply_OBL_JB2AC_Ph_RMS_A(const char* data, uint16_t reply_len, int idx) {
-  REQUIRE_LEN(2);
-  float value = ((CAN_UINT(0) * 0.625) - 2000) / 10.0;
-  mt_obl_main_amps->SetElemValue(idx, value);
-  if (idx == 2)
-    UpdateChargeMetrics();
-}
-
-void OvmsVehicleSmartEQ::PollReply_OBL_JB2AC_Ph_RMS_V(const char* data, uint16_t reply_len, int idx) {
-  REQUIRE_LEN(2);
-  mt_obl_main_volts->SetElemValue(idx, CAN_UINT(0) / 2.0);
-  if (idx == 2)
-    UpdateChargeMetrics();
 }
 
 void OvmsVehicleSmartEQ::PollReply_OBL_JB2AC_LeakageDiag(const char* data, uint16_t reply_len) {
