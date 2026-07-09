@@ -33,8 +33,35 @@ make size / make clean
 
 The default sdkconfig presets do **not** enable any single vehicle by default — selecting the
 vehicle(s) to compile in is a menuconfig step (`CONFIG_OVMS_VEHICLE_*`). The devcontainer
-(`.devcontainer/`) is the supported dev environment; the build is also exercised in CI
-(`.travis.yml`) which just copies `support/sdkconfig.default.hw31` and runs `make`.
+(`.devcontainer/`) is the supported dev environment.
+
+### CI is three path-filtered GitHub Actions workflows
+
+Real CI lives in `.github/workflows/` (the root `.travis.yml` is dead — untouched since 2020).
+**"CI passed" is never one check.** Each workflow is path-filtered, so on any given commit some
+simply do not run — and a workflow that did not run is not a workflow that passed:
+
+| Workflow | File | Runs when |
+|---|---|---|
+| `Firmware build` | `build.yml` | push to master / any PR, **unless** every changed file is docs/plugins/markdown (`paths-ignore`) |
+| `Docs build` | `docs.yml` | only when `docs/**`, `vehicle/**/docs/**`, or any `*.rst` changed |
+| `Web assets sync check` | `web-assets-check.yml` | only when `ovms_webserver/assets/**` changed |
+
+The trap: **a green PR does not mean a green master.** `Docs build` has two jobs, and its Pages
+`deploy` job is gated `if: github.ref == 'refs/heads/master'` — it is *skipped* on every PR and
+first runs on the push after merge, where it can fail (e.g. GitHub failing to assign a runner:
+"The job was not acquired by Runner of type hosted"). Such a failure is infrastructure, not code;
+re-run it with `gh run rerun <run-id> --failed`.
+
+So to check master is actually green, list **all** workflow runs for the commit, don't just watch
+the firmware build:
+
+```bash
+gh run list --branch master --limit 6 \
+  --json workflowName,headSha,status,conclusion   # filter to the sha you care about
+```
+
+Firmware only compiles in CI (or the devcontainer) — never assume a local build verified anything.
 
 Deploy a freshly built image to a running module over the network (SCP + `ota flash vfs`):
 
