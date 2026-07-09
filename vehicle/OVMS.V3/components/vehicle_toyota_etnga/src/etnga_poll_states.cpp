@@ -460,6 +460,16 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
     SetPollState(PollState::CHARGE_HANDSHAKE);
     SetChargingStatus(false);    // not yet delivering energy (AC/DC states set true)
     SetChargeState(PollState::CHARGE_HANDSHAKE);
+
+    // We only get here on a seated PISW (>= 0x02), which means the cable is in and the lid
+    // is physically open.  Latch it: the lid (0x1625) polls @10s in AWAKE and never in the
+    // charge states, so a plug-in that wakes us from SLEEP arrives here on the @5s PISW read
+    // before the lid is ever sampled — without this, v.d.cp stays false for the whole session
+    // and the base CommandStat (gated on ms_v_door_chargeport) prints "Not charging".
+    // ResetStaleMetrics only forces the lid closed below CHARGE_HANDSHAKE, so this holds until
+    // the session ends and AWAKE resumes polling 0x1625.
+    SetChargingDoorStatus(true);
+
     if (!m_charge_session.in_session) {
         ResetSleepBackoff();   // brand-new charge session — resume responsive cooldowns
         m_charge_wait_slept = false;   // brand-new session — fresh responsive wait window
