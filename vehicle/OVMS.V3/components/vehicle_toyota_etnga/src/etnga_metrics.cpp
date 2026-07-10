@@ -84,12 +84,6 @@ void OvmsVehicleToyotaETNGA::ResetStaleMetrics() // Reset stale variables
         SetControlMode(0);
     }
 
-    // Check to make sure the 'awake' signal has been updated recently
-    if (StandardMetrics.ms_v_env_awake->IsStale() && StandardMetrics.ms_v_env_awake->AsBool()) {
-        ESP_LOGD(TAG, "Awake is stale. Manually setting to off");
-        SetAwake(false);
-    }
-
     // Check to make sure the 'charging door' signal has been updated recently.
     // The lid (0x1625) is only polled in AWAKE+DRIVING, so in the charge states it
     // reads stale even though the cable is physically holding the door open — don't
@@ -645,6 +639,19 @@ void OvmsVehicleToyotaETNGA::SetAwake(bool awake)
     StandardMetrics.ms_v_env_awake->SetValue(awake);
 }
 
+// CAN2 bus-liveness. Mirrors the old v.e.awake ~120s auto-stale window (SM_STALE_MID)
+// but is kept internal, so v.e.awake can carry the standard "switched on" meaning.
+// Uses the ms_m_monotonic seconds clock (same clock as the CHARGE_WAIT drain timer).
+static const uint32_t BUS_STALE_SECS = 120;
+
+bool OvmsVehicleToyotaETNGA::IsBusAlive() const
+{
+    if (m_last_can2_time == 0)
+        return false;
+    uint32_t now = (uint32_t) StandardMetrics.ms_m_monotonic->AsInt();
+    return (now - m_last_can2_time) <= BUS_STALE_SECS;
+}
+
 // Hours elapsed since the last sample on an energy-integrator channel; updates the
 // channel timestamp. The first sample of an interval (lastSampleTime == 0) counts as
 // 1 s. Gaps over 60 s (charge pause, OBC lock-isolation, sleep) also count as 1 s —
@@ -1038,6 +1045,10 @@ void OvmsVehicleToyotaETNGA::SetPollState(int state)
     const char* NextPollStateText = ConvertPollStateToString(state);
 
     ESP_LOGI(TAG, "Transitioning from the %s to the %s state", CurrentPollStateText, NextPollStateText);
+
+    // v.e.awake reflects the standard "switched on" meaning: true only while actively
+    // awake for a non-charge reason. Charge states poll with the car off -> awake stays false.
+    SetAwake(state == PollState::AWAKE || state == PollState::DRIVING);
 
     PollSetState(state);
 }

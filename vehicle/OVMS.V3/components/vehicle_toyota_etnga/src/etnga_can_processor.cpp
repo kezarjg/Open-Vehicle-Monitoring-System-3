@@ -26,6 +26,7 @@ void OvmsVehicleToyotaETNGA::IncomingFrameCan2(CAN_frame_t* p_frame)
         // parked-bus broadcast rates an INFO message here flooded the log.
         ESP_LOGV(TAG, "OBD message ignored during cooldown");
     } else {
-        SetAwake(true);
+        // Bus-liveness only; v.e.awake is now driven by poll state in SetPollState().
+        m_last_can2_time = (uint32_t) StandardMetrics.ms_m_monotonic->AsInt();
     }
 }

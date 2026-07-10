@@ -62,7 +62,7 @@ void OvmsVehicleToyotaETNGA::HandleSleepState()
         }
     }
 
-    if (StandardMetrics.ms_v_env_awake->AsBool()) {
+    if (IsBusAlive()) {
         // There is life.
         TransitionToAwakeState();
     } else {
@@ -165,7 +165,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
         // fall through to normal AWAKE handling (finalize path only)
     }
 
-    if (!StandardMetrics.ms_v_env_awake->AsBool()) {
+    if (!IsBusAlive()) {
         // No CAN communication - bus is dead, go to sleep
         ESP_LOGI(TAG, "CAN bus idle (env_awake cleared) — sleeping");
         TransitionToSleepState();
@@ -280,7 +280,7 @@ void OvmsVehicleToyotaETNGA::HandleChargeWaitState()
         TransitionToChargeDcState();
         return;
     }
-    if (!StandardMetrics.ms_v_env_awake->AsBool()) {
+    if (!IsBusAlive()) {
         // Bus went dead during scheduled wait (OBC slept or gateway isolated OBD)
         TransitionToSleepState();
         return;
@@ -376,8 +376,8 @@ void OvmsVehicleToyotaETNGA::TransitionToSleepState()
                      > (StandardMetrics.ms_v_bat_12v_voltage_ref->AsFloat() + AUX_12V_WAKE_SET_V);
     if (m_sleep_backoff_idx < SLEEP_COOLDOWN_STEPS - 1)
         m_sleep_backoff_idx++;
-    SetPollState(PollState::SLEEP);
-    SetAwake(false);
+    SetPollState(PollState::SLEEP);   // also sets v.e.awake = false
+    m_last_can2_time = 0;             // force rising-edge: next wake needs a fresh CAN2 frame
     // 12V aux metrics come only from the EV ECU (answers in READY/charging); clear the
     // PID-sourced values when leaving those states so stale readings aren't shown while off.
     StandardMetrics.ms_v_bat_12v_current->Clear();
