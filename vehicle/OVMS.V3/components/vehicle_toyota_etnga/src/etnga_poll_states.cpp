@@ -167,7 +167,7 @@ void OvmsVehicleToyotaETNGA::HandleAwakeState()
 
     if (!IsBusAlive()) {
         // No CAN communication - bus is dead, go to sleep
-        ESP_LOGI(TAG, "CAN bus idle (env_awake cleared) — sleeping");
+        ESP_LOGI(TAG, "CAN bus idle (no recent CAN2 frames) — sleeping");
         TransitionToSleepState();
         return;
     }
