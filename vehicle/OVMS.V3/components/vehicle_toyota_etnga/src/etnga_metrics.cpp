@@ -549,11 +549,39 @@ void OvmsVehicleToyotaETNGA::DecodeAux12vIntegrators(const std::string& data)
     m_v_bat_12v_readyon_h->SetValue(static_cast<float>(GetRxBUint16(data, 10)));
 }
 
+// Aux-12V charge detection comes from the rail voltage (v.b.12v.voltage — the module's own ADC),
+// NOT from the CAN-sourced DC-DC current: the current tapers below any sane threshold while the car
+// is still running and the rail is still held at float, and it is unavailable entirely if the bus
+// drops. A resting lead-acid aux never exceeds ~13V, so a rail above that means the DC-DC is holding
+// it up. Hysteresis stops the flag chattering as the rail decays after shutdown.
+static const float AUX_12V_CHARGING_ON_V  = 13.2f;  // rail above resting -> DC-DC is charging
+static const float AUX_12V_CHARGING_OFF_V = 12.9f;  // rail back at rest  -> not charging
+
+void OvmsVehicleToyotaETNGA::UpdateCharging12v()
+{
+    float v = StandardMetrics.ms_v_bat_12v_voltage->AsFloat();
+    if (v <= 0.0f)  // ADC not ready yet
+        return;
+
+    bool charging = StandardMetrics.ms_v_env_charging12v->AsBool();
+    if (!m_charging12v_seeded) {
+        // The metric is persistent (survives a warm reboot), and the hysteresis below uses its
+        // previous value as the latch. A stale 'true' would stick while the rail sits in the
+        // 12.9-13.2V band, so seed the latch from the rail itself rather than trusting it.
+        charging = (v > AUX_12V_CHARGING_ON_V);
+        m_charging12v_seeded = true;
+    }
+    else if (!charging && v > AUX_12V_CHARGING_ON_V)
+        charging = true;
+    else if (charging && v < AUX_12V_CHARGING_OFF_V)
+        charging = false;
+
+    StandardMetrics.ms_v_env_charging12v->SetValue(charging);
+}
+
 void OvmsVehicleToyotaETNGA::SetAux12vCurrent(float v)
 {
     StandardMetrics.ms_v_bat_12v_current->SetValue(v);
-    // Positive current = HV->12V DC-DC pushing charge into the aux battery.
-    StandardMetrics.ms_v_env_charging12v->SetValue(v > 0.5f);
     // Any valid EV-ECU 12V reply means the aux system is energized.
     StandardMetrics.ms_v_env_aux12v->SetValue(true);
 }
