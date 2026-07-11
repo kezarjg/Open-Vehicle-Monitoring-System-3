@@ -78,6 +78,7 @@ protected:
     int m_sleep_backoff_idx = 0;     // Index into SLEEP_COOLDOWN_SECS; escalates on consecutive no-activity sleeps
     bool m_12v_was_high = false;     // 12V-above-threshold latch: the SLEEP 12V wake fires on the rising edge only
                                      // (level-triggering oscillated; seeded on each sleep entry in TransitionToSleepState)
+    bool m_charging12v_seeded = false;  // v.e.charging12v persists across warm reboots: seed the latch from the rail on the first tick
 
     bool m_armed_for_charge = false;   // charge lid seen open since entering AWAKE
     int  m_cable_watch_start = 0;      // monotonic s when armed (15-min cable watch)

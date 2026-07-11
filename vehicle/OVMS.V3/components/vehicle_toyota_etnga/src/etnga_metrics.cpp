@@ -564,7 +564,14 @@ void OvmsVehicleToyotaETNGA::UpdateCharging12v()
         return;
 
     bool charging = StandardMetrics.ms_v_env_charging12v->AsBool();
-    if (!charging && v > AUX_12V_CHARGING_ON_V)
+    if (!m_charging12v_seeded) {
+        // The metric is persistent (survives a warm reboot), and the hysteresis below uses its
+        // previous value as the latch. A stale 'true' would stick while the rail sits in the
+        // 12.9-13.2V band, so seed the latch from the rail itself rather than trusting it.
+        charging = (v > AUX_12V_CHARGING_ON_V);
+        m_charging12v_seeded = true;
+    }
+    else if (!charging && v > AUX_12V_CHARGING_ON_V)
         charging = true;
     else if (charging && v < AUX_12V_CHARGING_OFF_V)
         charging = false;
