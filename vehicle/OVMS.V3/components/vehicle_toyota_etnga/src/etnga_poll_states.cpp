@@ -381,7 +381,6 @@ void OvmsVehicleToyotaETNGA::TransitionToSleepState()
     // 12V aux metrics come only from the EV ECU (answers in READY/charging); clear the
     // PID-sourced values when leaving those states so stale readings aren't shown while off.
     StandardMetrics.ms_v_bat_12v_current->Clear();
-    StandardMetrics.ms_v_env_charging12v->SetValue(false);
     StandardMetrics.ms_v_env_aux12v->SetValue(false);
     m_v_bat_12v_voltage_pid->Clear();
     m_v_bat_12v_temp->Clear();
@@ -411,7 +410,6 @@ void OvmsVehicleToyotaETNGA::TransitionToAwakeState()
     // 12V aux metrics come only from the EV ECU (answers in READY/charging); clear the
     // PID-sourced values when leaving those states so stale readings aren't shown while off.
     StandardMetrics.ms_v_bat_12v_current->Clear();
-    StandardMetrics.ms_v_env_charging12v->SetValue(false);
     StandardMetrics.ms_v_env_aux12v->SetValue(false);
     m_v_bat_12v_voltage_pid->Clear();
     m_v_bat_12v_temp->Clear();

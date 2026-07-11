@@ -234,6 +234,10 @@ void OvmsVehicleToyotaETNGA::NotifyVehicleOn()
 
 void OvmsVehicleToyotaETNGA::Ticker1(uint32_t ticker)
 {
+    // Aux-12V charge state is derived from the rail voltage every tick, independent of CAN and poll
+    // state. The base 12V monitor in VehicleTicker1() samples v.b.12v.voltage.ref from this flag
+    // later in the same tick, so it must be fresh before that runs.
+    UpdateCharging12v();
 
     if (StandardMetrics.ms_v_charge_inprogress->AsBool()) {
         ESP_LOGV(CHARGING_TAG, "%.0f, %.2f, %.4f, %.0f, %.2f, %.2f, %.2f, %.2f, %.0f, %.2f, %.4f",

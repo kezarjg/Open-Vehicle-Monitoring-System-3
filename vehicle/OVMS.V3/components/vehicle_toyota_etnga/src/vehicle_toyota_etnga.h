@@ -404,6 +404,7 @@ private:
     void SetAux12vVoltage(float v);
     void SetAux12vTemperature(float v);
     void SetAux12vFullCharge(float v);
+    void UpdateCharging12v();
     void DecodeAux12vIntegrators(const std::string& data);
 
     // const char* throughout: these run on every poll reply, and std::string
