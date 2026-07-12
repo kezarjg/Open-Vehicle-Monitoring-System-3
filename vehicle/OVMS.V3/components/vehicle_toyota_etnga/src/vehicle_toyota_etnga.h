@@ -76,6 +76,7 @@ protected:
     int m_sleep_entry_time = 0;  // Used to track the time that cooldown timer started
     int m_sleep_cooldown_secs = 10;  // Cooldown window (s) for the current sleep; default must equal SLEEP_COOLDOWN_SECS[0]
     int m_sleep_backoff_idx = 0;     // Index into SLEEP_COOLDOWN_SECS; escalates on consecutive no-activity sleeps
+    uint32_t m_last_can2_time = 0;   // monotonic secs of last accepted CAN2 frame; drives SLEEP<->AWAKE bus-liveness
     bool m_12v_was_high = false;     // 12V-above-threshold latch: the SLEEP 12V wake fires on the rising edge only
                                      // (level-triggering oscillated; seeded on each sleep entry in TransitionToSleepState)
     bool m_charging12v_seeded = false;  // v.e.charging12v persists across warm reboots: seed the latch from the rail on the first tick
@@ -350,6 +351,7 @@ private:
     void SetAcOpStatus(int v);
     void SetAmbientTemperature(float temperature);
     void SetAwake(bool awake);
+    bool IsBusAlive() const;   // true if a CAN2 frame arrived within BUS_STALE_SECS
     void SetBatteryChargingPower(float power);
     void SetBatteryCurrent(float current);
     void SetBatteryPower(float power);

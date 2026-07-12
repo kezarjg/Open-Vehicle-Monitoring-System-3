@@ -56,10 +56,10 @@ Tick loop
 ``Ticker1()`` runs once per second and does three things:
 
 1. ``ResetStaleMetrics()`` manually clears ``controlstate``,
-   ``ms_v_env_awake``, ``ms_v_door_chargeport``, ``ms_v_charge_pilot``,
-   and ``ms_v_bat_power`` if they have gone stale but still hold a
-   non-default value.  This is the only way ``ms_v_env_awake`` ever drops
-   back to ``false``.
+   ``ms_v_door_chargeport``, ``ms_v_charge_pilot``, and ``ms_v_bat_power``
+   if they have gone stale but still hold a non-default value.
+   ``ms_v_env_awake`` is no longer cleared here — it is now set directly
+   by ``SetPollState()`` (see "Two views of 'vehicle on'" below).
 2. While in the ``DRIVING`` state, computes ``v.b.consumption``
    (trip-average Wh/km) from net trip energy divided by trip distance.
 3. Dispatches to the appropriate handler —
@@ -86,7 +86,7 @@ Transition diagram
    start →│      SLEEP      │◄─────────────────────┐       │
           └─────────────────┘                      │       │
               │     ▲                              │       │
-   CAN traffic│     │ env_awake stale (~120 s)      │       │
+   CAN traffic│     │ bus idle (~120 s)             │       │
    OR 12V >   │     │ OR 5-min / 15-min watchdog    │       │
    ref+0.2 V  │     │ (arms escalating cooldown)    │       │
               ▼     │                              │       │
@@ -138,16 +138,18 @@ The polling feedback loop
 =========================
 
 The ``SLEEP → AWAKE`` edge is driven by external CAN traffic (any frame
-on CAN2 sets ``ms_v_env_awake``).  Once in ``AWAKE``, however, the
-poller is actively transmitting OBD-II requests on the same bus.  The
-ECUs reply, and those replies are themselves CAN traffic — so the
-driver's own polling refreshes ``ms_v_env_awake`` on every tick and
-prevents the auto-stale that would otherwise bring it back to ``SLEEP``.
+on CAN2 updates the internal ``m_last_can2_time`` bus-liveness timestamp,
+checked via ``IsBusAlive()``).  Once in ``AWAKE``, however, the poller
+is actively transmitting OBD-II requests on the same bus.  The ECUs
+reply, and those replies are themselves CAN traffic — so the driver's
+own polling refreshes ``m_last_can2_time`` on every tick and prevents
+the bus-liveness window (120 s) from expiring, which would otherwise
+bring it back to ``SLEEP``.
 
 Practical consequences:
 
-* ``AWAKE`` will not exit on its own via the ``env_awake`` stale path
-  while the poller is running.  The 5-minute forced-sleep watchdog in
+* ``AWAKE`` will not exit on its own via the ``IsBusAlive()`` stale
+  path while the poller is running.  The 5-minute forced-sleep watchdog in
   ``HandleAwakeState`` exists precisely to break this loop when the
   vehicle never reports a clear ``DRIVING`` state and no cable is
   inserted.
@@ -187,17 +189,18 @@ All edges live in ``etnga_poll_states.cpp``.
      - Condition
      - Notes
    * - ``SLEEP → AWAKE``
-     - ``ms_v_env_awake == true``
-     - Set by ``IncomingFrameCan2()`` on any CAN2 frame, gated by the
-       cooldown latch (see below).
+     - ``IsBusAlive() == true``
+     - ``m_last_can2_time`` updated by ``IncomingFrameCan2()`` on any
+       CAN2 frame, gated by the cooldown latch (see below).
    * - ``SLEEP → AWAKE``
      - 12 V > 12 V-ref + 0.2 V
      - Issues ``m_can2->Reset()`` first to recover from a stuck bus.
        **Not** gated by the cooldown latch.
    * - ``AWAKE → SLEEP``
-     - ``ms_v_env_awake == false``
-     - Triggered when ``env_awake`` auto-stales (~120 s of no CAN
-       frames) and ``ResetStaleMetrics`` flips it false.
+     - ``IsBusAlive() == false``
+     - Triggered when ``m_last_can2_time`` goes stale (~120 s of no
+       CAN2 frames); checked directly in ``HandleAwakeState``, not via
+       a metric auto-stale.
    * - ``AWAKE → DRIVING``
      - ``controlstate == CS_DRIVING``
      - Invalidates the internal trip-start odometer baseline on entry so it
@@ -249,7 +252,7 @@ All edges live in ``etnga_poll_states.cpp``.
      - HLC in range ``0x0A–0x12``
      - DC engaged from wait.  Sets ``ms_v_charge_state = "charging"``.
    * - ``CHARGE_WAIT → SLEEP``
-     - ``ms_v_env_awake == false``
+     - ``IsBusAlive() == false``
      - Bus went dead during scheduled wait (OBC slept or gateway isolated
        OBD).  Arms the escalating cooldown latch.
    * - ``CHARGE_AC → CHARGE_WAIT``
@@ -588,9 +591,9 @@ To prevent flapping after the forced-sleep watchdogs,
 ``m_sleep_entry_time`` before calling ``SetPollState(SLEEP)``.  While
 the latch is held:
 
-* ``IncomingFrameCan2`` does **not** call ``SetAwake(true)``, so trailing
-  post-shutdown CAN traffic cannot bounce the driver straight back to
-  ``AWAKE``.
+* ``IncomingFrameCan2`` does **not** update ``m_last_can2_time``, so
+  trailing post-shutdown CAN traffic cannot bounce the driver straight
+  back to ``AWAKE`` via ``IsBusAlive()``.
 * After the current cooldown window elapses, ``HandleSleepState`` clears
   the latch and CAN frames can wake the driver again.
 
@@ -627,18 +630,26 @@ The driver always starts in ``SLEEP`` and waits for CAN activity or a
 Notes and quirks
 ================
 
-* **Two views of "vehicle on".** ``ms_v_env_awake`` (anything on the bus)
-  drives ``SLEEP ↔ AWAKE``; ``controlstate`` (vehicle-reported mode)
-  drives ``AWAKE ↔ DRIVING``; PISW (cable-seated signal) drives
-  ``AWAKE → CHARGE_HANDSHAKE``.  Future wake/sleep tweaks should preserve
-  this split.
+* **Two views of "vehicle on".** Bus-liveness and the "switched on"
+  metric are separate.  The internal ``m_last_can2_time`` timestamp
+  (checked via ``IsBusAlive()``, a 120 s window) drives ``SLEEP ↔
+  AWAKE``; ``controlstate`` (vehicle-reported mode) drives ``AWAKE ↔
+  DRIVING``; PISW (cable-seated signal) drives ``AWAKE →
+  CHARGE_HANDSHAKE``.  ``ms_v_env_awake`` no longer drives any
+  transition — ``SetPollState()`` sets it directly to ``(state ==
+  AWAKE || state == DRIVING)``, so it reads ``false`` in ``SLEEP`` and
+  all four ``CHARGE_*`` states (this is what stops the periodic
+  "Vehicle is idling" notification from firing mid-charge).  Future
+  wake/sleep tweaks should preserve this split.
 * **Charge entry no longer uses CS_CHARGING.** The old
   ``controlstate == CS_CHARGING`` trigger is gone; PISW ``≥ 0x02`` fires
   earlier (plug-in detected before HV mode flips).
-* **``env_awake`` is never explicitly cleared.** It falls to ``false``
-  only via auto-stale plus the manual reset in ``ResetStaleMetrics``.
-  Anything that changes its auto-stale period changes the ``SLEEP``
-  detection latency.
+* **``ms_v_env_awake`` is set explicitly, not auto-staled.**
+  ``SetPollState()`` sets it on every state transition (``true`` for
+  ``AWAKE``/``DRIVING``, ``false`` otherwise); it is no longer cleared
+  via metric auto-stale in ``ResetStaleMetrics``.  Bus-liveness
+  detection latency is governed separately by the internal
+  ``BUS_STALE_SECS`` (120 s) window used by ``IsBusAlive()``.
 * **Direct ``DRIVING ↔ charge-state`` is impossible.** A vehicle that
   flips control mode from drive to charge spends at least one tick in
   ``AWAKE`` in between, which clears trip metrics.
