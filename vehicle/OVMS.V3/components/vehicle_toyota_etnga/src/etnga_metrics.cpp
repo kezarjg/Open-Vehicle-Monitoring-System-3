@@ -548,29 +548,33 @@ void OvmsVehicleToyotaETNGA::DecodeAux12vIntegrators(const std::string& data)
 // is still running and the rail is still held at float, and it is unavailable entirely if the bus
 // drops. A resting lead-acid aux never exceeds ~13V, so a rail above that means the DC-DC is holding
 // it up. Hysteresis stops the flag chattering as the rail decays after shutdown.
+// The rail voltage alone cannot tell "charging" from "resting" on this vehicle, so it is only one
+// term of a union (see issue #153). Measured on the car: the DC-DC floats the aux battery at just
+// ~12.85V during an HV charge (below OFF), it dips to ~12.86V mid-drive, and a healthy resting
+// battery sits at 12.6-12.8V -- the bands overlap, so no pair of thresholds separates them.
+// The rail term is kept because it is the only CAN-independent one: it alone must carry a CAN
+// outage, which is exactly what the old CAN-derived rule failed to do (#147).
 static const float AUX_12V_CHARGING_ON_V  = 13.2f;  // rail above resting -> DC-DC is charging
 static const float AUX_12V_CHARGING_OFF_V = 12.9f;  // rail back at rest  -> not charging
 
 void OvmsVehicleToyotaETNGA::UpdateCharging12v()
 {
     float v = StandardMetrics.ms_v_bat_12v_voltage->AsFloat();
-    if (v <= 0.0f)  // ADC not ready yet
-        return;
-
-    bool charging = StandardMetrics.ms_v_env_charging12v->AsBool();
-    if (!m_charging12v_seeded) {
-        // The metric is persistent (survives a warm reboot), and the hysteresis below uses its
-        // previous value as the latch. A stale 'true' would stick while the rail sits in the
-        // 12.9-13.2V band, so seed the latch from the rail itself rather than trusting it.
-        charging = (v > AUX_12V_CHARGING_ON_V);
-        m_charging12v_seeded = true;
+    if (v > 0.0f) {  // 0 = ADC not ready yet: hold the latch rather than clearing it
+        if (v > AUX_12V_CHARGING_ON_V)
+            m_rail_charging12v = true;
+        else if (v < AUX_12V_CHARGING_OFF_V)
+            m_rail_charging12v = false;
     }
-    else if (!charging && v > AUX_12V_CHARGING_ON_V)
-        charging = true;
-    else if (charging && v < AUX_12V_CHARGING_OFF_V)
-        charging = false;
 
-    StandardMetrics.ms_v_env_charging12v->SetValue(charging);
+    // CHARGE_WAIT and CHARGE_HANDSHAKE are deliberately excluded: the DC-DC is off in those states
+    // and the module drains the aux battery (the rail measurably declines from plug-in until the
+    // charge actually starts), so calling them "charging" would mask that.
+    bool hv_charging = (static_cast<PollState>(m_poll_state) == PollState::CHARGE_AC ||
+                        static_cast<PollState>(m_poll_state) == PollState::CHARGE_DC);
+
+    StandardMetrics.ms_v_env_charging12v->SetValue(
+        m_rail_charging12v || StandardMetrics.ms_v_env_on->AsBool() || hv_charging);
 }
 
 void OvmsVehicleToyotaETNGA::SetAux12vCurrent(float v)

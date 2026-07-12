@@ -120,8 +120,25 @@ rail decays after shutdown.
 |---|---|---|---|
 | Driving, DC-DC current tapered below 0.5 A | ~14.1 V | **true** | No — ticker stays charged |
 | Driving, **CAN bus dead** | ~14.1 V | **true** | No — ADC is unaffected by CAN |
-| AC/DC HV charging (DC-DC also charges aux) | ~14 V | true | No |
+| AC/DC HV charging (DC-DC also charges aux) | ~14 V | true | No | ← **WRONG, see below** |
 | Parked, car off | ~12.3 V | false | Yes — at genuine resting voltage ✅ |
+
+> **Correction (2026-07-12, measured on the car — issue #153).** Two rows of the table above are wrong,
+> and the error is the same in both: this design assumed the rail cleanly separates "charging" from
+> "resting". It does not.
+>
+> - **HV charging is NOT ~14 V.** The DC-DC floats the aux battery at only **~12.85 V** (current
+>   +2.64 A tapering to +0.64 A, positive throughout a 3 h charge) — *below* `AUX_12V_CHARGING_OFF_V`.
+>   So `charging12v` reads **false** for an entire charge while the battery is demonstrably being charged.
+> - **Driving is not a steady float either.** The DC-DC modulates; the rail was measured at **12.86 V**
+>   mid-drive, which makes the flag flap.
+>
+> Note 12.86 V occurs while HV-charging *and* while driving, and both sit inside a healthy battery's
+> resting band (12.6–12.8 V) — so **no pair of voltage thresholds can separate these states.**
+> The fix is a union (rail ∥ `v.e.on` ∥ CHARGE_AC/CHARGE_DC), not a retune.
+>
+> The safety invariant this spec relies on is unaffected: `ref` is still only ever sampled while
+> `charging12v` is false, so it can never latch a charging voltage.
 
 The currently-corrupted persisted reference **self-heals** on the first drive-and-park cycle after this
 ships: `charging12v` goes true during the drive, charging the calmdown ticker; on parking it drains and

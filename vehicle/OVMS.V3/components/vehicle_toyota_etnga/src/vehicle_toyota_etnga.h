@@ -79,7 +79,7 @@ protected:
     uint32_t m_last_can2_time = 0;   // monotonic secs of last accepted CAN2 frame; drives SLEEP<->AWAKE bus-liveness
     bool m_12v_was_high = false;     // 12V-above-threshold latch: the SLEEP 12V wake fires on the rising edge only
                                      // (level-triggering oscillated; seeded on each sleep entry in TransitionToSleepState)
-    bool m_charging12v_seeded = false;  // v.e.charging12v persists across warm reboots: seed the latch from the rail on the first tick
+    bool m_rail_charging12v = false;    // rail-voltage term of v.e.charging12v; own (non-persistent) latch, so the union's other terms cannot pollute the hysteresis
 
     bool m_armed_for_charge = false;   // charge lid seen open since entering AWAKE
     int  m_cable_watch_start = 0;      // monotonic s when armed (15-min cable watch)
