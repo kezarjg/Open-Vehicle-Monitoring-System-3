@@ -32,10 +32,11 @@
 
 #include "libtelnet.h"
 #include "ovms_console.h"
+#include "console_mongoose.h"
 
 struct mg_connection;
 
-class OvmsTelnet : public MongooseClient
+class OvmsTelnet : public MongooseClient, public ConsoleMongooseServer
   {
   public:
     OvmsTelnet();
@@ -49,7 +50,7 @@ class OvmsTelnet : public MongooseClient
     bool m_running;
   };
 
-class ConsoleTelnet : public OvmsConsole, public MongooseClient
+class ConsoleTelnet : public ConsoleMongoose
   {
   public:
     ConsoleTelnet(struct mg_connection* nc);
@@ -68,7 +69,6 @@ class ConsoleTelnet : public OvmsConsole, public MongooseClient
     ssize_t write(const void *buf, size_t nbyte);
 
   protected:
-    mg_connection* m_connection;
     telnet_t *m_telnet;
   };
 

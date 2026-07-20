@@ -75,6 +75,7 @@ void OvmsTelnet::EventHandler(struct mg_connection *nc, int ev, void *p)
 
     case MG_EV_POLL:
       {
+      ReapConsoles();
       ConsoleTelnet* child = (ConsoleTelnet*)nc->user_data;
       if (child)
         child->Poll(0);
@@ -93,7 +94,8 @@ void OvmsTelnet::EventHandler(struct mg_connection *nc, int ev, void *p)
       {
       ConsoleTelnet* child = (ConsoleTelnet*)nc->user_data;
       if (child)
-        delete child;
+        CloseConsole(child);
+      nc->user_data = NULL;
       }
       break;
 
@@ -156,8 +158,8 @@ void OvmsTelnet::NetManStop(std::string event, void* data)
 //-----------------------------------------------------------------------------
 
 ConsoleTelnet::ConsoleTelnet(struct mg_connection* nc)
+  : ConsoleMongoose(nc)
   {
-  m_connection = nc;
   m_queue = xQueueCreate(100, sizeof(Event));
 
   static const telnet_telopt_t options[] =
@@ -287,7 +289,10 @@ int ConsoleTelnet::printf(const char* fmt, ...)
 
 ssize_t ConsoleTelnet::write(const void *buf, size_t nbyte)
   {
-  if (!m_telnet || (m_connection->flags & MG_F_SEND_AND_CLOSE))
+  // m_closing is checked first on purpose: once the connection is closing the
+  // mongoose nc (m_connection) may already be freed, so short-circuit before
+  // dereferencing it — telnet_send_text() would otherwise reach mg_send() on it.
+  if (m_closing || !m_telnet || (m_connection->flags & MG_F_SEND_AND_CLOSE))
     return 0;
   telnet_send_text(m_telnet, (const char*)buf, nbyte);
   return nbyte;
