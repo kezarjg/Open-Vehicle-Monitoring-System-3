@@ -96,3 +96,5 @@ void ConsoleMongooseServer::ReapConsoles()
       ++it;
     }
   }
+
+// (CI retrigger: telnet A-B-A build)
