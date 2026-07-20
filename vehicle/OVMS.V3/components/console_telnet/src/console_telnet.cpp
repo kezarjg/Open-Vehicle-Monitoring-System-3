@@ -235,7 +235,14 @@ void ConsoleTelnet::TelnetHandler(telnet_event_t *event)
   switch (event->type)
     {
     case TELNET_EV_SEND:
-      mg_send(m_connection, event->data.buffer, event->data.size);
+      // Single mg_send choke point for ALL telnet output (write/puts/printf all
+      // funnel here via telnet_send_text). Once the connection is closing, the
+      // mongoose nc (m_connection) may already be freed, so bail out — a
+      // follow-mode task tearing down (e.g. ~OvmsCommandTask writing "^C") must
+      // not mg_send on it. Guarding only write() misses puts()/printf(); this
+      // mirrors the IsClosing() guard SSH applies in its SendCallback.
+      if (!IsClosing())
+        mg_send(m_connection, event->data.buffer, event->data.size);
       break;
 
     case TELNET_EV_DATA:
