@@ -75,7 +75,6 @@ void OvmsTelnet::EventHandler(struct mg_connection *nc, int ev, void *p)
 
     case MG_EV_POLL:
       {
-      ReapConsoles();
       ConsoleTelnet* child = (ConsoleTelnet*)nc->user_data;
       if (child)
         child->Poll(0);
@@ -92,9 +91,15 @@ void OvmsTelnet::EventHandler(struct mg_connection *nc, int ev, void *p)
 
     case MG_EV_CLOSE:
       {
+      // Telnet's send path (telnet_send_text -> mg_send) takes NO Mongoose lock,
+      // so the follow-mode teardown JOIN in ~ConsoleTelnet (RunTerminationCallback)
+      // cannot deadlock the way SSH's would, and it stops the tail task while the
+      // connection is still valid. So telnet deletes synchronously here and does
+      // NOT use the SSH defer-and-reap scheme (which, on telnet, leaves a
+      // heap-corruption window under rapid connect/tail/disconnect churn).
       ConsoleTelnet* child = (ConsoleTelnet*)nc->user_data;
       if (child)
-        CloseConsole(child);
+        delete child;
       nc->user_data = NULL;
       }
       break;
