@@ -96,15 +96,7 @@ void OvmsSSH::EventHandler(struct mg_connection *nc, int ev, void *p)
 
     case MG_EV_POLL:
       {
-      // Reap consoles whose follow task has exited (GetFollowModeTask() now NULL).
-      for (auto it = m_reaping.begin(); it != m_reaping.end(); )
-        {
-        ConsoleSSH* z = *it;
-        if (z->GetFollowModeTask() == NULL)
-          { delete z; it = m_reaping.erase(it); }
-        else
-          ++it;
-        }
+      ReapConsoles();
       //ESP_EARLY_LOGV(tag, "Event MG_EV_ACCEPT conn %p, data %p", nc, p);
       ConsoleSSH* child = (ConsoleSSH*)nc->user_data;
       if (child)
@@ -154,20 +146,7 @@ void OvmsSSH::EventHandler(struct mg_connection *nc, int ev, void *p)
       ESP_EARLY_LOGV(tag, "Event MG_EV_CLOSE conn %p, data %p", nc, p);
       ConsoleSSH* child = (ConsoleSSH*)nc->user_data;
       if (child)
-        {
-        OvmsCommandTask* ft = child->GetFollowModeTask();
-        if (ft)
-          {
-          // Follow task still running: we cannot join here (we hold the Mongoose
-          // lock its write() needs). Mark closing so its in-flight write bails,
-          // ask it to stop, and defer delete until it has left the write path.
-          child->SetClosing();
-          ft->RequestStop();
-          m_reaping.push_back(child);
-          }
-        else
-          delete child;   // no follow task: synchronous termination + free (unchanged)
-        }
+        CloseConsole(child);
       nc->user_data = NULL;
       }
       break;
@@ -331,14 +310,13 @@ int RecvCallback(WOLFSSH* ssh, void* data, word32 size, void* ctx);
 int SendCallback(WOLFSSH* ssh, void* data, word32 size, void* ctx);
 
 ConsoleSSH::ConsoleSSH(OvmsSSH* server, struct mg_connection* nc)
+  : ConsoleMongoose(nc)
   {
   m_server = server;
-  m_connection = nc;
   m_queue = xQueueCreate(100, sizeof(Event));
   m_ssh = NULL;
   m_state = ACCEPT;
   m_drain = 0;
-  m_closing = false;
   m_sent = true;
   m_rekey = false;
   m_needDir = false;
