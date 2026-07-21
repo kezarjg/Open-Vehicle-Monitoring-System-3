@@ -148,36 +148,6 @@ void ota_status(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, c
 
 void ota_flash_vfs(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc, const char* const* argv)
   {
-  const esp_partition_t *running = esp_ota_get_running_partition();
-  const esp_partition_t *target = esp_ota_get_next_update_partition(running);
-
-  OvmsMutexLock m_lock(&MyOTA.m_flashing,0);
-  if (!m_lock.IsLocked())
-    {
-    writer->puts("Error: Flash operation already in progress - cannot flash again");
-    return;
-    }
-
-  if (running==NULL)
-    {
-    writer->puts("Error: Current running image cannot be determined - aborting");
-    return;
-    }
-  writer->printf("Current running partition is: %s\n",running->label);
-
-  if (target==NULL)
-    {
-    writer->puts("Error: Target partition cannot be determined - aborting");
-    return;
-    }
-  writer->printf("Target partition is: %s\n",target->label);
-
-  if (running == target)
-    {
-    writer->puts("Error: Cannot flash to running image partition");
-    return;
-    }
-
   if (MyConfig.ProtectedPath(argv[0]))
     {
     writer->puts("Error: protected path");
@@ -192,17 +162,6 @@ void ota_flash_vfs(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc
     }
   writer->printf("Source image is %ld bytes in size\n",ds.st_size);
 
-  if (ds.st_size > target->size)
-    {
-    writer->printf("Error: target partition too small (%u bytes capacity) - aborting\n", target->size);
-    if (target->size < 0x700000)
-      {
-      writer->puts("Consider upgrading your partitioning scheme to v3-35.");
-      MyOTA.SendPartitionTypeAlert(true);
-      }
-    return;
-    }
-
   FILE* f = fopen(argv[0], "r");
   if (f == NULL)
     {
@@ -210,59 +169,43 @@ void ota_flash_vfs(int verbosity, OvmsWriter* writer, OvmsCommand* cmd, int argc
     return;
     }
 
-  MyOTA.SetFlashStatus("OTA Flash VFS: Preparing flash partition...");
-  writer->puts(MyOTA.GetFlashStatus());
-  esp_ota_handle_t otah;
-  esp_err_t err = esp_ota_begin(target, ds.st_size, &otah);
+  // Stream the file into the inactive OTA partition (shared flash core):
+  std::string msg;
+  esp_err_t err = MyOTA.StreamFlashBegin(ds.st_size, msg);
   if (err != ESP_OK)
     {
-    MyOTA.ClearFlashStatus();
-    writer->printf("Error: ESP32 error #%d when starting OTA operation\n",err);
+    writer->printf("Error: %s\n", msg.c_str());
+    if (err == ESP_ERR_INVALID_SIZE)
+      writer->puts("Consider upgrading your partitioning scheme to v3-35.");
     fclose(f);
     return;
     }
-
-  MyOTA.SetFlashStatus("OTA Flash VFS: Flashing image partition...");
+  // Begin() validated both partitions, so neither can be NULL here:
+  writer->printf("Current running partition is: %s\n", esp_ota_get_running_partition()->label);
+  writer->printf("Target partition is: %s\n", MyOTA.m_stream_target->label);
   writer->puts(MyOTA.GetFlashStatus());
+
   char buf[512];
-  size_t done = 0;
   while(size_t n = fread(buf, sizeof(char), sizeof(buf), f))
     {
-    err = esp_ota_write(otah, buf, n);
-    if (err != ESP_OK)
+    if (MyOTA.StreamFlashWrite(buf, n, msg) != ESP_OK)
       {
-      MyOTA.ClearFlashStatus();
-      writer->printf("Error: ESP32 error #%d when writing to flash - state is inconsistent\n",err);
-      esp_ota_end(otah);
+      writer->printf("Error: %s\n", msg.c_str());
       fclose(f);
-      return;
+      return;   // session already aborted & unlocked by StreamFlashWrite()
       }
-    done += n;
-    MyOTA.SetFlashPerc((done*100)/ds.st_size);
     }
   fclose(f);
 
-  MyOTA.SetFlashStatus("OTA Flash VFS: Finalising flash write");
-  err = esp_ota_end(otah);
-  if (err != ESP_OK)
+  const char* target_label = MyOTA.m_stream_target->label;
+  if (MyOTA.StreamFlashFinish(msg) != ESP_OK)
     {
-    MyOTA.ClearFlashStatus();
-    writer->printf("Error: ESP32 error #%d finalising OTA operation - state is inconsistent\n",err);
-    return;
-    }
-
-  MyOTA.SetFlashStatus("OTA Flash VFS: Setting boot partition...");
-  writer->puts(MyOTA.GetFlashStatus());
-  err = esp_ota_set_boot_partition(target);
-  MyOTA.ClearFlashStatus();
-  if (err != ESP_OK)
-    {
-    writer->printf("Error: ESP32 error #%d setting boot partition - check before rebooting\n",err);
+    writer->printf("Error: %s\n", msg.c_str());
     return;
     }
 
   writer->printf("OTA flash was successful\n  Flashed %ld bytes from %s\n  Next boot will be from '%s'\n",
-                 ds.st_size,argv[0],target->label);
+                 ds.st_size,argv[0],target_label);
   MyConfig.SetParamValue("ota", "vfs.mru", argv[0]);
   }
 
