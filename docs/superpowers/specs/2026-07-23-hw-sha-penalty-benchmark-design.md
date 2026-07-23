@@ -34,15 +34,29 @@ Established by inspection of this tree, and load-bearing for the design:
 - **mbedTLS TLS sites on a stock module:** server v2 (`ovms_server_v2.cpp:915`), server v3
   MQTT/TLS (`ovms_server_v3.cpp:1003`), the HTTPS web server (`ovms_webserver.cpp:189`), and
   pushover (`pushover.cpp:403`).
-- **OTA is *not* a TLS workload in mainline.** `OvmsHttpClient::Request` strips an `https://`
-  prefix but then opens a plain TCP connection defaulting to port 80
+- **OTA is not a TLS workload in mainline *today*.** `OvmsHttpClient::Request` strips an
+  `https://` prefix but then opens a plain TCP connection defaulting to port 80
   (`components/ovms_http/src/ovms_http.cpp:72-97`), and the default OTA server is
-  `api.openvehicles.com/firmware/ota` with no scheme. Firmware download is therefore
+  `api.openvehicles.com/firmware/ota` with no scheme. Firmware download is currently
   cleartext and contributes no SHA load.
 
-Consequence: the real workload is **handshake-dominated**, with modest bulk only from
-web-UI asset serving. The measurement must be sensitive enough to credibly report a small
-number, not just detect a large one.
+Consequence for the *current* firmware: the real workload is **handshake-dominated**, with
+modest bulk only from web-UI asset serving. The measurement must be sensitive enough to
+credibly report a small number, not just detect a large one.
+
+### HTTPS OTA changes this, and is imminent
+
+`feature/ota-streaming-flash` routes all three OTA URL paths through `esp_http_client` with
+`cfg.cert_pem = MyOvmsTLS.GetTrustedList()` (`ovms_ota.cpp:216-218, 262-264`) — that is
+esp-tls, backed by mbedTLS. When that lands, OTA becomes a **~3 MB bulk TLS download in the
+client direction**, on a different stack from mongoose.
+
+That is the one workload where a software-SHA penalty could become user-visible, as a
+longer firmware flash. It is therefore measured now rather than after the fact, and it
+raises the importance of one specific fact: **whether the OTA host negotiates an AEAD
+(GCM) suite or a CBC-SHA suite.** With GCM, per-record SHA is essentially free and the
+whole question is moot for OTA. With CBC-SHA, HMAC-SHA runs over all ~3 MB. That single
+observation largely decides the answer, and it costs one `openssl s_client` invocation.
 
 ## Design
 
@@ -97,6 +111,27 @@ The command *also* calls IDF's `esp_sha()` directly, so the SW build alone print
 sides of the ratio; the HW build then confirms the mbedTLS-level number tracks the
 primitive-level one.
 
+### Layer 1b — client-side bulk: `test crypto tlsget`
+
+A second small subcommand, `test crypto tlsget <url> [<count>]`: performs `<count>`
+`esp_http_client` GETs, discards the body, and reports bytes, wall time, MB/s and the
+negotiated ciphersuite.
+
+Rationale: this exercises the **exact esp-tls/mbedTLS stack the HTTPS OTA path will use**,
+in the client direction, without depending on the not-yet-validated
+`feature/ota-streaming-flash` code. Building the benchmark on top of that WIP branch was
+rejected — it would put unvalidated OTA code and the crash-prone hardware-SHA build on the
+daily driver simultaneously, and any OTA-branch instability would contaminate the A/B.
+
+Discarding the body is deliberate. A real HTTPS OTA also writes to SPI flash via
+`esp_ota_write`, and flash writes on the ESP32 stall the cache — the real download is
+plausibly flash-bound rather than crypto-bound. By removing the flash sink, `tlsget`
+isolates crypto and therefore measures an **upper bound** on the SHA penalty's contribution
+to OTA time. That is the honest framing for the writeup: if the upper bound is small, the
+real penalty is smaller.
+
+The command stays useful after this exercise as a TLS diagnostic for the OTA work itself.
+
 ### Layer 2 — macro (module as TLS server)
 
 **Setup, once, shared by both arms.** Self-signed cert/key installed to
@@ -130,8 +165,21 @@ defensible claim paired with Layer 3, where CPU-seconds per MB still differ at i
 wall-clock throughput.
 
 **M3 — what production negotiates.** `openssl s_client` against the real peers
-(`api.openvehicles.com:6870`, the server v3 MQTT/TLS port) to record the negotiated suite.
-Determines whether M2's CBC arm describes anything real or is a synthetic worst case.
+(`api.openvehicles.com:6870`, the server v3 MQTT/TLS port, and **the OTA host over 443**)
+to record the negotiated suite in each case. Determines whether M2/M5's CBC arm describes
+anything real or is a synthetic worst case. The OTA-host result is the single most
+decision-relevant data point in the whole exercise, and it is obtainable in about a minute
+without touching the module.
+
+**M5 — client-side bulk (the HTTPS-OTA preview).** `test crypto tlsget` against a
+controlled HTTPS endpoint on os-k3s serving a ~3 MB file, N=5, plus one run against the
+real OTA host if it serves the image over 443. Ciphersuite is pinned **server-side** here
+(the client cannot readily force one through `esp_http_client`): the local endpoint is
+configured to offer GCM only for one run and CBC-SHA only for the other, giving the same
+within-build isolation M2 provides in the server direction.
+
+This is the number that matters if HTTPS OTA lands, expressed as: added seconds on a 3 MB
+firmware download, upper-bounded (see Layer 1b).
 
 **M4 — module as TLS client.** The production-representative direction and the crash path.
 N=30 `server v3 stop` / `server v3 start` cycles via `/api/execute`. Log timestamp
@@ -155,7 +203,8 @@ difference the mongoose / `OVMS NetMan` task counter and the total.
 Derived metrics, comparable across arms:
 
 - CPU-ms per handshake (M1 batch)
-- CPU-ms per MB transferred, separately for GCM and CBC arms (M2)
+- CPU-ms per MB transferred, server direction, separately for GCM and CBC arms (M2)
+- CPU-ms per MB transferred, client direction via esp-tls, GCM and CBC arms (M5)
 - CPU-ms per server-v3 reconnect (M4)
 - Idle baseline: 60 s with no TLS activity, subtracted from each of the above
 
@@ -180,16 +229,22 @@ A comment on #1321 that dexterbg can act on without re-running anything:
    ratio. `mbedtls_sha256_clone()` on its own line. Call out the 64 B row if hardware loses
    there.
 3. **Macro table.** Handshake median/p95 (M1 server-side, M4 client-side), bulk MB/s for
-   GCM and CBC arms, SW vs HW — with **both** SW runs shown so the reader can see the noise
-   floor directly.
-4. **CPU cost table.** CPU-ms per handshake, per MB, per reconnect, idle baseline
-   subtracted. The headline for a "load" question.
-5. **Context and provenance.** Chip revision, both build SHAs, vehicle state, N per
+   GCM and CBC arms in **both** directions (M2 server, M5 client), SW vs HW — with **both**
+   SW runs shown so the reader can see the noise floor directly.
+4. **CPU cost table.** CPU-ms per handshake, per MB (each direction), per reconnect, idle
+   baseline subtracted. The headline for a "load" question.
+5. **Forward look: HTTPS OTA.** The negotiated suite at the OTA host (M3), and the
+   upper-bound added seconds on a 3 MB firmware download derived from M5. Flagged as
+   forward-looking because `feature/ota-streaming-flash` is not merged — but it is the
+   case where the penalty would first become user-visible, and upstream is moving the same
+   direction (`upstream/ota_http2sd`), so it belongs in the answer rather than in a
+   follow-up.
+6. **Context and provenance.** Chip revision, both build SHAs, vehicle state, N per
    measurement, production ciphersuite (M3), binary size delta, HW-arm crash count.
-6. **Reproduction.** `test crypto sha` as an upstreamable patch plus the curl one-liners —
-   what makes this checkable on other hardware rather than a claim about one module in one
-   driveway.
-7. **What this does not settle.** The test prices the *mitigation*; it does not establish
+7. **Reproduction.** `test crypto sha` and `test crypto tlsget` as an upstreamable patch,
+   plus the curl one-liners — what makes this checkable on other hardware rather than a
+   claim about one module in one driveway.
+8. **What this does not settle.** The test prices the *mitigation*; it does not establish
    that disabling hardware SHA is the *right* fix. Fixing the locking in the IDF 3.3
    mbedTLS port, or avoiding the clone-mid-handshake pattern, are alternatives this data
    does not evaluate. That is the maintainer's call; the goal is to remove the cost
@@ -211,6 +266,8 @@ Listed in the issue comment, not buried.
 | Ciphersuite forcing changes cipher and key exchange, not just MAC | GCM↔CBC compared only *within* a build, never across arms. |
 | SHA-384/512 software cost disproportionately worse on ESP32 | Reported but not headlined unless M3 shows production negotiates a SHA-384 suite. |
 | Toolchain/compiler drift between arms | Same branch, same CI runner, two commits apart. Build SHAs recorded. |
+| `tlsget` is not the real HTTPS-OTA path | It shares the esp-tls/mbedTLS stack but omits the `esp_ota_write` flash sink, whose cache stalls plausibly dominate. Reported explicitly as an **upper bound** on the OTA penalty, never as the OTA penalty. |
+| HTTPS OTA is unmerged, so its ciphersuite is not yet fixed | M3 records what the OTA host offers today; a future server or CA change could alter it. Stated with the date of measurement. |
 
 **What this design delivers:** a defensible per-byte cost, a defensible per-handshake CPU
 cost, and a defensible statement about bulk transfer.
@@ -222,5 +279,6 @@ heavier vehicle stack than e-TNGA.
 
 - Fixing the IDF 3.3 hardware-SHA locking, or eliminating the clone-mid-handshake pattern.
 - Whether hardware AES and MPI (both retained) carry similar defects.
-- The fork's HTTPS-OTA branch (`feature/ota-streaming-flash`), which *would* add a bulk TLS
-  workload but is not upstream and is not what #1321 is about.
+- Validating or timing the fork's HTTPS-OTA branch (`feature/ota-streaming-flash`) itself.
+  Its *stack* is measured via `test crypto tlsget`, but the branch is not built, flashed, or
+  exercised here — that is separate work under #858.
