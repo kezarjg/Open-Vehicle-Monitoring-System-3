@@ -53,6 +53,7 @@ OvmsConsole::OvmsConsole()
   : OvmsShell(COMMAND_RESULT_VERBOSE)
   {
   m_ready = false;
+  m_closing = false;
   m_queue = NULL;
   m_deferred = NULL;
   m_discarded = 0;
@@ -77,6 +78,35 @@ OvmsConsole::~OvmsConsole()
   // release buffered events & delete the queues if created:
   DeleteEventQueue(&m_queue);
   DeleteEventQueue(&m_deferred);
+  }
+
+bool ConsoleReaper::CloseConsole(OvmsConsole* child)
+  {
+  // Atomic check-and-stop: the follow task may self-exit (e.g. "tail: file
+  // lost") and free itself at any time, so testing for it and signalling it
+  // must be one unit. Setting m_closing after the stop request is safe: any
+  // write the task starts in between blocks on the Mongoose lock we hold here,
+  // and re-checks IsClosing() under that lock before touching the connection.
+  if (!child->StopFollowModeTask())
+    return false;   // no follow task: caller does synchronous termination + free
+  // Follow task still running: we cannot join it here (we hold the Mongoose
+  // lock its write() needs). Mark closing so its in-flight write bails, and
+  // defer delete until it has left the write path.
+  child->SetClosing();
+  m_reaping.push_back(child);
+  return true;
+  }
+
+void ConsoleReaper::ReapConsoles()
+  {
+  for (auto it = m_reaping.begin(); it != m_reaping.end(); )
+    {
+    OvmsConsole* child = *it;
+    if (!child->HasFollowModeTask())
+      { delete child; it = m_reaping.erase(it); }
+    else
+      ++it;
+    }
   }
 
 void OvmsConsole::Initialize(const char* console)
