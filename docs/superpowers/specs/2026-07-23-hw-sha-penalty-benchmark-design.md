@@ -58,6 +58,51 @@ raises the importance of one specific fact: **whether the OTA host negotiates an
 whole question is moot for OTA. With CBC-SHA, HMAC-SHA runs over all ~3 MB. That single
 observation largely decides the answer, and it costs one `openssl s_client` invocation.
 
+## M3 result (measured 2026-07-23, devbox, no module involved)
+
+Run ahead of everything else because it was the cheapest decision-relevant measurement.
+**All OVMS mbedTLS peers negotiate an AEAD suite, so there is no per-record SHA anywhere in
+production.** SHA cost is confined to the handshake transcript and PRF.
+
+| Probe | Offered | Negotiated |
+|---|---|---|
+| `api.openvehicles.com:443` (OTA host) | openssl default TLS1.2 | `ECDHE-RSA-AES256-GCM-SHA384` |
+| `api.openvehicles.com:443` | mongoose's real order, prime256v1 | **`ECDHE-RSA-AES128-GCM-SHA256`** |
+| `api.openvehicles.com:6870` (server v2 TLS) | mongoose's real order | **`ECDHE-RSA-AES128-GCM-SHA256`** |
+| `api.openvehicles.com:443` | CBC-SHA listed first | `ECDHE-RSA-AES128-SHA256` |
+| `api.openvehicles.com:8883` (server v3 MQTT) | — | no response; the v3 broker is user-configured, not hosted there |
+
+Two findings behind that:
+
+- **The server honors client preference order.** Listing CBC-SHA first yields a CBC-SHA
+  suite. So the negotiated suite is decided entirely by the *module's* ciphersuite ordering,
+  not the server's policy.
+- **Mongoose supplies its own default ciphersuite list, not mbedTLS's.** `mg_set_cipher_list`
+  falls back to `mg_s_cipher_list` (`components/mongoose/mongoose/mongoose.c:5140`) when no
+  list is configured, and no OVMS call site configures one (`ssl_ca_cert` / `ssl_server_name`
+  / `ssl_cert` / `ssl_key` only), nor is `CONFIG_MBEDTLS_SSL_CIPHERSUITES` set. Its order is
+  ECDHE-ECDSA-GCM, ECDHE-ECDSA-CBC, **ECDHE-RSA-AES128-GCM-SHA256**, … — and since the
+  OVMS servers present RSA certificates, the first two never match and the third wins. The
+  probe above reproduces exactly that.
+
+**Consequences for the design:**
+
+1. The **CBC-SHA arms of M2 and M5 are synthetic worst cases, not production.** They stay in
+   (they are nearly free, they bound the answer for anyone pointing OVMS at a CBC-only
+   server, and the GCM↔CBC delta is the cleanest within-build isolation available) but they
+   are demoted from headline to appendix.
+2. The **headline is now handshake cost** — transcript SHA plus PRF HMAC-SHA — which makes
+   M1, M4 and Layer 3 the load-bearing measurements and the 64 B / 512 B micro cases more
+   important than the 4 KB one.
+3. **Bulk transfer, including the future HTTPS OTA, is expected to show ~zero SHA penalty**,
+   because AES-GCM does not use SHA per record. M5 becomes a confirmation rather than a
+   discovery.
+4. One open item: HTTPS OTA goes through `esp_http_client`/esp-tls, which uses **mbedTLS's
+   default ciphersuite order, not mongoose's**. mbedTLS's default is expected to prefer
+   AES256-GCM-SHA384, which is still AEAD but uses a **SHA-384 PRF** — the disproportionately
+   slow path in software on a 32-bit core. This is unverified (no IDF checkout on the
+   devbox) and is precisely why `test crypto tlsget` reports the negotiated suite.
+
 ## Design
 
 Three layers, because the question has two halves ("what is the number" and "does it
@@ -164,12 +209,9 @@ show nothing. That is a real finding, not a failed measurement — but it only b
 defensible claim paired with Layer 3, where CPU-seconds per MB still differ at identical
 wall-clock throughput.
 
-**M3 — what production negotiates.** `openssl s_client` against the real peers
-(`api.openvehicles.com:6870`, the server v3 MQTT/TLS port, and **the OTA host over 443**)
-to record the negotiated suite in each case. Determines whether M2/M5's CBC arm describes
-anything real or is a synthetic worst case. The OTA-host result is the single most
-decision-relevant data point in the whole exercise, and it is obtainable in about a minute
-without touching the module.
+**M3 — what production negotiates. DONE, see above.** Result: AEAD everywhere
+(`ECDHE-RSA-AES128-GCM-SHA256`). Re-run with `test crypto tlsget` on-module to confirm the
+esp-tls path, which uses a different preference order from mongoose.
 
 **M5 — client-side bulk (the HTTPS-OTA preview).** `test crypto tlsget` against a
 controlled HTTPS endpoint on os-k3s serving a ~3 MB file, N=5, plus one run against the
