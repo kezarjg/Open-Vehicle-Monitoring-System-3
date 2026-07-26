@@ -126,12 +126,20 @@ The saved-but-unlisted warning is deliberately aggregated into a single message.
 per network would produce eight warnings for a user with ten saved networks and two
 prioritised, which would train the user to ignore the warning block.
 
-**Errors** (block the save, form redisplayed):
+**Errors** (block only the priority section's writes; form redisplayed):
 
 | Condition | Rationale |
 |---|---|
 | Interval < 10 | The firmware clamps to 10 silently; the UI should say so rather than accept a value it won't honour |
 | Enabled with zero networks checked | `PriorityActive()` requires a non-empty list, so this saves a configuration that cannot work |
+
+Note this does not block the rest of the page: `HandleCfgWifi` calls `UpdateWifiTable` (ap and
+client) before `UpdateWifiPriority`, and those tables — plus the client-options block further
+down — have already committed by the time a priority error is detected. So a POST with, say,
+`interval < 10` still saves any AP/client network edits and client-option changes; only the
+`network/wifi.priority*` keys are skipped, and the response is an HTTP 400 with the form
+redisplayed. This partial-save behaviour is pre-existing to this page (each section commits
+independently) and is unrelated to the priority feature; it is not addressed by this change.
 
 ### Firmware change
 
