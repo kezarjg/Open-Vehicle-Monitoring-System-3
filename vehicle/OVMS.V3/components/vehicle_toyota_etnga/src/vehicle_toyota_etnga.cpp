@@ -255,21 +255,6 @@ void OvmsVehicleToyotaETNGA::Ticker1(uint32_t ticker)
     // later in the same tick, so it must be fresh before that runs.
     UpdateCharging12v();
 
-    if (StandardMetrics.ms_v_charge_inprogress->AsBool()) {
-        ESP_LOGV(CHARGING_TAG, "%.0f, %.2f, %.4f, %.0f, %.2f, %.2f, %.2f, %.2f, %.0f, %.2f, %.4f",
-                StandardMetrics.ms_v_bat_voltage->AsFloat(),
-                StandardMetrics.ms_v_bat_current->AsFloat(),
-                StandardMetrics.ms_v_bat_power->AsFloat(),
-                StandardMetrics.ms_v_env_temp->AsFloat(),
-                StandardMetrics.ms_v_bat_pack_tavg->AsFloat(),
-                StandardMetrics.ms_v_bat_pack_tmax->AsFloat(),
-                StandardMetrics.ms_v_bat_pack_tmin->AsFloat(),
-                StandardMetrics.ms_v_bat_pack_tstddev->AsFloat(),
-                StandardMetrics.ms_v_bat_soc->AsFloat(),
-                m_v_bat_soc_bms->AsFloat(),
-                StandardMetrics.ms_v_charge_power->AsFloat());
-    }
-
     //ESP_LOGI(TAG, "Entering Ticker1: %d", ticker);
     ResetStaleMetrics();
 

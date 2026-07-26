@@ -1,6 +1,12 @@
 Open Vehicle Monitor System v3 - Change log
 
 ????-??-?? ???  ???????  OTA release
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the log tags have been shortened for
+    consistency with other vehicles. If you set log levels for diagnostics, use the new names:
+    "v-etnga" (was "v-toyota-etnga") and "v-subsol" (was "v-subaru-solterra"). Almost all
+    messages come from the shared platform, so "log level verbose v-etnga" is the one to set
+    on any of these cars. The separate "v-toyota-etnga-charging" telemetry tag is gone — the
+    same per-second charging data is recorded in the charge-session report CSV.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): v.e.awake now reflects the vehicle being
     switched on (AWAKE/DRIVING) rather than raw CAN2 bus activity, so it no longer reads true
     during a charge — the module no longer sends the periodic "Vehicle is idling / stopped

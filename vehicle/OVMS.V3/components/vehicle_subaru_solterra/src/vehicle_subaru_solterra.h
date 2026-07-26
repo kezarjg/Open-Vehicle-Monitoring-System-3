@@ -34,7 +34,7 @@ class OvmsVehicleSubaruSolterra : public OvmsVehicleToyotaETNGA
 public:
   OvmsVehicleSubaruSolterra();  // Constructor for the Subaru Solterra vehicle module
   ~OvmsVehicleSubaruSolterra(); // Destructor for the Subaru Solterra vehicle module
-  static constexpr const char* TAG = "v-subaru-solterra";
+  static constexpr const char* TAG = "v-subsol";
 
 };
 

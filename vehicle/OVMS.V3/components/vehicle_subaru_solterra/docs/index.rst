@@ -13,7 +13,9 @@ Vehicle identity
 
 :Short type code: SUBSOL
 :Vehicle name: Subaru Solterra
-:Log tag: ``v-subaru-solterra``
+:Log tag: ``v-subsol`` (wrapper only). Nearly all logging comes from the shared
+   e-TNGA platform under ``v-etnga`` — set that one to collect diagnostics, e.g.
+   ``log level verbose v-etnga``.
 
 -------------
 Battery / BMS

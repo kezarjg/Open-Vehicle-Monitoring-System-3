@@ -238,8 +238,7 @@ protected:
     // session counters reset at session open in TransitionToChargeHandshakeState.
 
 private:
-    static constexpr const char* TAG = "v-toyota-etnga";
-    static constexpr const char* CHARGING_TAG = "v-toyota-etnga-charging";
+    static constexpr const char* TAG = "v-etnga";
     // Energy-integrator timestamps (esp_log_timestamp ms; 0 = interval not started).
     // Must be zero-initialized: the first poll reply can arrive before NotifyVehicleOn /
     // NotifyChargeStart reset them, and a garbage dt would corrupt the persistent *_total metrics.
