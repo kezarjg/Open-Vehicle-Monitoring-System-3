@@ -731,15 +731,6 @@ config OVMS_VEHICLE_SUBARU_SOLTERRA
     help
         Enable to include support for Subaru Solterra vehicles.
 
-config OVMS_VEHICLE_LEXUS_RZ
-    bool "Include support for Lexus RZ vehicles (EXPERIMENTAL/UNVALIDATED)"
-    default n
-    depends on OVMS
-    help
-        Enable to include support for Lexus RZ vehicles.
-        EXPERIMENTAL: inherits the Toyota e-TNGA logic and has not been validated
-        on a real Lexus RZ. Off by default.
-
 endmenu # Vehicle Support
 
 menu "Component Options"
