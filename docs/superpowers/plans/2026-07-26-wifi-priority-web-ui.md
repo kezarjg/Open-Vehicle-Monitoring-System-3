@@ -4,7 +4,7 @@
 
 **Goal:** Add priority-network management to the `/cfg/wifi` web page so the WiFi priority list can be viewed and edited from a browser, with every silent-failure condition surfaced.
 
-**Architecture:** Two new static methods on `OvmsWebServer` (`OutputWifiPriority` / `UpdateWifiPriority`) render and parse an additive fieldset on `/cfg/wifi`. The existing `OutputWifiTable`/`UpdateWifiTable` helpers are **not** modified — they are shared with the AP networks table. Ordering is carried in a single hidden CSV field maintained by inline page JS. One small `esp32wifi::OutputStatus` change makes `wifi status` explain why priority is inactive.
+**Architecture:** Two new static methods on `OvmsWebServer` (`OutputWifiPriority` / `UpdateWifiPriority`) render and parse an additive fieldset on `/cfg/wifi`. The existing `OutputWifiTable`/`UpdateWifiTable` helpers keep their logic untouched — they are shared with the AP networks table — and are edited only to HTML-escape their existing warning strings (Task 5, separate commit). Ordering is carried in a single hidden CSV field maintained by inline page JS. One small `esp32wifi::OutputStatus` change makes `wifi status` explain why priority is inactive.
 
 **Tech Stack:** C++ (ESP-IDF 3.3, older GCC — no C++14/17 idioms), jQuery 2.x + Bootstrap 3 (already bundled), Sphinx RST for docs.
 
@@ -16,7 +16,7 @@
 - **No host test suite exists.** The firmware compiles only in GitHub Actions or the devcontainer. "Verify" therefore means: (a) CI `Firmware build` green, (b) on-device check on the bench module. Never claim a local build verified anything.
 - **Upstream-bound.** This ships as one PR to openvehicles together with the PR #120 firmware feature. No new JavaScript dependencies. Match the surrounding file's existing style exactly.
 - **All page JS is inline** in `web_cfg_wifi.cpp`. Nothing goes into `ovms.js`, so no `script.js`/`script.js.gz` regeneration and the `Web assets sync check` workflow stays untriggered.
-- **Warning/error strings are built by plain string concatenation without HTML-escaping**, matching the existing `UpdateWifiTable` convention in the same file. Do not introduce `_html()` escaping into these lists — it would be inconsistent with the four adjacent messages.
+- **Every interpolated value in a warning or error string MUST be HTML-escaped** using `c.encode_html(v)`, which is `static` and returns `std::string` — safe to use directly in `+` concatenation, unlike the `_attr`/`_html` macros whose `.c_str()` result must not be stored. Literal markup in these strings stays as it is; only interpolated values are escaped. This **overrides** the file's existing convention by explicit decision of the project owner (2026-07-26), and the three pre-existing unescaped lines in `UpdateWifiTable` are corrected as part of Task 5.
 - `_attr(x)` and `_html(x)` are file-local macros already defined at `web_cfg_wifi.cpp:26-27`; both expand to `c.encode_html(x).c_str()` and require a `PageContext_t& c` named `c` in scope.
 - `<vector>` and `<set>` are already pulled in via `ovms_webserver.h`; `endsWith()` comes from `main/ovms_utils.h` and is already used in this file. **No new `#include` lines are needed.**
 - Config defaults, which drive the delete-on-default writes: `wifi.priority.enable` = false, `wifi.priority.interval` = 60, `wifi.priority` = "".
@@ -458,8 +458,10 @@ After the `if (error != "") return;` guard and before the first `MyConfig` write
 ```cpp
   // listed but no stored credential -> SelectPriorityAP() will skip it:
   for (size_t i = 0; i < prio.size(); i++) {
-    if (ssidparam->GetValue(prio[i]).empty())
-      warn += "<li>Priority network <code>" + prio[i] + "</code> has no saved password and will be skipped</li>";
+    if (ssidparam->GetValue(prio[i]).empty()) {
+      warn += "<li>Priority network <code>" + c.encode_html(prio[i])
+            + "</code> has no saved password and will be skipped</li>";
+    }
   }
 
   if (enable) {
@@ -473,7 +475,7 @@ After the `if (error != "") return;` guard and before the first `MyConfig` write
       if (InList(prio, kv.first))
         continue;
       if (n++) unlisted += ", ";
-      unlisted += "<code>" + kv.first + "</code>";
+      unlisted += "<code>" + c.encode_html(kv.first) + "</code>";
     }
     if (n) {
       warn += "<li>While priority networks are enabled only listed networks are joined."
@@ -484,23 +486,67 @@ After the `if (error != "") return;` guard and before the first `MyConfig` write
     std::string autossid = MyConfig.GetParamValue("auto", "wifi.ssid.client");
     std::string automode = MyConfig.GetParamValue("auto", "wifi.mode", "ap");
     if (!autossid.empty()) {
-      warn += "<li>Priority networks are inactive: a fixed client SSID (<code>" + autossid
+      warn += "<li>Priority networks are inactive: a fixed client SSID (<code>"
+            + c.encode_html(autossid)
             + "</code>) is configured. Clear it on the <a href=\"/cfg/autostart\" target=\"#main\">"
               "Autostart configuration page</a> to enable scanning mode.</li>";
     }
     if (automode != "client" && automode != "apclient") {
-      warn += "<li>Priority networks are inactive: Wifi mode is <code>" + automode
+      warn += "<li>Priority networks are inactive: Wifi mode is <code>"
+            + c.encode_html(automode)
             + "</code>. Select client or access point + client mode on the"
               " <a href=\"/cfg/autostart\" target=\"#main\">Autostart configuration page</a>.</li>";
     }
   }
 ```
 
-- [ ] **Step 3: Push and verify CI**
+Every interpolated value goes through `c.encode_html`. Do not shorten these to the
+`_html()` macro: that macro yields a `const char*` into a temporary, which is only safe
+inside a single `printf`-style call, not in `+` concatenation chains like these.
+
+- [ ] **Step 3: Commit the warnings**
 
 ```bash
 git add vehicle/OVMS.V3/components/ovms_webserver/src/web_cfg_wifi.cpp
 git commit -m "webserver: warn on wifi priority conditions that silently disable it"
+```
+
+- [ ] **Step 4: Escape the three pre-existing warning strings**
+
+Separate commit — this corrects existing code, not new code, and upstream should be able to
+read it on its own.
+
+In `UpdateWifiTable`, three lines interpolate an unescaped, user-supplied SSID. At
+`web_cfg_wifi.cpp:390,392,396` (line numbers before this task's edits), change:
+
+```cpp
+        error += "<li>Autostart SSID <code>" + ssid + "</code> has no password</li>";
+      else
+        warn += "<li>SSID <code>" + ssid + "</code> has no password</li>";
+```
+```cpp
+      error += "<li>SSID <code>" + ssid + "</code>: password is too short (min " + buf + " chars)</li>";
+```
+
+to:
+
+```cpp
+        error += "<li>Autostart SSID <code>" + c.encode_html(ssid) + "</code> has no password</li>";
+      else
+        warn += "<li>SSID <code>" + c.encode_html(ssid) + "</code> has no password</li>";
+```
+```cpp
+      error += "<li>SSID <code>" + c.encode_html(ssid) + "</code>: password is too short (min " + buf + " chars)</li>";
+```
+
+`buf` is a locally-formatted integer and needs no escaping. Do not change anything else in
+`UpdateWifiTable` — its logic stays exactly as it is.
+
+- [ ] **Step 5: Push and verify CI**
+
+```bash
+git add vehicle/OVMS.V3/components/ovms_webserver/src/web_cfg_wifi.cpp
+git commit -m "webserver: HTML-escape SSIDs in wifi config warning messages"
 git push
 gh run list --branch feature/wifi-priority-web-ui --limit 3 \
   --json workflowName,status,conclusion
