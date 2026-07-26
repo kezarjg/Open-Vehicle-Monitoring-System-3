@@ -26,6 +26,40 @@
 #define _attr(text) (c.encode_html(text).c_str())
 #define _html(text) (c.encode_html(text).c_str())
 
+// Split a comma separated SSID list, trimming whitespace, first occurrence wins.
+// Deliberately mirrors esp32wifi::ParsePriorityList() so the page orders and
+// de-duplicates exactly the way the firmware will.
+static void ParsePriorityCsv(const std::string& csv, std::vector<std::string>& list)
+{
+  list.clear();
+  size_t start = 0;
+  while (start <= csv.length()) {
+    size_t comma = csv.find(',', start);
+    if (comma == std::string::npos) comma = csv.length();
+    std::string item = csv.substr(start, comma - start);
+    size_t a = item.find_first_not_of(" \t");
+    size_t b = item.find_last_not_of(" \t");
+    if (a != std::string::npos) {
+      item = item.substr(a, b - a + 1);
+      bool dup = false;
+      for (size_t i = 0; i < list.size(); i++) {
+        if (list[i] == item) { dup = true; break; }
+      }
+      if (!dup)
+        list.push_back(item);
+    }
+    start = comma + 1;
+  }
+}
+
+static bool InList(const std::vector<std::string>& list, const std::string& s)
+{
+  for (size_t i = 0; i < list.size(); i++) {
+    if (list[i] == s) return true;
+  }
+  return false;
+}
+
 /**
  * HandleCfgWifi: configure wifi networks (URL /cfg/wifi)
  */
@@ -422,20 +456,107 @@ void OvmsWebServer::OutputWifiPriority(PageEntry_t& p, PageContext_t& c)
   auto lock = MyConfig.Lock();
   bool enable;
   int interval;
+  std::string csv;
 
   if (c.method == "POST") {
     enable   = (c.getvar("cfg_priority_enable") == "yes");
     interval = atoi(c.getvar("cfg_priority_interval").c_str());
+    csv      = c.getvar("cfg_priority");
   }
   else {
     enable   = MyConfig.GetParamValueBool("network", "wifi.priority.enable", false);
     interval = MyConfig.GetParamValueInt("network", "wifi.priority.interval", 60);
+    csv      = MyConfig.GetParamValue("network", "wifi.priority", "");
   }
 
   c.input_checkbox("Enable priority networks", "cfg_priority_enable", enable,
     "<p>Prefer known networks in the order listed below. While connected to a lower ranked"
     " network the module periodically rescans and upgrades to a higher ranked one when it is"
     " in range with a good signal.</p>");
+
+  OvmsConfigParam* ssidparam = MyConfig.CachedParam("wifi.ssid");
+  std::vector<std::string> prio;
+  ParsePriorityCsv(csv, prio);
+
+  c.print(
+    "<div class=\"table-responsive\">"
+      "<table class=\"table table-condensed\" id=\"prio-table\">"
+        "<thead>"
+          "<tr>"
+            "<th width=\"10%\">Use</th>"
+            "<th width=\"12%\">Rank</th>"
+            "<th width=\"52%\">Network</th>"
+            "<th width=\"26%\">Order</th>"
+          "</tr>"
+        "</thead>"
+        "<tbody>");
+
+  auto gen_row = [&c](const std::string& ssid, bool checked, bool haspass) {
+    c.printf(
+          "<tr data-ssid=\"%s\">"
+            "<td><input type=\"checkbox\" class=\"prio-use\"%s></td>"
+            "<td class=\"prio-rank\"></td>"
+            "<td>%s%s</td>"
+            "<td>"
+              "<button type=\"button\" class=\"btn btn-default btn-xs prio-up\"><strong>&#9650;</strong></button> "
+              "<button type=\"button\" class=\"btn btn-default btn-xs prio-down\"><strong>&#9660;</strong></button>"
+            "</td>"
+          "</tr>"
+      , _attr(ssid)
+      , checked ? " checked" : ""
+      , _html(ssid)
+      , haspass ? "" : " <span class=\"text-warning\">(no saved password)</span>");
+  };
+
+  // listed networks first, in priority order:
+  for (size_t i = 0; i < prio.size(); i++)
+    gen_row(prio[i], true, !ssidparam->GetValue(prio[i]).empty());
+
+  // then saved networks that are not on the list, alphabetically (map order):
+  for (auto const& kv : ssidparam->m_instances) {
+    if (endsWith(kv.first, ".ovms.staticip"))
+      continue;
+    if (InList(prio, kv.first))
+      continue;
+    gen_row(kv.first, false, !kv.second.empty());
+  }
+
+  c.printf(
+        "</tbody>"
+      "</table>"
+    "</div>"
+    "<input type=\"hidden\" name=\"cfg_priority\" id=\"cfg_priority\" value=\"%s\">"
+    , _attr(csv));
+
+  c.print(
+    "<script>"
+    "(function(){"
+      "var $t = $('#prio-table');"
+      "function refresh(){"
+        "var csv = [];"
+        "$t.find('tbody > tr').each(function(){"
+          "var $tr = $(this);"
+          "if ($tr.find('.prio-use').prop('checked')) {"
+            "csv.push($tr.attr('data-ssid'));"
+            "$tr.find('.prio-rank').text(csv.length);"
+          "} else {"
+            "$tr.find('.prio-rank').text('—');"
+          "}"
+        "});"
+        "$('#cfg_priority').val(csv.join(','));"
+      "}"
+      "$t.on('click', '.prio-up', function(){"
+        "var $tr = $(this).closest('tr'), $prev = $tr.prev();"
+        "if ($prev.length) { $tr.insertBefore($prev); refresh(); }"
+      "});"
+      "$t.on('click', '.prio-down', function(){"
+        "var $tr = $(this).closest('tr'), $next = $tr.next();"
+        "if ($next.length) { $tr.insertAfter($next); refresh(); }"
+      "});"
+      "$t.on('change', '.prio-use', refresh);"
+      "refresh();"
+    "})();"
+    "</script>");
 
   c.input_slider("Upgrade-scan interval", "cfg_priority_interval", 3, "s", -1,
     interval, 60, 10, 600, 1,
