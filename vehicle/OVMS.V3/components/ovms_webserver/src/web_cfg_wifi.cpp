@@ -60,6 +60,35 @@ static bool InList(const std::vector<std::string>& list, const std::string& s)
   return false;
 }
 
+// HTML for the two configuration states that make PriorityActive() false regardless of the
+// priority list itself: a fixed client SSID, or a Wifi mode other than client/apclient. Empty
+// when neither applies. Shared by OutputWifiPriority (GET and POST-error re-render) and
+// UpdateWifiPriority (the save-time warnlist) so the wording lives in one place.
+// Reads the *configured* (auto/*) values applied at boot, not the esp32wifi runtime state --
+// e.g. a `wifi mode client` shell command can diverge from these until the next restart, so
+// the wording says "configured" / "from the next restart" rather than asserting the feature
+// is inactive right now.
+static std::string PriorityInactiveWarning(PageContext_t& c)
+{
+  std::string html;
+  std::string autossid = MyConfig.GetParamValue("auto", "wifi.ssid.client");
+  std::string automode = MyConfig.GetParamValue("auto", "wifi.mode", "ap");
+  if (!autossid.empty()) {
+    html += "Priority networks will be inactive from the next restart: a fixed client SSID"
+            " (<code>" + c.encode_html(autossid) + "</code>) is configured. Clear it on the"
+            " <a href=\"/cfg/autostart\" target=\"#main\">Autostart configuration page</a>"
+            " to enable scanning mode.";
+  }
+  if (automode != "client" && automode != "apclient") {
+    if (!html.empty()) html += "<br>";
+    html += "Priority networks will be inactive from the next restart: the configured Wifi"
+            " mode is <code>" + c.encode_html(automode) + "</code>. Select client or access"
+            " point + client mode on the <a href=\"/cfg/autostart\" target=\"#main\">Autostart"
+            " configuration page</a>.";
+  }
+  return html;
+}
+
 /**
  * HandleCfgWifi: configure wifi networks (URL /cfg/wifi)
  */
@@ -474,6 +503,14 @@ void OvmsWebServer::OutputWifiPriority(PageEntry_t& p, PageContext_t& c)
     " network the module periodically rescans and upgrades to a higher ranked one when it is"
     " in range with a good signal.</p>");
 
+  std::string inactive_warn = PriorityInactiveWarning(c);
+  if (!inactive_warn.empty()) {
+    c.print(
+      "<div class=\"form-group\"><div class=\"col-sm-12\"><div class=\"help-block text-warning\">"
+      + inactive_warn +
+      "</div></div></div>");
+  }
+
   OvmsConfigParam* ssidparam = MyConfig.CachedParam("wifi.ssid");
   std::vector<std::string> prio;
   ParsePriorityCsv(csv, prio);
@@ -492,20 +529,25 @@ void OvmsWebServer::OutputWifiPriority(PageEntry_t& p, PageContext_t& c)
         "<tbody>");
 
   auto gen_row = [&c](const std::string& ssid, bool checked, bool haspass) {
+    // a comma-bearing SSID can't be represented in the CSV priority list (it's the
+    // delimiter), so keep it unticked and prevent it from being ticked:
+    bool has_comma = ssid.find(',') != std::string::npos;
     c.printf(
           "<tr data-ssid=\"%s\">"
-            "<td><input type=\"checkbox\" class=\"prio-use\"%s></td>"
+            "<td><input type=\"checkbox\" class=\"prio-use\"%s%s></td>"
             "<td class=\"prio-rank\"></td>"
-            "<td>%s%s</td>"
+            "<td>%s%s%s</td>"
             "<td>"
               "<button type=\"button\" class=\"btn btn-default btn-xs prio-up\"><strong>&#9650;</strong></button> "
               "<button type=\"button\" class=\"btn btn-default btn-xs prio-down\"><strong>&#9660;</strong></button>"
             "</td>"
           "</tr>"
       , _attr(ssid)
-      , checked ? " checked" : ""
+      , (checked && !has_comma) ? " checked" : ""
+      , has_comma ? " disabled" : ""
       , _html(ssid)
-      , haspass ? "" : " <span class=\"text-warning\">(no saved password)</span>");
+      , haspass ? "" : " <span class=\"text-warning\">(no saved password)</span>"
+      , has_comma ? " <span class=\"text-warning\">(cannot be prioritised: SSID contains a comma)</span>" : "");
   };
 
   // listed networks first, in priority order:
@@ -580,6 +622,14 @@ void OvmsWebServer::UpdateWifiPriority(PageEntry_t& p, PageContext_t& c,
     error += "<li data-input=\"cfg_priority_interval\">Upgrade-scan interval must be at least 10 seconds</li>";
   if (enable && prio.empty())
     error += "<li data-input=\"cfg_priority\">Enable priority networks: select at least one network</li>";
+  // guard against a crafted POST bypassing the disabled checkbox in gen_row(); a comma
+  // can never legitimately survive ParsePriorityCsv() since it's the field's delimiter:
+  for (size_t i = 0; i < prio.size(); i++) {
+    if (prio[i].find(',') != std::string::npos) {
+      error += "<li>Priority network <code>" + c.encode_html(prio[i])
+              + "</code> cannot be prioritised: SSID contains a comma</li>";
+    }
+  }
   if (error != "")
     return;
 
@@ -610,20 +660,9 @@ void OvmsWebServer::UpdateWifiPriority(PageEntry_t& p, PageContext_t& c,
     }
 
     // conditions that make PriorityActive() false regardless of the list:
-    std::string autossid = MyConfig.GetParamValue("auto", "wifi.ssid.client");
-    std::string automode = MyConfig.GetParamValue("auto", "wifi.mode", "ap");
-    if (!autossid.empty()) {
-      warn += "<li>Priority networks are inactive: a fixed client SSID (<code>"
-            + c.encode_html(autossid)
-            + "</code>) is configured. Clear it on the <a href=\"/cfg/autostart\" target=\"#main\">"
-              "Autostart configuration page</a> to enable scanning mode.</li>";
-    }
-    if (automode != "client" && automode != "apclient") {
-      warn += "<li>Priority networks are inactive: Wifi mode is <code>"
-            + c.encode_html(automode)
-            + "</code>. Select client or access point + client mode on the"
-              " <a href=\"/cfg/autostart\" target=\"#main\">Autostart configuration page</a>.</li>";
-    }
+    std::string inactive_warn = PriorityInactiveWarning(c);
+    if (!inactive_warn.empty())
+      warn += "<li>" + inactive_warn + "</li>";
   }
 
   if (!enable)

@@ -1733,6 +1733,8 @@ void esp32wifi::OutputStatus(int verbosity, OvmsWriter* writer)
     }
   }
 
+// Mirrored by web_cfg_wifi.cpp's ParsePriorityCsv(), so the web priority-list editor orders
+// and de-duplicates entries exactly the way this parser will; keep both in sync if this changes.
 void esp32wifi::ParsePriorityList(const std::string& csv)
   {
   m_priority_list.clear();
