@@ -1,6 +1,10 @@
 Open Vehicle Monitor System v3 - Change log
 
 ????-??-?? ???  ???????  OTA release
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): per-cell battery voltages are now read during
+    AC charging (every 60 seconds), so the BMS cell monitor keeps updating and per-cell deviation
+    alerts stay active through a charge. Previously cell voltages were only read while driving and
+    on DC fast charge, leaving the cell display frozen for the whole of an AC session.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): v.e.awake now reflects the vehicle being
     switched on (AWAKE/DRIVING) rather than raw CAN2 bus activity, so it no longer reads true
     during a charge — the module no longer sends the periodic "Vehicle is idling / stopped

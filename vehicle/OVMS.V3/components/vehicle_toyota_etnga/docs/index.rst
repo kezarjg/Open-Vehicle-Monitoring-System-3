@@ -184,6 +184,15 @@ Battery and 12V
      - No such hardware available; both are reasoned from published pack specs.
        The runtime auto-arrange is deliberately **grow-only** — it cannot shrink,
        because a short reply is indistinguishable from a truncated one.
+   * - Per-cell voltage polling during ``CHARGE_AC``
+     - Unvalidated
+     - ``0x182E`` now polls at 60 s in ``CHARGE_AC`` (previously not polled in that
+       state at all, while the temperature array was).  Needs one AC session to
+       confirm the cell data updates and that the added array poll does not disturb
+       the charge.  It also closes a latent variant bug: ``m_bms_modules`` is
+       resolved from this reply and drives temperature grouping, so a module
+       booting straight into an AC charge previously kept its constructor default
+       for the whole session — harmless on the 96-cell pack, wrong on 78/104.
    * - Capacity arrays ``0x1D3E`` / ``0x1D3F`` (HV Battery ECU ``0x747``/``0x74F``)
      - Log-inferred
      - Five weeks of logs show ``0x1D3E`` declining monotonically — a good
@@ -326,9 +335,9 @@ each column is the poll interval in seconds (``0`` = not polled in that state). 
      - 5
      - 0
      - 0
-     - 0
+     - 60
      - 30
-     - Per-cell voltages (96 cells); DRIVING@5 s, DC@30 s
+     - Per-cell voltages; DRIVING@5 s, AC@60 s, DC@30 s
    * - ``PID_BATTERY_CAPACITY`` (``0x1D3E``)
      - HV Battery
      - 0

@@ -140,7 +140,7 @@ static const OvmsPoller::poll_pid_t obdii_polls_charge[] = {
 
     // --- Heavy 96-cell multiframe arrays LAST (deferred first when a cycle is cut short) ---
   { HYBRID_BATTERY_SYSTEM_TX,  HYBRID_BATTERY_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_TEMPERATURES,       { 0,  0, 30, 20}, 0, ISOTP_STD }, // 0x1814 cell-temp array (Hybrid Battery ECU): AC @30s, DC @20s (AC added so batt_temp_c logs during AC charge)
-  { HYBRID_BATTERY_SYSTEM_TX,  HYBRID_BATTERY_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_CELL_VOLTAGES,      { 0,  0,  0, 30}, 0, ISOTP_STD }, // 0x182E cell voltages: DC @30s
+  { HYBRID_BATTERY_SYSTEM_TX,  HYBRID_BATTERY_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_CELL_VOLTAGES,      { 0,  0, 60, 30}, 0, ISOTP_STD }, // 0x182E cell voltages: AC @60s, DC @30s
   { HYBRID_BATTERY_SYSTEM_TX,  HYBRID_BATTERY_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_CAPACITY,           { 0,  0, 60, 60}, 0, ISOTP_STD }, // 0x1D3E per-module capacity: AC+DC @60s
   { HYBRID_BATTERY_SYSTEM_TX,  HYBRID_BATTERY_SYSTEM_RX,  VEHICLE_POLL_TYPE_READDATA, PID_BATTERY_CAPACITY_ALT,       { 0,  0, 60, 60}, 0, ISOTP_STD }, // 0x1D3F parallel capacity array: AC+DC @60s
 
