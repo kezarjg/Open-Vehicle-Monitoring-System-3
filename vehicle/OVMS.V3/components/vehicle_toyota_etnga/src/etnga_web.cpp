@@ -144,10 +144,17 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
             error += "<li>Temperature alert should be at or above the warning threshold (higher temperature is worse).</li>";
 
         if (error == "") {
-            MyConfig.SetParamValueFloat("xte", "tpms.pressure.warn",  p_warn);
-            MyConfig.SetParamValueFloat("xte", "tpms.pressure.alert", p_alert);
-            MyConfig.SetParamValueFloat("xte", "tpms.temp.warn",      t_warn);
-            MyConfig.SetParamValueFloat("xte", "tpms.temp.alert",     t_alert);
+            // Hold the config lock across all four writes. OvmsConfig::Transaction is a
+            // recursive lock that commits only as the OUTERMOST lock is released, so the
+            // four Save() operations coalesce into a single config-store write instead of
+            // one per setter. Scoped so the lock is released before the response is built.
+            {
+                auto lock = MyConfig.Lock();
+                MyConfig.SetParamValueFloat("xte", "tpms.pressure.warn",  p_warn);
+                MyConfig.SetParamValueFloat("xte", "tpms.pressure.alert", p_alert);
+                MyConfig.SetParamValueFloat("xte", "tpms.temp.warn",      t_warn);
+                MyConfig.SetParamValueFloat("xte", "tpms.temp.alert",     t_alert);
+            }
 
             c.head(200);
             std::string saved = "<p class=\"lead\">" + etnga_vehicle_name() + " configuration saved.</p>";
