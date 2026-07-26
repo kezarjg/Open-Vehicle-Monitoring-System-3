@@ -26,6 +26,69 @@
 #define _attr(text) (c.encode_html(text).c_str())
 #define _html(text) (c.encode_html(text).c_str())
 
+// Split a comma separated SSID list, trimming whitespace, first occurrence wins.
+// Deliberately mirrors esp32wifi::ParsePriorityList() so the page orders and
+// de-duplicates exactly the way the firmware will.
+static void ParsePriorityCsv(const std::string& csv, std::vector<std::string>& list)
+{
+  list.clear();
+  size_t start = 0;
+  while (start <= csv.length()) {
+    size_t comma = csv.find(',', start);
+    if (comma == std::string::npos) comma = csv.length();
+    std::string item = csv.substr(start, comma - start);
+    size_t a = item.find_first_not_of(" \t");
+    size_t b = item.find_last_not_of(" \t");
+    if (a != std::string::npos) {
+      item = item.substr(a, b - a + 1);
+      bool dup = false;
+      for (size_t i = 0; i < list.size(); i++) {
+        if (list[i] == item) { dup = true; break; }
+      }
+      if (!dup)
+        list.push_back(item);
+    }
+    start = comma + 1;
+  }
+}
+
+static bool InList(const std::vector<std::string>& list, const std::string& s)
+{
+  for (size_t i = 0; i < list.size(); i++) {
+    if (list[i] == s) return true;
+  }
+  return false;
+}
+
+// HTML for the two configuration states that make PriorityActive() false regardless of the
+// priority list itself: a fixed client SSID, or a Wifi mode other than client/apclient. Empty
+// when neither applies. Shared by OutputWifiPriority (GET and POST-error re-render) and
+// UpdateWifiPriority (the save-time warnlist) so the wording lives in one place.
+// Reads the *configured* (auto/*) values applied at boot, not the esp32wifi runtime state --
+// e.g. a `wifi mode client` shell command can diverge from these until the next restart, so
+// the wording says "configured" / "from the next restart" rather than asserting the feature
+// is inactive right now.
+static std::string PriorityInactiveWarning(PageContext_t& c)
+{
+  std::string html;
+  std::string autossid = MyConfig.GetParamValue("auto", "wifi.ssid.client");
+  std::string automode = MyConfig.GetParamValue("auto", "wifi.mode", "ap");
+  if (!autossid.empty()) {
+    html += "Priority networks will be inactive from the next restart: a fixed client SSID"
+            " (<code>" + c.encode_html(autossid) + "</code>) is configured. Clear it on the"
+            " <a href=\"/cfg/autostart\" target=\"#main\">Autostart configuration page</a>"
+            " to enable scanning mode.";
+  }
+  if (automode != "client" && automode != "apclient") {
+    if (!html.empty()) html += "<br>";
+    html += "Priority networks will be inactive from the next restart: the configured Wifi"
+            " mode is <code>" + c.encode_html(automode) + "</code>. Select client or access"
+            " point + client mode on the <a href=\"/cfg/autostart\" target=\"#main\">Autostart"
+            " configuration page</a>.";
+  }
+  return html;
+}
+
 /**
  * HandleCfgWifi: configure wifi networks (URL /cfg/wifi)
  */
@@ -43,6 +106,7 @@ void OvmsWebServer::HandleCfgWifi(PageEntry_t& p, PageContext_t& c)
     // process form submission:
     UpdateWifiTable(p, c, "ap", "wifi.ap", warn, error, 8);
     UpdateWifiTable(p, c, "client", "wifi.ssid", warn, error, 0);
+    UpdateWifiPriority(p, c, warn, error);
 
     cfg_sq_good           = atof(c.getvar("cfg_sq_good").c_str());
     cfg_sq_bad            = atof(c.getvar("cfg_sq_bad").c_str());
@@ -140,6 +204,10 @@ void OvmsWebServer::HandleCfgWifi(PageEntry_t& p, PageContext_t& c)
 
   c.fieldset_start("Wifi client networks");
   OutputWifiTable(p, c, "client", "wifi.ssid", MyConfig.GetParamValue("auto", "wifi.ssid.client"));
+  c.fieldset_end();
+
+  c.fieldset_start("Wifi priority networks");
+  OutputWifiPriority(p, c);
   c.fieldset_end();
 
   c.fieldset_start("Wifi client options");
@@ -387,13 +455,13 @@ void OvmsWebServer::UpdateWifiTable(PageEntry_t& p, PageContext_t& c, const std:
       pass = param->GetValue(ssid);
     if (pass == "") {
       if (i == pos_autostart)
-        error += "<li>Autostart SSID <code>" + ssid + "</code> has no password</li>";
+        error += "<li>Autostart SSID <code>" + c.encode_html(ssid) + "</code> has no password</li>";
       else
-        warn += "<li>SSID <code>" + ssid + "</code> has no password</li>";
+        warn += "<li>SSID <code>" + c.encode_html(ssid) + "</code> has no password</li>";
     }
     else if (pass.length() < pass_minlen) {
       sprintf(buf, "%d", pass_minlen);
-      error += "<li>SSID <code>" + ssid + "</code>: password is too short (min " + buf + " chars)</li>";
+      error += "<li>SSID <code>" + c.encode_html(ssid) + "</code>: password is too short (min " + buf + " chars)</li>";
     }
     newmap[ssid] = pass;
     if (param->IsDefined(ssid + ".ovms.staticip"))
@@ -410,4 +478,202 @@ void OvmsWebServer::UpdateWifiTable(PageEntry_t& p, PageContext_t& c, const std:
     if (ssid_autostart != "")
       MyConfig.SetParamValue("auto", "wifi.ssid." + prefix, ssid_autostart);
   }
+}
+
+void OvmsWebServer::OutputWifiPriority(PageEntry_t& p, PageContext_t& c)
+{
+  auto lock = MyConfig.Lock();
+  bool enable;
+  int interval;
+  std::string csv;
+
+  if (c.method == "POST") {
+    enable   = (c.getvar("cfg_priority_enable") == "yes");
+    interval = atoi(c.getvar("cfg_priority_interval").c_str());
+    csv      = c.getvar("cfg_priority");
+  }
+  else {
+    enable   = MyConfig.GetParamValueBool("network", "wifi.priority.enable", false);
+    interval = MyConfig.GetParamValueInt("network", "wifi.priority.interval", 60);
+    csv      = MyConfig.GetParamValue("network", "wifi.priority", "");
+  }
+
+  c.input_checkbox("Enable priority networks", "cfg_priority_enable", enable,
+    "<p>Prefer known networks in the order listed below. While connected to a lower ranked"
+    " network the module periodically rescans and upgrades to a higher ranked one when it is"
+    " in range with a good signal.</p>");
+
+  std::string inactive_warn = PriorityInactiveWarning(c);
+  if (!inactive_warn.empty()) {
+    c.print(
+      "<div class=\"form-group\"><div class=\"col-sm-12\"><div class=\"help-block text-warning\">"
+      + inactive_warn +
+      "</div></div></div>");
+  }
+
+  OvmsConfigParam* ssidparam = MyConfig.CachedParam("wifi.ssid");
+  std::vector<std::string> prio;
+  ParsePriorityCsv(csv, prio);
+
+  c.print(
+    "<div class=\"table-responsive\">"
+      "<table class=\"table table-condensed\" id=\"prio-table\">"
+        "<thead>"
+          "<tr>"
+            "<th width=\"10%\">Use</th>"
+            "<th width=\"12%\">Rank</th>"
+            "<th width=\"52%\">Network</th>"
+            "<th width=\"26%\">Order</th>"
+          "</tr>"
+        "</thead>"
+        "<tbody>");
+
+  auto gen_row = [&c](const std::string& ssid, bool checked, bool haspass) {
+    // a comma-bearing SSID can't be represented in the CSV priority list (it's the
+    // delimiter), so keep it unticked and prevent it from being ticked:
+    bool has_comma = ssid.find(',') != std::string::npos;
+    c.printf(
+          "<tr data-ssid=\"%s\">"
+            "<td><input type=\"checkbox\" class=\"prio-use\"%s%s></td>"
+            "<td class=\"prio-rank\"></td>"
+            "<td>%s%s%s</td>"
+            "<td>"
+              "<button type=\"button\" class=\"btn btn-default btn-xs prio-up\"><strong>&#9650;</strong></button> "
+              "<button type=\"button\" class=\"btn btn-default btn-xs prio-down\"><strong>&#9660;</strong></button>"
+            "</td>"
+          "</tr>"
+      , _attr(ssid)
+      , (checked && !has_comma) ? " checked" : ""
+      , has_comma ? " disabled" : ""
+      , _html(ssid)
+      , haspass ? "" : " <span class=\"text-warning\">(no saved password)</span>"
+      , has_comma ? " <span class=\"text-warning\">(cannot be prioritised: SSID contains a comma)</span>" : "");
+  };
+
+  // listed networks first, in priority order:
+  for (size_t i = 0; i < prio.size(); i++)
+    gen_row(prio[i], true, !ssidparam->GetValue(prio[i]).empty());
+
+  // then saved networks that are not on the list, alphabetically (map order):
+  for (auto const& kv : ssidparam->m_instances) {
+    if (endsWith(kv.first, ".ovms.staticip"))
+      continue;
+    if (InList(prio, kv.first))
+      continue;
+    gen_row(kv.first, false, !kv.second.empty());
+  }
+
+  c.printf(
+        "</tbody>"
+      "</table>"
+    "</div>"
+    "<input type=\"hidden\" name=\"cfg_priority\" id=\"cfg_priority\" value=\"%s\">"
+    , _attr(csv));
+
+  c.print(
+    "<script>"
+    "(function(){"
+      "var $t = $('#prio-table');"
+      "function refresh(){"
+        "var csv = [];"
+        "$t.find('tbody > tr').each(function(){"
+          "var $tr = $(this);"
+          "if ($tr.find('.prio-use').prop('checked')) {"
+            "csv.push($tr.attr('data-ssid'));"
+            "$tr.find('.prio-rank').text(csv.length);"
+          "} else {"
+            "$tr.find('.prio-rank').text('—');"
+          "}"
+        "});"
+        "$('#cfg_priority').val(csv.join(','));"
+      "}"
+      "$t.on('click', '.prio-up', function(){"
+        "var $tr = $(this).closest('tr'), $prev = $tr.prev();"
+        "if ($prev.length) { $tr.insertBefore($prev); refresh(); }"
+      "});"
+      "$t.on('click', '.prio-down', function(){"
+        "var $tr = $(this).closest('tr'), $next = $tr.next();"
+        "if ($next.length) { $tr.insertAfter($next); refresh(); }"
+      "});"
+      "$t.on('change', '.prio-use', refresh);"
+      "refresh();"
+    "})();"
+    "</script>");
+
+  c.input_slider("Upgrade-scan interval", "cfg_priority_interval", 3, "s", -1,
+    interval, 60, 10, 600, 1,
+    "<p>How often to rescan for a higher ranked network while connected to a lower ranked"
+    " one. Minimum 10 seconds.</p>");
+}
+
+void OvmsWebServer::UpdateWifiPriority(PageEntry_t& p, PageContext_t& c,
+  std::string& warn, std::string& error)
+{
+  auto lock = MyConfig.Lock();
+  OvmsConfigParam* ssidparam = MyConfig.CachedParam("wifi.ssid");
+
+  bool enable  = (c.getvar("cfg_priority_enable") == "yes");
+  int interval = atoi(c.getvar("cfg_priority_interval").c_str());
+  std::string csv = c.getvar("cfg_priority");
+  std::vector<std::string> prio;
+  ParsePriorityCsv(csv, prio);
+
+  if (interval < 10)
+    error += "<li data-input=\"cfg_priority_interval\">Upgrade-scan interval must be at least 10 seconds</li>";
+  if (enable && prio.empty())
+    error += "<li data-input=\"cfg_priority\">Enable priority networks: select at least one network</li>";
+  if (error != "")
+    return;
+
+  // listed but no stored credential -> SelectPriorityAP() will skip it:
+  for (size_t i = 0; i < prio.size(); i++) {
+    if (ssidparam->GetValue(prio[i]).empty()) {
+      warn += "<li>Priority network <code>" + c.encode_html(prio[i])
+            + "</code> has no saved password and will be skipped</li>";
+    }
+  }
+
+  if (enable) {
+    // saved but unlisted -> never joined while priority is on. Aggregated into one
+    // message on purpose: one warning per network trains the user to ignore the block.
+    std::string unlisted;
+    int n = 0;
+    for (auto const& kv : ssidparam->m_instances) {
+      if (endsWith(kv.first, ".ovms.staticip"))
+        continue;
+      if (InList(prio, kv.first))
+        continue;
+      if (n++) unlisted += ", ";
+      unlisted += "<code>" + c.encode_html(kv.first) + "</code>";
+    }
+    if (n) {
+      warn += "<li>While priority networks are enabled only listed networks are joined."
+              " These saved networks will be ignored: " + unlisted + "</li>";
+    }
+
+    // conditions that make PriorityActive() false regardless of the list:
+    std::string inactive_warn = PriorityInactiveWarning(c);
+    if (!inactive_warn.empty())
+      warn += "<li>" + inactive_warn + "</li>";
+  }
+
+  if (!enable)
+    MyConfig.DeleteInstance("network", "wifi.priority.enable");
+  else
+    MyConfig.SetParamValueBool("network", "wifi.priority.enable", enable);
+  if (prio.empty()) {
+    MyConfig.DeleteInstance("network", "wifi.priority");
+  }
+  else {
+    std::string out;
+    for (size_t i = 0; i < prio.size(); i++) {
+      if (i) out += ",";
+      out += prio[i];
+    }
+    MyConfig.SetParamValue("network", "wifi.priority", out);
+  }
+  if (interval == 60)
+    MyConfig.DeleteInstance("network", "wifi.priority.interval");
+  else
+    MyConfig.SetParamValueInt("network", "wifi.priority.interval", interval);
 }

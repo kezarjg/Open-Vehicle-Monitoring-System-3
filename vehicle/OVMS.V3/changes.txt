@@ -32,7 +32,10 @@ Open Vehicle Monitor System v3 - Change log
     user-defined order and, while connected to a lower-priority network, periodically scans and
     upgrades to a higher-priority one when it is in range with good signal (>= network wifi.sq.good).
     Active only in scan mode (no fixed client SSID) in client or apclient mode. Default off.
-    Hidden SSIDs cannot participate.
+    Hidden SSIDs cannot participate. The list can be configured from the web UI on the
+    Config → Wifi page, which also warns when the feature is inactive (fixed client SSID
+    or non-client Wifi mode), when a listed network has no saved password, and when a
+    saved network is not on the list.
   New configs:
     [network] wifi.priority.enable         -- [bool] enable WiFi priority network list (default: no)
     [network] wifi.priority                -- comma-separated SSIDs, highest priority first

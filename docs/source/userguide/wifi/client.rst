@@ -119,3 +119,31 @@ Optionally tune the upgrade-scan interval (default 60 seconds, minimum 10)::
   ``apclient`` WiFi mode.
 - Networks with hidden SSIDs cannot participate in priority ordering.
 - ``wifi status`` shows the current network's priority rank.
+
+Configuring priority networks from the web UI
+---------------------------------------------
+
+The priority list can be managed on the **Config → Wifi** page, in the
+*Wifi priority networks* section. Tick the networks to prioritise and use the
+▲/▼ buttons to order them; rank 1 is preferred. New entries can only be added
+from networks already saved under *Wifi client networks*, so an SSID cannot
+be mistyped — but an entry already on the priority list is still shown (and
+can be kept) even if its saved entry under *Wifi client networks* is later
+removed.
+
+Priority networks are inactive — regardless of the list — when either of
+these apply. The web page warns about each:
+
+- a fixed client SSID is configured on the Autostart page (the module then
+  connects to that SSID only, instead of scanning),
+- the Wifi mode is not *client* or *access point + client* (the mode defaults
+  to *access point*, so priority is inactive until you change it).
+
+Enabling priority networks without ticking at least one is rejected outright:
+the page reports an error and does not save, since an empty list can never
+be active.
+
+A listed network with no saved password is skipped, and while priority
+networks are enabled a saved network that is **not** on the list is never
+joined. As with ordinary scan mode, open (passwordless) networks cannot be
+joined at all.

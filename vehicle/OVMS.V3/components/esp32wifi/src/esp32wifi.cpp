@@ -1678,6 +1678,15 @@ void esp32wifi::OutputStatus(int verbosity, OvmsWriter* writer)
         writer->printf("  Priority: rank %d/%d - upgrade-scanning every %ds\n",
           cur+1, (int)m_priority_list.size(), m_priority_interval);
       }
+    else if (m_priority_enable)
+      {
+      // Enabled but not active: say why, otherwise the line simply vanishes exactly
+      // when the user is trying to work out why priority is doing nothing.
+      if (!m_sta_ssid.empty())
+        writer->printf("  Priority: inactive - fixed SSID configured\n");
+      else if (m_priority_list.empty())
+        writer->printf("  Priority: inactive - network list is empty\n");
+      }
     }
 
   if (m_mode == ESP32WIFI_MODE_AP || m_mode == ESP32WIFI_MODE_APCLIENT)
@@ -1724,6 +1733,8 @@ void esp32wifi::OutputStatus(int verbosity, OvmsWriter* writer)
     }
   }
 
+// Mirrored by web_cfg_wifi.cpp's ParsePriorityCsv(), so the web priority-list editor orders
+// and de-duplicates entries exactly the way this parser will; keep both in sync if this changes.
 void esp32wifi::ParsePriorityList(const std::string& csv)
   {
   m_priority_list.clear();

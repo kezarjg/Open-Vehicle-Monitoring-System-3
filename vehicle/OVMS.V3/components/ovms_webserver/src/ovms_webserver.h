@@ -575,6 +575,9 @@ class OvmsWebServer : public ExternalRamAllocated, MongooseClient
       const std::string autostart_ssid);
     static void UpdateWifiTable(PageEntry_t& p, PageContext_t& c, const std::string prefix, const std::string paramname,
       std::string& warn, std::string& error, int pass_minlen);
+    static void OutputWifiPriority(PageEntry_t& p, PageContext_t& c);
+    static void UpdateWifiPriority(PageEntry_t& p, PageContext_t& c,
+      std::string& warn, std::string& error);
     static void HandleCfgAutoInit(PageEntry_t& p, PageContext_t& c);
     static void HandleCfgFirmware(PageEntry_t& p, PageContext_t& c);
     static void HandleCfgPartitioning(PageEntry_t& p, PageContext_t& c);
