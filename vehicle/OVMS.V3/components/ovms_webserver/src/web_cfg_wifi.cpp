@@ -43,6 +43,7 @@ void OvmsWebServer::HandleCfgWifi(PageEntry_t& p, PageContext_t& c)
     // process form submission:
     UpdateWifiTable(p, c, "ap", "wifi.ap", warn, error, 8);
     UpdateWifiTable(p, c, "client", "wifi.ssid", warn, error, 0);
+    UpdateWifiPriority(p, c, warn, error);
 
     cfg_sq_good           = atof(c.getvar("cfg_sq_good").c_str());
     cfg_sq_bad            = atof(c.getvar("cfg_sq_bad").c_str());
@@ -140,6 +141,10 @@ void OvmsWebServer::HandleCfgWifi(PageEntry_t& p, PageContext_t& c)
 
   c.fieldset_start("Wifi client networks");
   OutputWifiTable(p, c, "client", "wifi.ssid", MyConfig.GetParamValue("auto", "wifi.ssid.client"));
+  c.fieldset_end();
+
+  c.fieldset_start("Wifi priority networks");
+  OutputWifiPriority(p, c);
   c.fieldset_end();
 
   c.fieldset_start("Wifi client options");
@@ -410,4 +415,53 @@ void OvmsWebServer::UpdateWifiTable(PageEntry_t& p, PageContext_t& c, const std:
     if (ssid_autostart != "")
       MyConfig.SetParamValue("auto", "wifi.ssid." + prefix, ssid_autostart);
   }
+}
+
+void OvmsWebServer::OutputWifiPriority(PageEntry_t& p, PageContext_t& c)
+{
+  auto lock = MyConfig.Lock();
+  bool enable;
+  int interval;
+
+  if (c.method == "POST") {
+    enable   = (c.getvar("cfg_priority_enable") == "yes");
+    interval = atoi(c.getvar("cfg_priority_interval").c_str());
+  }
+  else {
+    enable   = MyConfig.GetParamValueBool("network", "wifi.priority.enable", false);
+    interval = MyConfig.GetParamValueInt("network", "wifi.priority.interval", 60);
+  }
+
+  c.input_checkbox("Enable priority networks", "cfg_priority_enable", enable,
+    "<p>Prefer known networks in the order listed below. While connected to a lower ranked"
+    " network the module periodically rescans and upgrades to a higher ranked one when it is"
+    " in range with a good signal.</p>");
+
+  c.input_slider("Upgrade-scan interval", "cfg_priority_interval", 3, "s", -1,
+    interval, 60, 10, 600, 1,
+    "<p>How often to rescan for a higher ranked network while connected to a lower ranked"
+    " one. Minimum 10 seconds.</p>");
+}
+
+void OvmsWebServer::UpdateWifiPriority(PageEntry_t& p, PageContext_t& c,
+  std::string& warn, std::string& error)
+{
+  auto lock = MyConfig.Lock();
+
+  bool enable  = (c.getvar("cfg_priority_enable") == "yes");
+  int interval = atoi(c.getvar("cfg_priority_interval").c_str());
+
+  if (interval < 10) {
+    error += "<li data-input=\"cfg_priority_interval\">Upgrade-scan interval must be at least 10 seconds</li>";
+    return;
+  }
+
+  if (!enable)
+    MyConfig.DeleteInstance("network", "wifi.priority.enable");
+  else
+    MyConfig.SetParamValueBool("network", "wifi.priority.enable", enable);
+  if (interval == 60)
+    MyConfig.DeleteInstance("network", "wifi.priority.interval");
+  else
+    MyConfig.SetParamValueInt("network", "wifi.priority.interval", interval);
 }
