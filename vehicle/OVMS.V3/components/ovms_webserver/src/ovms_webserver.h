@@ -155,8 +155,8 @@ struct PageContext : public ExternalRamAllocated
   // output:
   void error(int code, const char* text);
   void head(int code, const char* headers=NULL);
-  void print(const std::string text);
-  void print(const extram::string text);
+  void print(const std::string& text);
+  void print(const extram::string& text);
   void print(const char* text);
   void printf(const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
   void done();
@@ -337,20 +337,62 @@ class HttpDataSender : public MgHandler
  * HttpStringSender transmits a std::string in HTTP chunks of XFER_CHUNK_SIZE size.
  * Note: the string is deleted after transmission.
  */
-class HttpStringSender : public MgHandler
+/**
+ * HttpStringSenderT: chunked transfer of a string the sender takes ownership of.
+ *  The string must not be modified during the transfer; the sender deletes both the
+ *  string and itself once the last chunk has gone out, and emits the terminating
+ *  zero-length chunk, so the caller must NOT also call PageContext::done().
+ *
+ *  Two instantiations are provided. Prefer HttpExtRamStringSender for file-sized
+ *  bodies so the payload sits in SPIRAM instead of internal 8-bit RAM.
+ */
+template <class StringType>
+class HttpStringSenderT : public MgHandler
 {
   public:
-    HttpStringSender(mg_connection* nc, std::string* msg, bool keepalive=true);
-    ~HttpStringSender();
+    HttpStringSenderT(mg_connection* nc, StringType* msg, bool keepalive=true)
+      : MgHandler(nc)
+    {
+      m_msg = msg;
+      m_sent = 0;
+      m_keepalive = keepalive;
+    }
+    ~HttpStringSenderT()
+    {
+      delete m_msg;
+    }
 
   public:
-    int HandleEvent(int ev, void* p);
+    int HandleEvent(int ev, void* p)
+    {
+      if (ev == MG_EV_SEND)                 // last transmission has finished
+      {
+        if (m_sent < m_msg->size()) {
+          // send next chunk:
+          size_t remain = m_msg->size() - m_sent;
+          size_t len = (remain < XFER_CHUNK_SIZE) ? remain : (size_t) XFER_CHUNK_SIZE;
+          mg_send_http_chunk(m_nc, (const char*) m_msg->data() + m_sent, len);
+          m_sent += len;
+        }
+        else {
+          // done:
+          if (!m_keepalive)
+            m_nc->flags |= MG_F_SEND_AND_CLOSE;
+          mg_send_http_chunk(m_nc, "", 0);
+          delete this;
+        }
+      }
+      return ev;
+    }
 
   public:
-    std::string*              m_msg = NULL;           // pointer to data
+    StringType*               m_msg = NULL;           // owned payload
     size_t                    m_sent = 0;             // size sent up to now
     bool                      m_keepalive = false;    // false = close connection when done
 };
+
+typedef HttpStringSenderT<std::string>      HttpStringSender;
+typedef HttpStringSenderT<extram::string>   HttpExtRamStringSender;
 
 
 /**
