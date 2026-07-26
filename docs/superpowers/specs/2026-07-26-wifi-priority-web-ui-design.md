@@ -182,3 +182,59 @@ There is no host-side test suite; the firmware only compiles in CI.
 - Editing credentials from the priority fieldset. Passwords stay in the client networks table;
   the priority list only references SSIDs.
 - Any change to the priority selection algorithm itself.
+
+## Validation (on-device, 2026-07-26)
+
+Bench module (Subaru Solterra, parked), firmware `9625b6f/ota_1` flashed via the launcher
+`/ota/upload` path to the default slot. Web tests driven through an authenticated session
+against the real `/cfg/wifi` form, replaying every field a browser sends so `UpdateWifiTable`
+never saw a truncated table.
+
+### Passed
+
+| # | Check | Evidence |
+|---|---|---|
+| — | Flash sticks to default slot | `9625b6f/ota_1`, running + boot partition `ota_1` |
+| — | Rank line renders | `Priority: rank 1/4 (top) - not scanning` |
+| 1 | Enable persists | `wifi.priority.enable: yes` after save |
+| 2 | Enable off **deletes** the instance | key absent, not stored as `no` |
+| 3 | Reorder persists | posted `Kezarnet,Vivo X,GL-AR750-1d8` → stored identically |
+| 4 | Interval 60 deletes on default | `wifi.priority.interval` absent; 30 restored |
+| 5 | Interval < 10 rejected | HTTP 400, "must be at least 10 seconds", config untouched |
+| 6 | Enable with empty list rejected | HTTP 400, "select at least one network", config untouched |
+| 7 | CLI-set list reflected in UI | 4 rows checked in exact priority order |
+| 8 | Orphan without credential | row flagged "(no saved password)" + warnlist entry |
+| 9 | Saved-but-unlisted | **one** aggregated warning naming `SRCGuest` |
+| 10 | Fixed client SSID | GET warning: "inactive from the next restart: a fixed client SSID (Kezarnet)" |
+| 13 | Empty list | `wifi status`: `Priority: inactive - network list is empty` |
+| 15 | Comma-bearing SSID | `Test,Comma` row rendered unchecked + **disabled** with explanatory note |
+| 16 | `wifi.mode = ap` (the default) | GET warning: "the configured Wifi mode is ap" |
+
+Also confirmed: write atomicity (both rejected POSTs left config byte-identical); the union row
+set preserves orphans rather than dropping them; an SSID containing a space (`Vivo X`)
+round-trips through the hidden CSV unchanged.
+
+Rows 10 and 16 jointly validate the GET-path warning added after the final review, including
+its "from the next restart" wording — the config is what changed, the runtime was not touched.
+
+### Not validated
+
+- **Row 12** (`wifi status` → `inactive - fixed SSID configured`). Requires a WiFi restart to
+  change the runtime `m_sta_ssid`; skipped deliberately after the incident below. Its sibling
+  branch (empty list, row 13) passed, and the two branches are a proven-exhaustive `else if`.
+- **Row 14** (numeric-looking SSID such as `1e5`). The defect this guards against is jQuery
+  `.data()` type coercion, which only manifests in a real browser; `curl` does not execute the
+  page JS. The `.attr('data-ssid')` guard is present and was reviewed.
+
+### Incident during testing
+
+The first reorder attempt posted a list with `SRCGuest` at rank 1. Upgrade-scan did exactly
+what it is built to do and left `Kezarnet`; `SRCGuest` was out of range so it selected rank 2,
+the operator's phone hotspot, and the module left the reachable subnet. It returned within
+seconds of that hotspot being switched off, and the baseline config was restored in full.
+
+No firmware fault — a test-design error. Reordering a live priority list over the very link
+that list controls is unsafe. Every subsequent reorder test pinned `Kezarnet` at rank 1, which
+proves the same behaviour with no connectivity risk. Incidentally this was an unplanned
+end-to-end confirmation that the save path works and the firmware acts on the new order within
+seconds, including correct fallback to the next-best in-range network.
