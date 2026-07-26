@@ -568,6 +568,7 @@ void OvmsWebServer::UpdateWifiPriority(PageEntry_t& p, PageContext_t& c,
   std::string& warn, std::string& error)
 {
   auto lock = MyConfig.Lock();
+  OvmsConfigParam* ssidparam = MyConfig.CachedParam("wifi.ssid");
 
   bool enable  = (c.getvar("cfg_priority_enable") == "yes");
   int interval = atoi(c.getvar("cfg_priority_interval").c_str());
@@ -581,6 +582,49 @@ void OvmsWebServer::UpdateWifiPriority(PageEntry_t& p, PageContext_t& c,
     error += "<li data-input=\"cfg_priority\">Enable priority networks: select at least one network</li>";
   if (error != "")
     return;
+
+  // listed but no stored credential -> SelectPriorityAP() will skip it:
+  for (size_t i = 0; i < prio.size(); i++) {
+    if (ssidparam->GetValue(prio[i]).empty()) {
+      warn += "<li>Priority network <code>" + c.encode_html(prio[i])
+            + "</code> has no saved password and will be skipped</li>";
+    }
+  }
+
+  if (enable) {
+    // saved but unlisted -> never joined while priority is on. Aggregated into one
+    // message on purpose: one warning per network trains the user to ignore the block.
+    std::string unlisted;
+    int n = 0;
+    for (auto const& kv : ssidparam->m_instances) {
+      if (endsWith(kv.first, ".ovms.staticip"))
+        continue;
+      if (InList(prio, kv.first))
+        continue;
+      if (n++) unlisted += ", ";
+      unlisted += "<code>" + c.encode_html(kv.first) + "</code>";
+    }
+    if (n) {
+      warn += "<li>While priority networks are enabled only listed networks are joined."
+              " These saved networks will be ignored: " + unlisted + "</li>";
+    }
+
+    // conditions that make PriorityActive() false regardless of the list:
+    std::string autossid = MyConfig.GetParamValue("auto", "wifi.ssid.client");
+    std::string automode = MyConfig.GetParamValue("auto", "wifi.mode", "ap");
+    if (!autossid.empty()) {
+      warn += "<li>Priority networks are inactive: a fixed client SSID (<code>"
+            + c.encode_html(autossid)
+            + "</code>) is configured. Clear it on the <a href=\"/cfg/autostart\" target=\"#main\">"
+              "Autostart configuration page</a> to enable scanning mode.</li>";
+    }
+    if (automode != "client" && automode != "apclient") {
+      warn += "<li>Priority networks are inactive: Wifi mode is <code>"
+            + c.encode_html(automode)
+            + "</code>. Select client or access point + client mode on the"
+              " <a href=\"/cfg/autostart\" target=\"#main\">Autostart configuration page</a>.</li>";
+    }
+  }
 
   if (!enable)
     MyConfig.DeleteInstance("network", "wifi.priority.enable");
