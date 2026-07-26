@@ -1810,7 +1810,6 @@ OvmsVehicle::vehicle_command_t OvmsVehicle::CommandStatTrip(int verbosity, OvmsW
     else
     {
       buf << std::setprecision(0);
-
     }
     buf
       << UnitConvert(WattHoursPK, consumUnit, wh_per_km) << consumUnitLabel
