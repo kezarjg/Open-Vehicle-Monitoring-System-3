@@ -814,12 +814,49 @@ Per-sample CSV columns
 The CSV is streamed to disk one row per second during active charging (``CHARGE_AC`` or
 ``CHARGE_DC``).  The header row defines the columns::
 
-    elapsed_s, soc_pct, delivered_kw, pack_v, pack_a, batt_temp_c, ambient_c, state,
-    station_max_kw, station_max_a, station_max_v, car_perm_kw, target_a,
-    grid_kw, present_v, present_a
+    phase, elapsed_s, soc_pct, bms_soc_pct, station_kw, battery_kw, hvac_kw,
+    pack_v, pack_a, batt_temp_c, ambient_c, state,
+    station_max_kw, station_max_a, station_max_v,
+    car_perm_kw, car_target_a,
+    station_grid_kw, station_present_v, station_present_a, obc_kw
 
-Where ``state`` is ``AC`` or ``DC`` and ``grid_kw`` / ``present_v`` / ``present_a`` are
-grid input power and DC station telemetry respectively (zero when not applicable).
+Grouped by what each column represents:
+
+* **Session position** — ``phase`` (1-based; a plug-in can contain several charge phases
+  separated by a pause) and ``elapsed_s`` (seconds since the session opened, not since
+  the phase).
+* **State of charge** — ``soc_pct`` as the vehicle reports it, ``bms_soc_pct`` as the BMS
+  does; the two differ, which is why both are recorded.
+* **Actual power** — ``station_kw`` drawn from the EVSE, ``battery_kw`` into the pack,
+  ``hvac_kw`` into the cabin.  These are measurements, not a split of one figure: the
+  difference between them is losses plus anything else the car is running.
+* **Pack** — ``pack_v``, ``pack_a``, ``batt_temp_c``, plus ``ambient_c`` (empty, not
+  ``0.0``, until the first in-charge reading arrives roughly 30 s in — an empty field is
+  distinguishable from a genuine 0 °C).
+* **``state``** — ``AC`` or ``DC``.
+* **The station's caps** — ``station_max_kw`` / ``_a`` / ``_v``.
+* **The car's asks** — ``car_perm_kw`` (DID ``0x16A1``) and ``car_target_a``
+  (DID ``0x166D``), both from the Plug-In Control / OBC ECU (``0x745``).  ``car_perm_kw``
+  is stored **signed** and reads negative while charging.
+* **Raw station telemetry** — ``station_grid_kw``, ``station_present_v``,
+  ``station_present_a`` (zero when not applicable).
+* **``obc_kw``** — diagnostic only: the raw DID ``0x10D4`` reading, which under-reads on
+  DC charging.  Use ``battery_kw`` for real power.
+
+.. note::
+
+   **Parse by header name, not by column index.**  The column set has grown across
+   releases and one column (``phase``) was inserted at the front rather than appended, so
+   positional parsers written against an older file will silently misread every field.
+   The header row is authoritative and is written at the top of every file, so a
+   name-based reader stays correct across all versions.
+
+   For reference when handling older files: the original layout had 16 columns beginning
+   with ``elapsed_s``; ``phase`` and ``bms_soc_pct`` were added later, the single
+   ``delivered_kw`` column was replaced by the separate ``station_kw`` / ``battery_kw`` /
+   ``hvac_kw`` measurements, ``obc_kw`` was added at the end, and ``target_a`` / ``grid_kw``
+   / ``present_v`` / ``present_a`` were renamed to their ``car_`` and ``station_``
+   prefixed forms.
 
 Metrics
 =======
