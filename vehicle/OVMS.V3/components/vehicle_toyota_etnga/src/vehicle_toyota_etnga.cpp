@@ -5,7 +5,23 @@
 
    (C) 2023       Jerry Kezar <solterra@kezarnet.com>
 
-   Licensed under the MIT License. See the LICENSE file for details.
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+   THE SOFTWARE.
 */
 
 #include "ovms_log.h"
@@ -238,21 +254,6 @@ void OvmsVehicleToyotaETNGA::Ticker1(uint32_t ticker)
     // state. The base 12V monitor in VehicleTicker1() samples v.b.12v.voltage.ref from this flag
     // later in the same tick, so it must be fresh before that runs.
     UpdateCharging12v();
-
-    if (StandardMetrics.ms_v_charge_inprogress->AsBool()) {
-        ESP_LOGV(CHARGING_TAG, "%.0f, %.2f, %.4f, %.0f, %.2f, %.2f, %.2f, %.2f, %.0f, %.2f, %.4f",
-                StandardMetrics.ms_v_bat_voltage->AsFloat(),
-                StandardMetrics.ms_v_bat_current->AsFloat(),
-                StandardMetrics.ms_v_bat_power->AsFloat(),
-                StandardMetrics.ms_v_env_temp->AsFloat(),
-                StandardMetrics.ms_v_bat_pack_tavg->AsFloat(),
-                StandardMetrics.ms_v_bat_pack_tmax->AsFloat(),
-                StandardMetrics.ms_v_bat_pack_tmin->AsFloat(),
-                StandardMetrics.ms_v_bat_pack_tstddev->AsFloat(),
-                StandardMetrics.ms_v_bat_soc->AsFloat(),
-                m_v_bat_soc_bms->AsFloat(),
-                StandardMetrics.ms_v_charge_power->AsFloat());
-    }
 
     //ESP_LOGI(TAG, "Entering Ticker1: %d", ticker);
     ResetStaleMetrics();
