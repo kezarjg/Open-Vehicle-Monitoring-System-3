@@ -426,13 +426,13 @@ void OvmsWebServer::UpdateWifiTable(PageEntry_t& p, PageContext_t& c, const std:
       pass = param->GetValue(ssid);
     if (pass == "") {
       if (i == pos_autostart)
-        error += "<li>Autostart SSID <code>" + ssid + "</code> has no password</li>";
+        error += "<li>Autostart SSID <code>" + c.encode_html(ssid) + "</code> has no password</li>";
       else
-        warn += "<li>SSID <code>" + ssid + "</code> has no password</li>";
+        warn += "<li>SSID <code>" + c.encode_html(ssid) + "</code> has no password</li>";
     }
     else if (pass.length() < pass_minlen) {
       sprintf(buf, "%d", pass_minlen);
-      error += "<li>SSID <code>" + ssid + "</code>: password is too short (min " + buf + " chars)</li>";
+      error += "<li>SSID <code>" + c.encode_html(ssid) + "</code>: password is too short (min " + buf + " chars)</li>";
     }
     newmap[ssid] = pass;
     if (param->IsDefined(ssid + ".ovms.staticip"))
