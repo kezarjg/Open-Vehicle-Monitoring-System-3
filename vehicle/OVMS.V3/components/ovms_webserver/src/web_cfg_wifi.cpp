@@ -622,14 +622,6 @@ void OvmsWebServer::UpdateWifiPriority(PageEntry_t& p, PageContext_t& c,
     error += "<li data-input=\"cfg_priority_interval\">Upgrade-scan interval must be at least 10 seconds</li>";
   if (enable && prio.empty())
     error += "<li data-input=\"cfg_priority\">Enable priority networks: select at least one network</li>";
-  // guard against a crafted POST bypassing the disabled checkbox in gen_row(); a comma
-  // can never legitimately survive ParsePriorityCsv() since it's the field's delimiter:
-  for (size_t i = 0; i < prio.size(); i++) {
-    if (prio[i].find(',') != std::string::npos) {
-      error += "<li>Priority network <code>" + c.encode_html(prio[i])
-              + "</code> cannot be prioritised: SSID contains a comma</li>";
-    }
-  }
   if (error != "")
     return;
 
