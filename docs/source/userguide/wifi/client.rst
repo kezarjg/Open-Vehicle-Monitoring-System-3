@@ -133,7 +133,8 @@ apply. The web page warns about each:
 
 - a fixed client SSID is configured on the Autostart page (the module then
   connects to that SSID only, instead of scanning),
-- the Wifi mode is not *client* or *access point + client*,
+- the Wifi mode is not *client* or *access point + client* (the mode defaults
+  to *access point*, so priority is inactive until you change it),
 - the priority list is empty.
 
 A listed network with no saved password is skipped, and while priority
