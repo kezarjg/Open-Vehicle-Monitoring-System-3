@@ -47,6 +47,170 @@ Others                      VIN
    per-cell history, deviation flags, and pack statistics work across pack variants (96-cell
    2022-24; 78-cell and 104-cell 2025/26 refresh). Only the 96-cell pack is on-vehicle validated.
 
+Validation status
+=================
+
+e-TNGA is developed against a single available vehicle — a 96-cell Subaru Solterra.  Much of
+the decode logic is therefore derived from CAN reverse engineering rather than confirmed
+against an independent reference, and several pack and charging variants have no hardware
+behind them at all.  This table records which of the behaviours described elsewhere in these
+docs have actually been observed on a car, so that a measured behaviour can be told apart
+from an inferred one.  The vehicle pages built on this base inherit these statuses.
+
+Vehicle-validated
+   Observed on a real vehicle, with the date of the session that confirmed it.
+
+Vehicle-validated (partial)
+   Confirmed on some code paths but not all; the unexercised path is named in the
+   Evidence / gap column.
+
+Log-inferred
+   Decoded from captured CAN traffic or module logs and self-consistent, but never
+   cross-checked against an independent ground truth — a scan tool, a published
+   specification, or a physically known value.
+
+Unvalidated
+   Reasoned from a specification, an analogous DID, or another platform.  Never
+   exercised on hardware.
+
+Last reviewed: 2026-07-26.
+
+State machine and sleep
+-----------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 22 46
+
+   * - Behaviour
+     - Status
+     - Evidence / gap
+   * - ``SLEEP`` / ``AWAKE`` / ``DRIVING`` transitions
+     - Vehicle-validated
+     - Continuous daily-driver use since 2026-06, including the ``AWAKE → DRIVING``
+       edge driven by ``0x10D1`` on the Plug-In Control ECU.
+   * - ``v.e.awake`` decoupled from CAN2 bus-liveness
+     - Vehicle-validated (partial)
+     - A 14.6 kWh charge on 2026-07-13 produced zero spurious "Vehicle is idling"
+       alerts.  The **true-positive** path — a genuine idle alert that *should*
+       fire — remains unexercised.
+   * - Adaptive parked-sleep cooldown backoff
+     - Unvalidated
+     - Merged, but the escalating cooldown has never been confirmed on a vehicle.
+
+Charging
+--------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 22 46
+
+   * - Behaviour
+     - Status
+     - Evidence / gap
+   * - AC path (``CHARGE_HANDSHAKE`` → ``CHARGE_WAIT`` → ``CHARGE_AC``)
+     - Vehicle-validated
+     - Many sessions.  Multi-phase pause/resume within one plug-in confirmed
+       2026-06-24 (report ``20260624T002537Z``, ``Phases: 2``, energy reconciling
+       across phases).
+   * - DC path (``CHARGE_DC``)
+     - Vehicle-validated
+     - 16 of 16 DC fast charges on the 2026-07-20 road trip.
+   * - Charge port ``v.d.cp`` latched at handshake
+     - Vehicle-validated (partial)
+     - Confirmed for plug-in while already ``AWAKE``.  The plug-in that *wakes the
+       module from* ``SLEEP`` — the case the fix was written for, where PISW
+       ``0x1669`` at 5 s beats the lid signal ``0x1625`` at 10 s — is unvalidated.
+   * - ``v.c.type`` AC (``type1`` / ``type2``)
+     - Vehicle-validated
+     - Read correctly across AC sessions.
+   * - ``v.c.type`` DC (``ccs``)
+     - Unvalidated
+     - DC sessions have occurred since the change merged, but the ``ccs`` value was
+       never checked in the logs.  A cheap gap to close on the next DC charge.
+   * - Charge power derived from pack V×I
+     - Vehicle-validated
+     - Energy reconciliation on 2026-06-24: 88% efficiency, station 0.17 kWh ≈
+       battery 0.15 kWh, replacing earlier 52%/158% garbage.
+   * - Charge-fault diagnostic DID dump
+     - Vehicle-validated
+     - A real ``0x29`` fault on 2026-06-24 fired the dump, labelled the triggering
+       outcome correctly, and rendered decoded values.
+   * - CAN-stale logging/accounting suspend
+     - Vehicle-validated
+     - A real lock produced an 85 s CSV gap with no stale rows, 2026-06-24.
+   * - DC limiting-side attribution (car vs station)
+     - Unvalidated
+     - Merged without DC verification.  Only the AC path — correctly emitting no
+       "Limiting" row — has been seen.  Thresholds (2 kW margin, 25 °C cold-battery)
+       are provisional and expected to need tuning against real data.
+   * - Charge-power DID scale factors
+     - Log-inferred
+     - Units inferred by analogy to the ``0x161D`` grid-power DID; already flagged
+       ``(unit inferred)`` in :doc:`state_machine`.
+   * - HLC handshake (``0x1666``) and AC-Op (``0x1684``) enum labels
+     - Log-inferred
+     - Labels come from CAN reverse engineering.  They render correctly in the
+       2026-06-24 fault dump, but the enum *semantics* have not been cross-checked
+       against a scan tool.
+   * - Ambient temperature during charge (``0x1F46``, HCS ECU)
+     - Log-inferred
+     - Selected because the A/C ECU ``0x7C4`` sleeps while charging.  Returns a
+       plausible value; never compared against a known ambient reading.
+
+Battery and 12V
+---------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 22 46
+
+   * - Behaviour
+     - Status
+     - Evidence / gap
+   * - 96-cell pack arrangement and per-cell decode
+     - Vehicle-validated
+     - ``bms status`` on 2026-06-23 reported exactly 96 cells in 4 modules of 24,
+       24 temperature sensors at 6 per module, 0 warnings and 0 alerts.
+   * - 78-cell and 104-cell pack variants
+     - Unvalidated
+     - No such hardware available; both are reasoned from published pack specs.
+       The runtime auto-arrange is deliberately **grow-only** — it cannot shrink,
+       because a short reply is indistinguishable from a truncated one.
+   * - Capacity arrays ``0x1D3E`` / ``0x1D3F`` (HV Battery ECU ``0x747``/``0x74F``)
+     - Log-inferred
+     - Five weeks of logs show ``0x1D3E`` declining monotonically — a good
+       ``v.b.cac`` candidate — while ``0x1D3F`` re-latches each cycle with no trend.
+       Semantics unconfirmed, which is why neither is exposed as ``v.b.cac``.
+   * - ``v.e.charging12v`` union rule
+     - Vehicle-validated
+     - 2026-07-20 road trip closed the last two gaps: the ``CHARGE_DC`` term
+       (16/16 fast charges) and the 12V rising-edge wake trigger (4 clean fires).
+   * - 12V current from ``0x15F7`` (EV-ECU ``0x7D2``)
+     - Vehicle-validated (partial)
+     - Direct read confirmed on-module 2026-06-21 after the dead ``0x15FD`` was
+       replaced.  The under-load swing is still unexercised.
+
+Driver inputs and TPMS
+----------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 22 46
+
+   * - Behaviour
+     - Status
+     - Evidence / gap
+   * - TPMS pressures and temperatures
+     - Vehicle-validated
+     - Two drive sessions on 2026-06-04 polled cleanly via the gateway relay
+       (target ``0x750``, sub-target ``0x2A``): ~280→310 kPa, 34–38 °C, no
+       timeouts.  Zeros only before the sensors wake at drive start.
+   * - Throttle, drive mode, AWD, foot brake, park brake (Brake/EPB ECU ``0x7B0``)
+     - Unvalidated
+     - Merged but never checked against the car.  The foot-brake full-scale value
+       in particular is expected to need retuning.
+
 PID Polling Logic
 =================
 
