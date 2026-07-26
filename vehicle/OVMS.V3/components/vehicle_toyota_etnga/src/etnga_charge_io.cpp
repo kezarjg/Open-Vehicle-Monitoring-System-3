@@ -18,7 +18,7 @@
 #include "ovms_log.h"
 #include "vehicle_toyota_etnga.h"
 
-static const char* TAG = "v-toyota-etnga";
+static const char* TAG = "v-etnga";
 
 static const int CHARGE_REPORT_MAX = 50;   // retain at most this many reports (moved from etnga_charge_report.cpp)
 
