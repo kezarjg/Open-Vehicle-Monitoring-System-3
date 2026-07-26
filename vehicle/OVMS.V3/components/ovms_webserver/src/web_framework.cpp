@@ -179,11 +179,11 @@ void PageContext::head(int code, const char* headers /*=NULL*/) {
   mg_send_head(nc, code, -1, headers);
 }
 
-void PageContext::print(const std::string text) {
+void PageContext::print(const std::string& text) {
   mg_send_http_chunk(nc, text.data(), text.size());
 }
 
-void PageContext::print(const extram::string text) {
+void PageContext::print(const extram::string& text) {
   mg_send_http_chunk(nc, text.data(), text.size());
 }
 

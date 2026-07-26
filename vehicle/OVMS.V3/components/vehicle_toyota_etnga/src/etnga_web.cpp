@@ -568,8 +568,15 @@ void OvmsVehicleToyotaETNGA::WebChargeReport(PageEntry_t& p, PageContext_t& c)
         c.head(200, "Content-Type: text/csv; charset=utf-8\r\nContent-Disposition: attachment");
     else
         c.head(200, "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-cache");
-    c.print(content);
-    c.done();
+
+    // Stream the body in XFER_CHUNK_SIZE pieces rather than appending the whole file to the
+    // connection send buffer. A session CSV can reach several MB, and buffering it whole held
+    // three concurrent copies (the load_file target, the print() argument, and the mbuf).
+    // Ownership passes to the sender, which frees the body and itself when the transfer ends
+    // and emits the terminating chunk — so there is deliberately no c.done() here.
+    extram::string* body = new extram::string();
+    body->swap(content);
+    new HttpExtRamStringSender(c.nc, body);
 }
 
 #endif // CONFIG_OVMS_COMP_WEBSERVER
