@@ -818,7 +818,8 @@ The CSV is streamed to disk one row per second during active charging (``CHARGE_
     pack_v, pack_a, batt_temp_c, ambient_c, state,
     station_max_kw, station_max_a, station_max_v,
     car_perm_kw, car_target_a,
-    station_grid_kw, station_present_v, station_present_a, obc_kw
+    station_grid_kw, station_present_v, station_present_a, obc_kw,
+    batt_tmin_c, batt_tmax_c
 
 Grouped by what each column represents:
 
@@ -833,6 +834,12 @@ Grouped by what each column represents:
 * **Pack** — ``pack_v``, ``pack_a``, ``batt_temp_c``, plus ``ambient_c`` (empty, not
   ``0.0``, until the first in-charge reading arrives roughly 30 s in — an empty field is
   distinguishable from a genuine 0 °C).
+* **Pack temperature spread** — ``batt_tmin_c`` and ``batt_tmax_c``, the coolest and
+  hottest of the pack's temperature sensors.  ``batt_temp_c`` is their **mean**, and the
+  spread is not negligible: roughly 3 °C between coolest and hottest even during a gentle
+  AC charge.  A BMS derates on its **hottest** sensor, so a charging curve should be keyed
+  to ``batt_tmax_c`` rather than the mean.  Both read ``0.0`` until the first temperature
+  reply of the session arrives.
 * **``state``** — ``AC`` or ``DC``.
 * **The station's caps** — ``station_max_kw`` / ``_a`` / ``_v``.
 * **The car's asks** — ``car_perm_kw`` (DID ``0x16A1``) and ``car_target_a``

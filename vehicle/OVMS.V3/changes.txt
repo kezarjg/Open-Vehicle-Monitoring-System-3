@@ -1,6 +1,12 @@
 Open Vehicle Monitor System v3 - Change log
 
 ????-??-?? ???  ???????  OTA release
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the charge-session CSV now also records the
+    coolest and hottest pack temperature sensors ("batt_tmin_c" / "batt_tmax_c") alongside the
+    existing average. The battery derates on its hottest sensor, so charging-curve analysis
+    should use the maximum rather than the average — the two differ by around 3 degrees C even
+    on a gentle AC charge. The new columns are added at the end of each row, so existing
+    tooling that reads the file is unaffected.
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): per-cell battery voltages are now read during
     AC charging (every 60 seconds), so the BMS cell monitor keeps updating and per-cell deviation
     alerts stay active through a charge. Previously cell voltages were only read while driving and

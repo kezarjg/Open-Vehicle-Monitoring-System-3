@@ -386,10 +386,16 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
         //   actuals         : station_kw (from EVSE), battery_kw (into battery), hvac_kw (into cabin),
         //                     plus raw station_grid_kw / station_present_v / station_present_a
         //   obc_kw          : diagnostic — raw 0x10D4 (under-reads on DC, issue #109)
+        //   pack temps      : batt_temp_c is the MEAN of all sensors; batt_tmin_c/_tmax_c are
+        //                     the coolest/hottest. The BMS derates on the hottest sensor, so a
+        //                     charging curve must be keyed to batt_tmax_c, not the mean (#155).
+        // New columns are APPENDED — never inserted. Nothing in-tree parses these files, but
+        // external decoders read them positionally, and `phase` was already prepended once.
         m_charge_session.csv_buf =
             "phase,elapsed_s,soc_pct,bms_soc_pct,station_kw,battery_kw,hvac_kw,pack_v,pack_a,"
             "batt_temp_c,ambient_c,state,station_max_kw,station_max_a,station_max_v,"
-            "car_perm_kw,car_target_a,station_grid_kw,station_present_v,station_present_a,obc_kw\n";
+            "car_perm_kw,car_target_a,station_grid_kw,station_present_v,station_present_a,obc_kw,"
+            "batt_tmin_c,batt_tmax_c\n";
         m_charge_session.csv_started = true;
     }
 
@@ -400,7 +406,7 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
     char amb[16] = "";
     if (StandardMetrics.ms_v_env_temp->IsDefined())
         snprintf(amb, sizeof(amb), "%.1f", StandardMetrics.ms_v_env_temp->AsFloat());
-    char row[320];
+    char row[384];
     float present_v = StandardMetrics.ms_v_charge_voltage->AsFloat();
     float present_a = StandardMetrics.ms_v_charge_current->AsFloat();
     float grid_kw   = m_v_charge_grid_power->AsFloat();
@@ -408,7 +414,7 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
     int phase_no = (m_charge_session.cur >= 0) ? (m_charge_session.cur + 1) : 0;
     snprintf(row, sizeof(row),
         "%d,%d,%.0f,%.1f,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%s,%s,"
-        "%.2f,%.0f,%.0f,%.2f,%.0f,%.3f,%.0f,%.0f,%.3f\n",
+        "%.2f,%.0f,%.0f,%.2f,%.0f,%.3f,%.0f,%.0f,%.3f,%.1f,%.1f\n",
         phase_no,
         elapsed,
         StandardMetrics.ms_v_bat_soc->AsFloat(),
@@ -424,7 +430,11 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
         m_v_charge_sta_max_p->AsFloat(), m_v_charge_sta_max_i->AsFloat(), m_v_charge_sta_max_v->AsFloat(),
         m_v_charge_perm->AsFloat(), m_v_charge_tgti->AsFloat(),
         grid_kw, present_v, present_a,
-        m_charge_obc_kw);
+        m_charge_obc_kw,
+        // Populated by BmsSetCellTemperature on every 0x1814 reply, so no new poll is
+        // needed. Both read 0 until the first reply of the session arrives.
+        StandardMetrics.ms_v_bat_pack_tmin->AsFloat(),
+        StandardMetrics.ms_v_bat_pack_tmax->AsFloat());
     m_charge_session.csv_buf += row;
 
     // Flush at most every 30 s (or ~4 KB): a 1 Hz open/append/close per row would put
