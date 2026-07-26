@@ -90,10 +90,13 @@ State machine and sleep
      - Continuous daily-driver use since 2026-06, including the ``AWAKE → DRIVING``
        edge driven by ``0x10D1`` on the Plug-In Control ECU.
    * - ``v.e.awake`` decoupled from CAN2 bus-liveness
-     - Vehicle-validated (partial)
+     - Vehicle-validated
      - A 14.6 kWh charge on 2026-07-13 produced zero spurious "Vehicle is idling"
-       alerts.  The **true-positive** path — a genuine idle alert that *should*
-       fire — remains unexercised.
+       alerts.  The true-positive path is confirmed as well: over the following
+       week exactly two alerts fired (2026-07-16 18:43 and 2026-07-18 14:00), both
+       with the vehicle stationary, parked, **not** charging and drawing
+       1.0–3.1 kW — the genuine idling condition — against hourly spam before
+       the fix.
    * - Adaptive parked-sleep cooldown backoff
      - Unvalidated
      - Merged, but the escalating cooldown has never been confirmed on a vehicle.
@@ -115,7 +118,8 @@ Charging
        across phases).
    * - DC path (``CHARGE_DC``)
      - Vehicle-validated
-     - 16 of 16 DC fast charges on the 2026-07-20 road trip.
+     - Repeated DC fast charges across the 2026-07-16→19 road trip, including
+       sessions of 50.58 kWh (6%→84%) and 28.01 kWh (35%→76%).
    * - Charge port ``v.d.cp`` latched at handshake
      - Vehicle-validated (partial)
      - Confirmed for plug-in while already ``AWAKE``.  The plug-in that *wakes the
@@ -125,9 +129,10 @@ Charging
      - Vehicle-validated
      - Read correctly across AC sessions.
    * - ``v.c.type`` DC (``ccs``)
-     - Unvalidated
-     - DC sessions have occurred since the change merged, but the ``ccs`` value was
-       never checked in the logs.  A cheap gap to close on the next DC charge.
+     - Vehicle-validated
+     - 27 ``*-LOG-Grid`` notification records across the 2026-07-16→19 road trip
+       carry ``ccs`` in the charge-type field, paired with ``charging`` /
+       ``stopped`` states at distinct highway locations.
    * - Charge power derived from pack V×I
      - Vehicle-validated
      - Energy reconciliation on 2026-06-24: 88% efficiency, station 0.17 kWh ≈
@@ -140,10 +145,12 @@ Charging
      - Vehicle-validated
      - A real lock produced an 85 s CSV gap with no stale rows, 2026-06-24.
    * - DC limiting-side attribution (car vs station)
-     - Unvalidated
-     - Merged without DC verification.  Only the AC path — correctly emitting no
-       "Limiting" row — has been seen.  Thresholds (2 kW margin, 25 °C cold-battery)
-       are provisional and expected to need tuning against real data.
+     - Vehicle-validated
+     - 15 classifications on real DC sessions over 2026-07-16→19, exercising
+       **both** branches: 14 × "limited by car" (46.3–78.6 kW, consistent with
+       battery taper) and 1 × "limited by station (100.0 kW)".  The thresholds
+       (2 kW margin, 25 °C cold-battery) remain untuned against ground truth —
+       there is no station nameplate data to check the 100.0 kW figure against.
    * - Charge-power DID scale factors
      - Log-inferred
      - Units inferred by analogy to the ``0x161D`` grid-power DID; already flagged
@@ -184,8 +191,9 @@ Battery and 12V
        Semantics unconfirmed, which is why neither is exposed as ``v.b.cac``.
    * - ``v.e.charging12v`` union rule
      - Vehicle-validated
-     - 2026-07-20 road trip closed the last two gaps: the ``CHARGE_DC`` term
-       (16/16 fast charges) and the 12V rising-edge wake trigger (4 clean fires).
+     - The 2026-07-16→20 road trip closed the last two gaps: the ``CHARGE_DC``
+       term (16 of 16 fast charges) and the 12V rising-edge wake trigger (4 clean
+       fires).
    * - 12V current from ``0x15F7`` (EV-ECU ``0x7D2``)
      - Vehicle-validated (partial)
      - Direct read confirmed on-module 2026-06-21 after the dead ``0x15FD`` was
@@ -206,10 +214,19 @@ Driver inputs and TPMS
      - Two drive sessions on 2026-06-04 polled cleanly via the gateway relay
        (target ``0x750``, sub-target ``0x2A``): ~280→310 kPa, 34–38 °C, no
        timeouts.  Zeros only before the sensors wake at drive start.
-   * - Throttle, drive mode, AWD, foot brake, park brake (Brake/EPB ECU ``0x7B0``)
+   * - Throttle, foot brake and park brake (Brake/EPB ECU ``0x7B0``)
+     - Vehicle-validated
+     - Throttle logged 90,752 change events spanning 0–100%, foot brake 11,239
+       events spanning 0–100% (mean 22%), park brake 163 Applied / 151 Released.
+       The foot brake does reach full scale, so the suspected scaling problem
+       appears unfounded.
+   * - Drive mode and AWD mode (Brake/EPB ECU ``0x7B0``)
      - Unvalidated
-     - Merged but never checked against the car.  The foot-brake full-scale value
-       in particular is expected to need retuning.
+     - Neither metric has produced a single change event in any captured log,
+       while sibling metrics decoded from the same ECU logged tens of thousands.
+       This is consistent with a driver who simply never changes mode, but the
+       decode is unexercised either way.  Cheapest possible check: change drive
+       mode once and watch for the log line.
 
 PID Polling Logic
 =================
