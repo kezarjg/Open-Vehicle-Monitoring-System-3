@@ -571,16 +571,32 @@ void OvmsWebServer::UpdateWifiPriority(PageEntry_t& p, PageContext_t& c,
 
   bool enable  = (c.getvar("cfg_priority_enable") == "yes");
   int interval = atoi(c.getvar("cfg_priority_interval").c_str());
+  std::string csv = c.getvar("cfg_priority");
+  std::vector<std::string> prio;
+  ParsePriorityCsv(csv, prio);
 
-  if (interval < 10) {
+  if (interval < 10)
     error += "<li data-input=\"cfg_priority_interval\">Upgrade-scan interval must be at least 10 seconds</li>";
+  if (enable && prio.empty())
+    error += "<li data-input=\"cfg_priority\">Enable priority networks: select at least one network</li>";
+  if (error != "")
     return;
-  }
 
   if (!enable)
     MyConfig.DeleteInstance("network", "wifi.priority.enable");
   else
     MyConfig.SetParamValueBool("network", "wifi.priority.enable", enable);
+  if (prio.empty()) {
+    MyConfig.DeleteInstance("network", "wifi.priority");
+  }
+  else {
+    std::string out;
+    for (size_t i = 0; i < prio.size(); i++) {
+      if (i) out += ",";
+      out += prio[i];
+    }
+    MyConfig.SetParamValue("network", "wifi.priority", out);
+  }
   if (interval == 60)
     MyConfig.DeleteInstance("network", "wifi.priority.interval");
   else
