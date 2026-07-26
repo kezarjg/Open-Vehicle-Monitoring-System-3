@@ -70,3 +70,6 @@ vehicle/OVMS.V3/components/ovms_webserver/assets/charts.js.gz
 # Local secrets sourced by helper scripts (never commit)
 scripts/.env
 .env
+
+# Brainstorming visual-companion scratch (mockups, session state)
+.superpowers/
