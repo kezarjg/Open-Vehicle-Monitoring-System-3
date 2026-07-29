@@ -659,9 +659,18 @@ static void OutputPluginEditor(PageEntry_t& p, PageContext_t& c)
             "</div>\n"
             "<textarea class=\"form-control fullwidth font-monospace\" rows=\"20\"\n"
               "autocapitalize=\"none\" autocorrect=\"off\" autocomplete=\"off\" spellcheck=\"false\"\n"
-              "id=\"input-content\" name=\"content\">%s</textarea>\n"
-          "</div>\n"
-          , c.encode_html(content).c_str());
+              "id=\"input-content\" name=\"content\">");
+
+  // Emit the body separately rather than as a printf argument: PageContext::printf formats
+  // through vasprintf(), which allocates the entire formatted result with plain malloc() --
+  // internal 8-bit RAM, of which a running module has only tens of kB free. Feeding the
+  // plugin source through it made that allocation scale with the file. print() hands the
+  // (SPIRAM-resident) escaped string straight to mg_send_http_chunk instead.
+  c.print(c.encode_html(content));
+
+  c.print(
+            "</textarea>\n"
+          "</div>\n");
 
   c.print(
           "<div class=\"text-center\">\n"
@@ -927,7 +936,16 @@ void OvmsWebServer::HandleEditor(PageEntry_t& p, PageContext_t& c)
             "</div>\n"
             "<textarea class=\"form-control fullwidth font-monospace\" rows=\"20\"\n"
               "autocapitalize=\"none\" autocorrect=\"off\" autocomplete=\"off\" spellcheck=\"false\"\n"
-              "id=\"input-content\" name=\"content\">%s</textarea>\n"
+              "id=\"input-content\" name=\"content\">");
+
+  // Same reason as the plugin editor above: keep the file body out of vasprintf(), which
+  // would allocate the whole formatted page -- template plus file -- from internal 8-bit RAM
+  // and fail outright on a large file. The escaped copy already lives in SPIRAM; print()
+  // passes it straight to mg_send_http_chunk.
+  c.print(c.encode_html(content));
+
+  c.printf(
+            "</textarea>\n"
           "</div>\n"
           "<div class=\"row action-group\">\n"
             "<div class=\"col-sm-6\">\n"
@@ -957,7 +975,6 @@ void OvmsWebServer::HandleEditor(PageEntry_t& p, PageContext_t& c)
           "Use a second session to test a web plugin.</p>\n"
       "</div>\n"
     "</div>\n"
-    , c.encode_html(content).c_str()
     , isECUEnabled ? "<button type=\"button\" class=\"btn btn-default action-script-ecu\">Reload ECU Settings</button>\n" : ""
     );
 
