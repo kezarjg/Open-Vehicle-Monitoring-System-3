@@ -41,6 +41,8 @@
 #include <sstream>
 #include "ovms_malloc.h"
 #include "esp_idf_version.h"
+#include "esp_log.h"      // ESP_EARLY_LOGE in ExtRamAllocator's failure path (writes via
+                          // ets_printf, so it does not itself allocate while out of memory)
 
 #if ESP_IDF_VERSION_MAJOR >= 4
 #define CONFIG_CONSOLE_UART_NUM CONFIG_ESP_CONSOLE_UART_NUM
@@ -117,6 +119,19 @@ struct ExtRamAllocator
   T* allocate(std::size_t n)
     {
     auto p = static_cast<T*>(ExternalRamMalloc(n*sizeof(T)));
+    if (p == NULL)
+      {
+      // The C++ allocator contract is "valid storage or throw". Returning NULL breaks it:
+      // libstdc++ containers assume success and write through the pointer immediately, so
+      // an exhausted SPIRAM heap surfaces as a StoreProhibited panic at address 0, several
+      // frames away inside <bits/basic_string.h> — which points investigation at string
+      // handling rather than at the allocation that actually failed.
+      // CONFIG_CXX_EXCEPTIONS is off, so throwing bad_alloc is not available; abort with a
+      // diagnostic instead, which is what libstdc++ itself does under -fno-exceptions.
+      ESP_EARLY_LOGE("extram", "ExtRamAllocator: allocation of %u bytes failed (SPIRAM exhausted)",
+        (unsigned)(n * sizeof(T)));
+      abort();
+      }
     return p;
     }
   void deallocate(T* p, std::size_t) noexcept { std::free(p); }
