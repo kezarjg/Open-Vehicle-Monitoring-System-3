@@ -34,6 +34,20 @@
 #define _attr(text) (c.encode_html(text).c_str())
 #define _html(text) (c.encode_html(text).c_str())
 
+// Largest file the text editor will open.
+//
+// Rendering a file costs roughly TWICE its size in SPIRAM at peak: the body is held in
+// `content`, and the HTML-escaped copy is appended to the connection's send buffer, which
+// mongoose only drains from mg_mgr_poll() — i.e. after the page handler has returned. Both
+// therefore exist at once, and neither can be streamed away mid-page.
+//
+// Opening a 2.67 MB file on a module with ~3.2 MB of SPIRAM free crashed it outright
+// (issue #182): the second allocation failed and, since ExtRamAllocator returned NULL
+// rather than aborting, libstdc++ wrote to address 0. Refuse up front instead. 512 kB is
+// far above any config file, script or plugin the editor is meant for, and leaves ample
+// headroom at ~1 MB peak.
+#define EDITOR_MAX_FILE_SIZE  (512 * 1024)
+
 /**
  * HandleCommand: execute command, stream output
  */
@@ -557,11 +571,22 @@ static void OutputPluginEditor(PageEntry_t& p, PageContext_t& c)
   }
 
   // read plugin content:
+  // Same size ceiling as the text editor, for the same reason (see EDITOR_MAX_FILE_SIZE):
+  // rendering costs roughly twice the file in SPIRAM at peak. A plugin should never come
+  // close, but the file is on writable storage and nothing else bounds it.
   std::string path = "/store/plugin/" + key;
   std::ifstream file(path, std::ios::in | std::ios::binary | std::ios::ate);
   if (file.is_open()) {
     auto size = file.tellg();
-    if (size > 0) {
+    if (size > EDITOR_MAX_FILE_SIZE) {
+      char msg[200];
+      snprintf(msg, sizeof(msg),
+        "<p class=\"lead\">Plugin not loaded</p><p>It is %lu bytes, over the %lu editor "
+        "limit. Saving from here would overwrite it with an empty file.</p>",
+        (unsigned long) size, (unsigned long) EDITOR_MAX_FILE_SIZE);
+      c.alert("danger", msg);
+    }
+    else if (size > 0) {
       content.resize(size, '\0');
       file.seekg(0);
       file.read(&content[0], size);
@@ -865,7 +890,15 @@ void OvmsWebServer::HandleEditor(PageEntry_t& p, PageContext_t& c)
       std::ifstream file(path, std::ios::in | std::ios::binary | std::ios::ate);
       if (file.is_open()) {
         auto size = file.tellg();
-        if (size > 0) {
+        if (size > EDITOR_MAX_FILE_SIZE) {
+          char msg[160];
+          snprintf(msg, sizeof(msg),
+            "<li>File is too large to edit: %lu bytes, limit %lu. "
+            "Use <code>/api/file</code> to download it instead.</li>",
+            (unsigned long) size, (unsigned long) EDITOR_MAX_FILE_SIZE);
+          error += msg;
+        }
+        else if (size > 0) {
           content.resize(size, '\0');
           file.seekg(0);
           file.read(&content[0], size);
