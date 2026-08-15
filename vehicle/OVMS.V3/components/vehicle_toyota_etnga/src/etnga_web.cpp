@@ -232,7 +232,7 @@ void OvmsVehicleToyotaETNGA::WebDispChgMetrics(PageEntry_t& p, PageContext_t& c)
               "</div>"
               "<div class=\"panel-body\">"
                 "<p>No active charge session.</p>"
-                "<p><a class=\"btn btn-default\" href=\"/xte/reports\">View saved charge reports</a></p>"
+                "<p><a class=\"btn btn-default\" href=\"/#/xte/reports\">View saved charge reports</a></p>"
               "</div>"
             "</div>");
         PAGE_HOOK("body.post");
@@ -286,15 +286,15 @@ void OvmsVehicleToyotaETNGA::WebChgRenderAc(PageContext_t& c, OvmsVehicleToyotaE
         "<div class=\"clearfix\">"
           "<h6 class=\"metric-head\">Battery</h6>"
           "<div class=\"metric number\" data-metric=\"v.b.power\" data-prec=\"3\"><span class=\"label\">Power</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
-          "<div class=\"metric number\" data-metric=\"v.b.voltage\" data-prec=\"1\"><span class=\"label\">Voltage</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.b.voltage\" data-prec=\"0\"><span class=\"label\">Voltage</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
           "<div class=\"metric number\" data-metric=\"v.b.current\" data-prec=\"1\"><span class=\"label\">Current</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
           "<div class=\"metric number\" data-metric=\"v.b.temp\" data-prec=\"1\"><span class=\"label\">Temp</span><span class=\"value\">?</span><span class=\"unit\">&deg;C</span></div>"
         "</div>"
 
         "<div class=\"clearfix\">"
           "<h6 class=\"metric-head\">Session energy</h6>"
-          "<div class=\"metric number\" data-metric=\"v.c.kwh\" data-prec=\"2\"><span class=\"label\">Charged</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
-          "<div class=\"metric number\" data-metric=\"v.c.kwh.grid\" data-prec=\"2\"><span class=\"label\">From grid</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.c.kwh\" data-prec=\"3\"><span class=\"label\">Charged</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.c.kwh.grid\" data-prec=\"3\"><span class=\"label\">From grid</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
           "<div class=\"metric number\" data-metric=\"xte.v.e.hvac.kwh\" data-prec=\"3\"><span class=\"label\">Cabin (My Room)</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
         "</div>");
 }
@@ -339,14 +339,14 @@ void OvmsVehicleToyotaETNGA::WebChgRenderDc(PageContext_t& c, OvmsVehicleToyotaE
         "<div class=\"clearfix\">"
           "<h6 class=\"metric-head\">Battery</h6>"
           "<div class=\"metric number\" data-metric=\"v.b.power\" data-prec=\"3\"><span class=\"label\">Power</span><span class=\"value\">?</span><span class=\"unit\">kW</span></div>"
-          "<div class=\"metric number\" data-metric=\"v.b.voltage\" data-prec=\"1\"><span class=\"label\">Voltage</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.b.voltage\" data-prec=\"0\"><span class=\"label\">Voltage</span><span class=\"value\">?</span><span class=\"unit\">V</span></div>"
           "<div class=\"metric number\" data-metric=\"v.b.current\" data-prec=\"1\"><span class=\"label\">Current</span><span class=\"value\">?</span><span class=\"unit\">A</span></div>"
           "<div class=\"metric number\" data-metric=\"v.b.temp\" data-prec=\"1\"><span class=\"label\">Temp</span><span class=\"value\">?</span><span class=\"unit\">&deg;C</span></div>"
         "</div>"
 
         "<div class=\"clearfix\">"
           "<h6 class=\"metric-head\">Session energy</h6>"
-          "<div class=\"metric number\" data-metric=\"v.c.kwh\" data-prec=\"2\"><span class=\"label\">Charged</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
+          "<div class=\"metric number\" data-metric=\"v.c.kwh\" data-prec=\"3\"><span class=\"label\">Charged</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
           // My-Room cabin energy integrates over both AC and DC sessions, so show it here too.
           "<div class=\"metric number\" data-metric=\"xte.v.e.hvac.kwh\" data-prec=\"3\"><span class=\"label\">Cabin (My Room)</span><span class=\"value\">?</span><span class=\"unit\">kWh</span></div>"
         "</div>");
