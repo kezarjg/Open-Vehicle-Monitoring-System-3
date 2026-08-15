@@ -944,8 +944,8 @@ void OvmsVehicleFactory::vehicle_aux(int verbosity, OvmsWriter* writer, OvmsComm
 
   if (StdMetrics.ms_v_bat_12v_voltage_alert->IsDefined())
     {
-    const std::string &auxBattI = StdMetrics.ms_v_bat_12v_voltage_alert->AsUnitString("-", Volts, 2);
-    writer->printf("  Voltage Alert: %s\n", auxBattI.c_str());
+    const std::string &auxBattAlert = StdMetrics.ms_v_bat_12v_voltage_alert->AsUnitString("-");
+    writer->printf("  Voltage Alert: %s\n", auxBattAlert.c_str());
     }
   }
 

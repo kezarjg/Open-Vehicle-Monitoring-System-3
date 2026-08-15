@@ -974,16 +974,20 @@ void OvmsVehicle::VehicleTicker1(std::string event, void* data)
     float alert_threshold = MyConfig.GetParamValueFloat("vehicle", "12v.alert", 1.6);
     if (!alert_on && volt > 0 && vref > 0 && vref-volt > alert_threshold)
       {
-      StandardMetrics.ms_v_bat_12v_voltage_alert->SetValue(true);
+      alert_on = true;
       MyEvents.SignalEvent("vehicle.alert.12v.on", NULL);
       if (m_autonotifications) Notify12vCritical();
       }
     else if (alert_on && volt > 0 && vref > 0 && vref-volt < alert_threshold*0.6)
       {
-      StandardMetrics.ms_v_bat_12v_voltage_alert->SetValue(false);
+      alert_on = false;
       MyEvents.SignalEvent("vehicle.alert.12v.off", NULL);
       if (m_autonotifications) Notify12vRecovered();
       }
+    // …publish on every check, not only on transitions, so the metric is defined as soon as a
+    //  12V reading is available and does not go stale while the state is simply unchanged:
+    if (volt > 0)
+      StandardMetrics.ms_v_bat_12v_voltage_alert->SetValue(alert_on);
 
     // Check for shutdown level:
     if (!m_12v_shutdown_ticker && !MyBoot.IsShuttingDown())
@@ -999,6 +1003,15 @@ void OvmsVehicle::VehicleTicker1(std::string event, void* data)
         int shutdown_delay = MyConfig.GetParamValueInt("vehicle", "12v.shutdown_delay", 2);
         if (m_12v_low_ticker > shutdown_delay)
           {
+          // Set the wakeup level for the boot check: Boot::Boot() reads the ADC before any
+          //  peripherals are powered up, so it sees the unloaded battery voltage, while the
+          //  shutdown check above sees the battery under the module's own load. Waking at the
+          //  bare shutdown threshold would boot into another shutdown, looping the module on an
+          //  already depleted battery, so add a margin covering the loaded/unloaded difference.
+          //  An explicitly configured wakeup level is never lowered by this:
+          float wakeup_margin = MyConfig.GetParamValueFloat("vehicle", "12v.wakeup_margin", 1.5);
+          float wakeup_level = MyConfig.GetParamValueFloat("vehicle", "12v.wakeup", 0);
+          MyBoot.SetMin12VLevel(std::max(wakeup_level, shutdown_threshold + wakeup_margin));
           MyEvents.SignalEvent("vehicle.alert.12v.shutdown", NULL);
           if (m_autonotifications) Notify12vShutdown();
           // shutdown in 10 seconds to allow for scripts & notifications:
