@@ -135,6 +135,17 @@ Open Vehicle Monitor System v3 - Change log
     v.e.handbrake                         -- Electric parking brake applied
   New metric:
     xte.v.e.awd                           -- AWD / X-MODE status (0=Normal,2=Snow/Dirt,3=Deep Snow/Mud)
+- 12V protection: the deep sleep wakeup level is now derived from the shutdown level when it has
+    not been configured explicitly. The wakeup test runs before the peripherals are powered up and
+    therefore reads the unloaded battery voltage, while the shutdown test reads it under the
+    module's load — so a wakeup level at or near the shutdown level made the module boot straight
+    into another shutdown and cycle on an already depleted battery. Previously the vehicle
+    framework did not set a wakeup level at all, so with the default (unset) 12v.wakeup the boot
+    check was skipped entirely and every wakeup became a full boot. An explicitly configured
+    12v.wakeup is still honoured if it is higher than the derived level.
+  New configs:
+    - [vehicle] 12v.wakeup_margin           -- Volts added to 12v.shutdown to derive the deep
+                                               sleep wakeup level (default 1.5)
 - Server V2 & V3: suspend periodic reconnect attempts on authentication failures (incorrect credentials)
     to avoid blocking of shared public IP addresses (mobile network proxies/gateways). A new reconnect
     attempt is triggered by changing the configuration. Changing the server configuration now also
