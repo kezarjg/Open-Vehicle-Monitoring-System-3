@@ -121,8 +121,9 @@ void OvmsVehicleToyotaETNGA::WebDeInit()
     MyWebServer.DeregisterPage("/xte/config");
 }
 
-// WebCfgFeatures: configure the e-TNGA TPMS alert thresholds (config namespace "xte").
-// These are otherwise only settable from the shell `config` command.
+// WebCfgFeatures: configure the e-TNGA TPMS alert thresholds and the battery capacity
+// reference (config namespace "xte"). These are otherwise only settable from the shell
+// `config` command.
 void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
 {
     std::string error;
@@ -133,6 +134,13 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
         float p_alert = atof(c.getvar("tpms_p_alert").c_str());
         float t_warn  = atof(c.getvar("tpms_t_warn").c_str());
         float t_alert = atof(c.getvar("tpms_t_alert").c_str());
+        // Blank means "derive from the detected pack", stored as 0. Read the raw strings so a
+        // cleared field is distinguishable from a typed 0 -- both mean auto, but only a blank
+        // field should stay blank on redisplay.
+        std::string nom_ah_s   = c.getvar("bat_nominal_ah");
+        std::string nom_volt_s = c.getvar("bat_nominal_volt");
+        float nom_ah   = nom_ah_s.empty()   ? 0.0f : atof(nom_ah_s.c_str());
+        float nom_volt = nom_volt_s.empty() ? 0.0f : atof(nom_volt_s.c_str());
 
         // Validate: pressures positive; alert at/below warn (low pressure is worse),
         // temperature alert at/above warn (high temperature is worse).
@@ -142,11 +150,13 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
             error += "<li>Pressure alert should be at or below the warning threshold (lower pressure is worse).</li>";
         if (t_alert < t_warn)
             error += "<li>Temperature alert should be at or above the warning threshold (higher temperature is worse).</li>";
+        if (nom_ah < 0 || nom_volt < 0)
+            error += "<li>Battery nominal capacity and voltage cannot be negative. Leave a field empty to derive it from the detected pack.</li>";
 
         if (error == "") {
-            // Hold the config lock across all four writes. OvmsConfig::Transaction is a
+            // Hold the config lock across all writes. OvmsConfig::Transaction is a
             // recursive lock that commits only as the OUTERMOST lock is released, so the
-            // four Save() operations coalesce into a single config-store write instead of
+            // Save() operations coalesce into a single config-store write instead of
             // one per setter. Scoped so the lock is released before the response is built.
             {
                 auto lock = MyConfig.Lock();
@@ -154,6 +164,8 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
                 MyConfig.SetParamValueFloat("xte", "tpms.pressure.alert", p_alert);
                 MyConfig.SetParamValueFloat("xte", "tpms.temp.warn",      t_warn);
                 MyConfig.SetParamValueFloat("xte", "tpms.temp.alert",     t_alert);
+                MyConfig.SetParamValueFloat("xte", "bat.nominal.ah",      nom_ah);
+                MyConfig.SetParamValueFloat("xte", "bat.nominal.volt",    nom_volt);
             }
 
             c.head(200);
@@ -192,6 +204,61 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
     snprintf(buf, sizeof(buf), "%.0f", t_alert);
     c.input("number", "Temperature alert", "tpms_t_alert", buf, "Default: 100",
         "<p>Alert when a tyre reaches this temperature (at or above the warning level).</p>", "step=\"1\"", "&deg;C");
+
+    c.fieldset_end();
+
+    c.fieldset_start("Battery capacity reference");
+
+    // What the module is actually using right now, and where it came from. Worth showing:
+    // the whole state-of-health figure hangs on this number matching the pack, and a wrong
+    // value fails silently -- it just produces a believable percentage.
+    OvmsVehicleToyotaETNGA* v = (OvmsVehicleToyotaETNGA*) MyVehicleFactory.ActiveVehicle();
+    int   cells    = v ? v->m_pack_cells : 0;
+    float eff_ah   = v ? v->PackNominalAh()   : 0.0f;
+    float eff_volt = v ? v->PackNominalVolt() : 0.0f;
+
+    std::string status;
+    if (cells == 0) {
+        status = "<p>Pack not identified yet &mdash; the cell count is read from the battery ECU, "
+                 "which only answers while the car is on or charging.</p>";
+    } else {
+        snprintf(buf, sizeof(buf), "%d", cells);
+        status = std::string("<p>Detected pack: <strong>") + buf + " cells</strong>. ";
+        if (eff_ah > 0.0f) {
+            snprintf(buf, sizeof(buf), "%.1f", eff_ah);
+            status += std::string("In use: <strong>") + buf + " Ah</strong>";
+            if (eff_volt > 0.0f) {
+                snprintf(buf, sizeof(buf), "%.0f", eff_volt);
+                status += std::string(" / <strong>") + buf + " V</strong>";
+            }
+            status += ".</p>";
+        } else {
+            status += "No reference capacity is known for this pack, so <code>v.b.soh</code> and "
+                      "<code>v.b.capacity</code> are not published. Set the values below to enable "
+                      "them.</p>";
+        }
+    }
+    c.print(status.c_str());
+
+    // Blank rather than "0" when unset, so the field reads as "automatic" rather than as a
+    // real zero.
+    float nom_ah   = MyConfig.GetParamValueFloat("xte", "bat.nominal.ah",   0.0f);
+    float nom_volt = MyConfig.GetParamValueFloat("xte", "bat.nominal.volt", 0.0f);
+    if (nom_ah > 0.0f) snprintf(buf, sizeof(buf), "%.1f", nom_ah); else buf[0] = 0;
+    c.input("number", "Nominal capacity", "bat_nominal_ah", buf, "Automatic",
+        "<p>The as-new capacity of this pack, used as the reference for state of health "
+        "(<code>v.b.soh</code> = measured &divide; this). Leave empty to derive it from the "
+        "detected pack &mdash; only the 96-cell pack is known, so other packs must set it here.</p>"
+        "<p><strong>This must match your actual pack.</strong> A wrong value still produces a "
+        "believable percentage: reading the same battery against a 195 Ah reference instead of "
+        "201.1 Ah moves state of health by 3 points. A result above 100% means this value is "
+        "wrong, not that the battery is better than new &mdash; it is shown unclamped so the "
+        "mismatch is visible.</p>", "min=\"0\" step=\"0.1\"", "Ah");
+    if (nom_volt > 0.0f) snprintf(buf, sizeof(buf), "%.0f", nom_volt); else buf[0] = 0;
+    c.input("number", "Nominal voltage", "bat_nominal_volt", buf, "Automatic",
+        "<p>Nominal pack voltage, used only to express capacity in kWh "
+        "(<code>v.b.capacity</code>). Leave empty to derive it from the detected pack.</p>",
+        "min=\"0\" step=\"1\"", "V");
 
     c.fieldset_end();
 

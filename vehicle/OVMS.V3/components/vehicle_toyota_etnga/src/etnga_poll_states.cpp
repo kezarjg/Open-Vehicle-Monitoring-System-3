@@ -493,6 +493,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
         m_charge_session.start_monotonic = StandardMetrics.ms_m_monotonic->AsInt();
         m_charge_session.start_utc = StandardMetrics.ms_m_timeutc->AsInt();
         m_charge_session.start_soc = (int) StandardMetrics.ms_v_bat_soc->AsFloat();
+        m_charge_session.start_soc_bms = m_v_bat_soc_bms->IsDefined() ? m_v_bat_soc_bms->AsFloat() : -1.0f;
         // Session energy counters reset HERE (session open), NOT in NotifyChargeStart:
         // the framework fires that hook on every ms_v_charge_state change to "charging",
         // including a CHARGE_WAIT pause/resume mid-session, which wiped the energy
