@@ -24,6 +24,7 @@
    THE SOFTWARE.
 */
 
+#include "ovms_config.h"
 #include "vehicle_toyota_etnga.h"
 #include <algorithm>
 #include <cmath>
@@ -54,6 +55,10 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     m_v_charge_stopreq = MyMetrics.InitInt("xte.v.c.stoprequest", SM_STALE_MID);
     m_v_bat_cap_full = MyMetrics.InitVector<float>("xte.v.b.cap.full", SM_STALE_HIGH, 0, AmpHours);  // 0x1D3E 8x per-module full-charge capacity (data collection)
     m_v_bat_cap_alt  = MyMetrics.InitVector<float>("xte.v.b.cap.alt",  SM_STALE_HIGH, 0, AmpHours);  // 0x1D3F 8x parallel capacity array, function unconfirmed (data collection)
+    // 0x1D70 raw counters. Deliberately Int (not Float+scale): the accumulator's units are
+    // unresolved, so applying any scale here would invent precision we do not have.
+    m_v_bat_lifetime_min = MyMetrics.InitInt  ("xte.v.b.lifetime.min", SM_STALE_MAX, 0, Other);  // 0x1D70 b0-3  ~1/min tick
+    m_v_bat_lifetime_acc = MyMetrics.InitInt64("xte.v.b.lifetime.acc", SM_STALE_MAX, 0, Other);  // 0x1D70 b12-15 load-proportional accumulator
     m_v_bat_heater_status = MyMetrics.InitBool("xte.v.b.heater", SM_STALE_MID);  // This variable stores the status of the battery coolant heater relay
     m_v_bat_soc_bms = MyMetrics.InitFloat("xte.v.b.soc.bms", SM_STALE_MID, 0.0f, Percentage, true);  // This variable stores the SOC as reported by the BMS
     m_v_bat_temp_coolant = MyMetrics.InitFloat("xte.v.b.temp.coolant", SM_STALE_MID, 0.0f, Celcius);  // This variable stores the temperature of the battery coolant
@@ -179,6 +184,94 @@ int OvmsVehicleToyotaETNGA::PackModuleCount(int cellCount)
     }
 }
 
+float OvmsVehicleToyotaETNGA::PackNominalAh()
+{
+    // Explicit override wins: the only way a non-96-cell car gets v.b.soh at all.
+    float cfg = MyConfig.GetParamValueFloat("xte", "bat.nominal.ah", 0.0f);
+    if (cfg > 0.0f)
+        return cfg;
+
+    // Auto only for packs whose nominal is actually established. A wrong nominal is silent --
+    // it yields a plausible percentage -- so an unknown variant gets nothing, not a guess.
+    switch (m_pack_cells) {
+        case 96:  return 201.1f;   // 2022-24: 71.4 kWh / 355 V
+        default:  return 0.0f;     // 78 / 104 / unread: nominal not established
+    }
+}
+
+float OvmsVehicleToyotaETNGA::PackNominalVolt()
+{
+    float cfg = MyConfig.GetParamValueFloat("xte", "bat.nominal.volt", 0.0f);
+    if (cfg > 0.0f)
+        return cfg;
+
+    switch (m_pack_cells) {
+        case 96:  return 355.0f;   // 2022-24 nominal pack voltage
+        default:  return 0.0f;
+    }
+}
+
+void OvmsVehicleToyotaETNGA::UpdateBatteryHealth(const std::vector<float>& caps)
+{
+    if (caps.size() < 8)
+        return;
+
+    // Mean of the 8 slots. The slots are ONE measurement plus fixed per-slot offsets, not 8
+    // independent sensor chains: across a 7-week series the per-slot offsets held to
+    // 0.003-0.034 Ah while the mean moved 0.644 Ah. So the mean is the low-noise estimator.
+    float sum = 0.0f;
+    for (size_t i = 0; i < 8; i++)
+        sum += caps[i];
+    float cac = sum / 8.0f;
+
+    StandardMetrics.ms_v_bat_cac->SetValue(cac);
+
+    float nominal = PackNominalAh();
+    if (nominal <= 0.0f) {
+        // No trustworthy denominator -> publish nothing rather than a plausible wrong number.
+        // Only worth telling the user about once we know the pack is one we have no nominal
+        // for; m_pack_cells == 0 just means 0x182E has not replied yet, which resolves itself.
+        if (m_pack_cells != 0 && !m_nominal_warned) {
+            m_nominal_warned = true;
+            ESP_LOGI(TAG, "v.b.cac = %.2f Ah, but no pack nominal for a %d-cell pack: "
+                          "v.b.soh and v.b.capacity suppressed. Set [xte] bat.nominal.ah "
+                          "(and bat.nominal.volt) to enable them.", cac, m_pack_cells);
+        }
+        return;
+    }
+
+    float soh = cac / nominal * 100.0f;
+    StandardMetrics.ms_v_bat_soh->SetValue(soh);
+
+    // Published unclamped on purpose: an SOH over 100% is a configuration bug (a nominal that
+    // does not match the pack), and clamping would hide exactly the misconfiguration worth
+    // seeing. Warn once per nominal -- keying on the value rather than a bool means correcting
+    // the config re-arms the warning without needing a reboot.
+    if (soh > 102.0f && m_soh_warned_nominal != nominal) {
+        m_soh_warned_nominal = nominal;
+        ESP_LOGW(TAG, "v.b.soh = %.1f%% (%.2f Ah / %.1f Ah nominal). Over 100%% means the "
+                      "nominal does not match this pack, not a healthy battery -- check "
+                      "[xte] bat.nominal.ah against the actual variant.", soh, cac, nominal);
+    }
+
+    // v.b.capacity is defined as USABLE kWh, so scale the full-charge Ah by the usable window
+    // before converting. Display SOC spans BMS [4.19, 93.92] (fitted over 8,901 unclamped
+    // sample pairs), i.e. 89.73% of full charge is reachable by the driver.
+    float volt = PackNominalVolt();
+    if (volt > 0.0f)
+        StandardMetrics.ms_v_bat_capacity->SetValue(cac * PACK_USABLE_FRACTION * volt / 1000.0f);
+}
+
+void OvmsVehicleToyotaETNGA::SetBatteryLifetimeCounters(uint32_t minutes, uint32_t accumulator)
+{
+    // Raw counts, no scale: bytes 12-15 are load-proportional but their units are unresolved
+    // (a passive capture bounds them to roughly 0.5-1.0 A.s per count, and a factor of two is
+    // fatal for any capacity derived from them). Logged so a charge session with a known
+    // integrated Ah can settle it -- see the charge CSV.
+    m_v_bat_lifetime_min->SetValue(static_cast<int>(minutes));
+    m_v_bat_lifetime_acc->SetValue(static_cast<int64_t>(accumulator));
+}
+
 std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryCellVoltages(const std::string& data)
 {
     // 0x182E payload (Hybrid Battery ECU): N cells x uint16 BE; each LSB = 5/65535 V (~76 uV).
@@ -198,8 +291,11 @@ std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryCellVoltages(const st
 std::vector<float> OvmsVehicleToyotaETNGA::CalculateBatteryCapacityArray(const std::string& data)
 {
     // 0x1D3E / 0x1D3F payload: 8 × uint16 BE, each LSB = 0.01 Ah.
-    // The 8 elements are believed to be per-module (pack = 8 modules); collecting all
-    // 8 raw for study rather than reducing to a scalar. No semantic commitment here.
+    // The 8 elements are NOT 8 independent measurements: over a 7-week series the per-slot
+    // offsets from each reading's own mean held to 0.003-0.034 Ah while the mean itself moved
+    // 0.644 Ah, so this is one measurement plus fixed per-slot offsets. Kept as a vector for
+    // the raw series (two slots do drift relative to the rest, the only per-stack aging signal
+    // we have); UpdateBatteryHealth takes the mean for v.b.cac.
     std::vector<float> caps;
     caps.reserve(8);
 
@@ -827,6 +923,7 @@ void OvmsVehicleToyotaETNGA::SetBatteryCellVoltages(const std::vector<float>& vo
             return;
         }
         m_bms_modules = modules;
+        m_pack_cells = cells;   // observed count: the pack-nominal resolver keys off this
         // Align the arrangement total + per-module grouping with the detected pack.
         // No-op (returns false) when both already match, e.g. the 96-cell pack (4x24).
         BmsCheckChangeCellArrangementVoltage(cells, cells / modules);

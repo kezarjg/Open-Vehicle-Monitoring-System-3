@@ -476,6 +476,7 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
             if (m_rxbuf.size() < 16) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
             std::vector<float> caps = CalculateBatteryCapacityArray(m_rxbuf);
             SetBatteryCapacityFull(caps);
+            UpdateBatteryHealth(caps);   // v.b.cac / v.b.soh / v.b.capacity derive from this DID only
             if (caps.size() >= 8)
                 ESP_LOGD(TAG, "Battery capacity 0x1D3E (Ah): %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f",
                          caps[0], caps[1], caps[2], caps[3], caps[4], caps[5], caps[6], caps[7]);
@@ -489,6 +490,21 @@ void OvmsVehicleToyotaETNGA::IncomingHybridBatterySystem(uint16_t pid)
             if (caps.size() >= 8)
                 ESP_LOGD(TAG, "Battery capacity 0x1D3F (Ah): %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f",
                          caps[0], caps[1], caps[2], caps[3], caps[4], caps[5], caps[6], caps[7]);
+            break;
+        }
+
+        case PID_BATTERY_LIFETIME: {
+            // 244-byte sparse block; only bytes 0-3 and 12-15 are believed populated. Guard on
+            // 16 so a short/truncated reply cannot index past the buffer.
+            if (m_rxbuf.size() < 16) { ESP_LOGW(TAG, "Short reply for PID %04X (%d bytes)", pid, (int)m_rxbuf.size()); break; }
+            uint32_t minutes = GetRxBUint32(m_rxbuf, 0);
+            uint32_t accum   = GetRxBUint32(m_rxbuf, 12);
+            SetBatteryLifetimeCounters(minutes, accum);
+            // Bytes 4-11 are recorded as always-zero from a single 38-sample capture, and that
+            // capture's own notes disagree on whether the first counter starts at byte 0 or 1.
+            // Dump the head so both claims can be settled from module logs rather than re-run.
+            ESP_LOGD(TAG, "0x1D70 len=%d min=%u acc=%u head=%s", (int)m_rxbuf.size(), minutes, accum,
+                     hexencode(m_rxbuf.substr(0, 16)).c_str());
             break;
         }
 

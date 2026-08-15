@@ -39,6 +39,13 @@
 #include "ovms_webserver.h"
 #endif
 
+// Fraction of full-charge capacity the driver can actually reach, used to convert the
+// full-charge Ah of 0x1D3E into the USABLE kWh that v.b.capacity is defined as.
+// Display SOC spans BMS SOC [4.19, 93.92] -> [0, 100] (least-squares fit over 8,901
+// unclamped display/BMS sample pairs), so 89.73% of full charge is reachable. Sanity check:
+// 197.9 Ah x 0.8973 x 355 V = 63.0 kWh against ~64 kWh advertised usable / 71.4 kWh gross.
+#define PACK_USABLE_FRACTION 0.8973f
+
 // Control states
 enum ControlState {
     CS_NONE = 0,
@@ -113,6 +120,9 @@ protected:
         bool  in_session = false;
         int   start_monotonic = 0;
         int   start_soc = -1;
+        float start_soc_bms = -1.0f;   // BMS SOC at session open. The implied-capacity estimate
+                                       // must use this, not display SOC: display SOC is defined
+                                       // over the USABLE window and clamps at 100 once BMS >= 95%.
         time_t start_utc = 0;
         bool  is_dc = false;
         float peak_power = 0.0f;
@@ -214,8 +224,11 @@ protected:
     OvmsMetricFloat* m_v_env_hvac_kwh_drive;  // Driving cabin/HVAC energy (kWh): per-trip time-integral of m_v_env_hvac_power while DRIVING (reset in NotifyVehicleOn)
     OvmsMetricInt*   m_v_charge_outcome;  // 0x1688 charging history / outcome enum
     OvmsMetricInt*   m_v_charge_stopreq;  // 0x1667 charge seq stop request (enum, partial)
-    OvmsMetricVector<float>* m_v_bat_cap_full;  // 0x1D3E 8x u16 x0.01 Ah — per-module full-charge capacity (data collection)
-    OvmsMetricVector<float>* m_v_bat_cap_alt;   // 0x1D3F 8x u16 x0.01 Ah — parallel array, function unconfirmed (data collection)
+    OvmsMetricVector<float>* m_v_bat_cap_full;  // 0x1D3E 8x u16 x0.01 Ah — full-charge capacity array (data collection; mean drives v.b.cac)
+    OvmsMetricVector<float>* m_v_bat_cap_alt;   // 0x1D3F 8x u16 x0.01 Ah — noisy parallel array, function unconfirmed (data collection)
+    OvmsMetricInt*   m_v_bat_lifetime_min;   // xte.v.b.lifetime.min 0x1D70 bytes 0-3, raw u32 — ticks ~1/min, load-independent
+    OvmsMetricInt64* m_v_bat_lifetime_acc;   // xte.v.b.lifetime.acc 0x1D70 bytes 12-15, raw u32 — load-proportional accumulator, UNITS UNKNOWN.
+                                             // int64 because the u32 is already at 3.15e8 and climbs ~36/s: it passes INT32_MAX in ~1.6 years.
     OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
     OvmsMetricFloat* m_v_bat_temp_coolant;
@@ -232,6 +245,13 @@ protected:
     bool  m_trip_start_valid = false; // false until the baseline is seeded; reset on transition to DRIVING
     OvmsMetricInt* m_v_e_awd;   // 0x1087 b2 AWD / X-MODE status (custom; no standard OVMS metric)
     int m_bms_modules = 4;   // resolved HV pack module count (bootstrap = 96-cell / 4 modules)
+    int m_pack_cells = 0;    // cell count as actually OBSERVED on 0x182E; 0 until the first reply.
+                             // Deliberately not read back from the BMS API: the ctor bootstraps the
+                             // arrangement to 96 cells, so that would report a 96-cell pack on every
+                             // car until 0x182E lands — silently picking the wrong pack nominal.
+    bool  m_nominal_warned = false;      // one-shot: "no pack nominal, v.b.soh suppressed"
+    float m_soh_warned_nominal = 0.0f;   // nominal the "SOH > 100%" warning last fired for, so
+                                         // correcting the config re-arms it without a reboot
     
     void NotifyVehicleOn() override;
     // NotifyChargeStart deliberately not overridden — see vehicle_toyota_etnga.cpp;
@@ -312,6 +332,10 @@ private:
     // Known packs: 96 (2022-24, 4x24), 78 (2025/26 FWD, 3x26), 104 (2025/26 AWD, 4x26).
     // Returns 0 for an unrecognised count so callers keep the last good arrangement.
     int PackModuleCount(int cellCount);
+    // Pack nominal full-charge capacity (Ah) and nominal pack voltage (V) for the detected
+    // variant, or 0.0f when unknown. Config [xte] bat.nominal.ah / bat.nominal.volt override.
+    float PackNominalAh();
+    float PackNominalVolt();
     std::vector<float> CalculateBatteryCellVoltages(const std::string& data);
     std::vector<float> CalculateBatteryCapacityArray(const std::string& data);
     float CalculateBatteryChargingPower(const std::string& data);
@@ -375,6 +399,10 @@ private:
     void SetBatteryCellVoltages(const std::vector<float>& voltages);
     void SetBatteryCapacityFull(const std::vector<float>& caps);
     void SetBatteryCapacityAlt(const std::vector<float>& caps);
+    // Derive v.b.cac / v.b.soh / v.b.capacity from a fresh 0x1D3E array. Called from the
+    // 0x1D3E handler only, so the standard metrics never outrun their source.
+    void UpdateBatteryHealth(const std::vector<float>& caps);
+    void SetBatteryLifetimeCounters(uint32_t minutes, uint32_t accumulator);
     void SetBatteryCellVoltageStatistics(const std::vector<float>& voltages);
     void SetBatteryTemperatures(const std::vector<float>& temperatures);
     void SetBatteryTemperatureStatistics(const std::vector<float>& temperatures);
@@ -496,8 +524,11 @@ enum CANPID
     PID_AC_INPUT_CURRENT = 0x1654,
     PID_AMBIENT_TEMPERATURE = 0x1002,
     PID_AMBIENT_TEMPERATURE_EV = 0x1F46,
-    PID_BATTERY_CAPACITY = 0x1D3E,        // 8x u16 BE x0.01 Ah — per-module full-charge capacity (data-collection only)
-    PID_BATTERY_CAPACITY_ALT = 0x1D3F,    // 8x u16 BE x0.01 Ah — parallel array ~4.5% lower, function unconfirmed (data-collection only)
+    PID_BATTERY_CAPACITY = 0x1D3E,        // 8x u16 BE x0.01 Ah — full-charge capacity; drives v.b.cac (see CalculateBatteryCapacityArray)
+    PID_BATTERY_CAPACITY_ALT = 0x1D3F,    // 8x u16 BE x0.01 Ah — same update events as 0x1D3E but ~20x noisier; raw estimate to 0x1D3E's
+                                          // filtered output (data-collection only, NOT a health source)
+    PID_BATTERY_LIFETIME = 0x1D70,        // 244B sparse block; u32 BE at 0..3 (~1/min) and 12..15 (load-proportional accumulator).
+                                          // Units unresolved — logged as raw counts, no scale applied.
     PID_BATTERY_CELL_VOLTAGES = 0x182E,
     PID_BATTERY_CHARGING_POWER = 0x10D4,
     PID_BATTERY_COOLANT_TEMPERATURE = 0x1848,

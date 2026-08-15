@@ -395,7 +395,7 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
             "phase,elapsed_s,soc_pct,bms_soc_pct,station_kw,battery_kw,hvac_kw,pack_v,pack_a,"
             "batt_temp_c,ambient_c,state,station_max_kw,station_max_a,station_max_v,"
             "car_perm_kw,car_target_a,station_grid_kw,station_present_v,station_present_a,obc_kw,"
-            "batt_tmin_c,batt_tmax_c\n";
+            "batt_tmin_c,batt_tmax_c,lifetime_min,lifetime_acc,delivered_ah\n";
         m_charge_session.csv_started = true;
     }
 
@@ -406,7 +406,7 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
     char amb[16] = "";
     if (StandardMetrics.ms_v_env_temp->IsDefined())
         snprintf(amb, sizeof(amb), "%.1f", StandardMetrics.ms_v_env_temp->AsFloat());
-    char row[384];
+    char row[448];   // grown with the 0x1D70 columns: lifetime_acc alone is up to 10 digits
     float present_v = StandardMetrics.ms_v_charge_voltage->AsFloat();
     float present_a = StandardMetrics.ms_v_charge_current->AsFloat();
     float grid_kw   = m_v_charge_grid_power->AsFloat();
@@ -414,7 +414,7 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
     int phase_no = (m_charge_session.cur >= 0) ? (m_charge_session.cur + 1) : 0;
     snprintf(row, sizeof(row),
         "%d,%d,%.0f,%.1f,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%s,%s,"
-        "%.2f,%.0f,%.0f,%.2f,%.0f,%.3f,%.0f,%.0f,%.3f,%.1f,%.1f\n",
+        "%.2f,%.0f,%.0f,%.2f,%.0f,%.3f,%.0f,%.0f,%.3f,%.1f,%.1f,%d,%lld,%.4f\n",
         phase_no,
         elapsed,
         StandardMetrics.ms_v_bat_soc->AsFloat(),
@@ -434,7 +434,14 @@ void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
         // Populated by BmsSetCellTemperature on every 0x1814 reply, so no new poll is
         // needed. Both read 0 until the first reply of the session arrives.
         StandardMetrics.ms_v_bat_pack_tmin->AsFloat(),
-        StandardMetrics.ms_v_bat_pack_tmax->AsFloat());
+        StandardMetrics.ms_v_bat_pack_tmax->AsFloat(),
+        // 0x1D70 raw counters paired with the module's OWN coulomb integral on the same row.
+        // That pairing is the whole point: regressing d(lifetime_acc) against d(delivered_ah)
+        // over a steady AC session is what resolves the accumulator's unknown scale, and
+        // whether it counts charge as well as discharge.
+        m_v_bat_lifetime_min->AsInt(),
+        (long long) m_v_bat_lifetime_acc->AsInt(),
+        m_charge_session.delivered_ah);
     m_charge_session.csv_buf += row;
 
     // Flush at most every 30 s (or ~4 KB): a 1 Hz open/append/close per row would put
@@ -802,10 +809,31 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
             loss >= 0.0f ? "loss" : "gain?");
         f << "<dt>Charging efficiency</dt><dd>" << b << "</dd>\n";
     }
-    if (start_soc >= 0 && end_soc > start_soc && m_charge_session.delivered_ah > 0.5f) {
-        float cap = m_charge_session.delivered_ah / ((end_soc - start_soc) / 100.0f);
-        snprintf(b, sizeof(b), "%.0f Ah implied (~%.0f%% of 201 Ah nominal)", cap, cap/201.1f*100.0f);
+    // Implied full-charge capacity, computed against BMS SOC rather than display SOC.
+    // Display SOC is the wrong denominator twice over: it is defined across the usable window
+    // (display ~ 1.1145 x BMS - 4.673), so it understates capacity by ~10%; and it clamps at
+    // exactly 100 once BMS >= 95.0%, so any session ending at a full charge has a truncated
+    // span. BMS SOC is the true fraction of full charge, which makes this number directly
+    // comparable to the 0x1D3E-derived v.b.cac shown alongside it.
+    const float start_bms = m_charge_session.start_soc_bms;
+    const float end_bms   = m_v_bat_soc_bms->AsFloat();
+    if (start_bms >= 0.0f && end_bms > start_bms + 1.0f && m_charge_session.delivered_ah > 0.5f) {
+        float cap = m_charge_session.delivered_ah / ((end_bms - start_bms) / 100.0f);
+        float nominal = PackNominalAh();
+        if (nominal > 0.0f)
+            snprintf(b, sizeof(b), "%.0f Ah implied (~%.0f%% of %.0f Ah nominal), BMS SOC %.1f%% &rarr; %.1f%%",
+                     cap, cap / nominal * 100.0f, nominal, start_bms, end_bms);
+        else
+            snprintf(b, sizeof(b), "%.0f Ah implied, BMS SOC %.1f%% &rarr; %.1f%% (no pack nominal configured)",
+                     cap, start_bms, end_bms);
         f << "<dt>Implied capacity</dt><dd>" << b << "</dd>\n";
+
+        float cac = StandardMetrics.ms_v_bat_cac->AsFloat();
+        if (cac > 0.0f) {
+            snprintf(b, sizeof(b), "%.2f Ah reported by the BMS (0x1D3E), %+.1f%% vs implied",
+                     cac, (cac - cap) / cap * 100.0f);
+            f << "<dt>Measured capacity</dt><dd>" << b << "</dd>\n";
+        }
     }
     f << "</dl>\n";
 

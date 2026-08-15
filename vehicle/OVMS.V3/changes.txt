@@ -1,6 +1,33 @@
 Open Vehicle Monitor System v3 - Change log
 
 ????-??-?? ???  ???????  OTA release
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): battery capacity and state of health are now
+    published. v.b.cac reports the pack's full-charge capacity as measured by the BMS, and
+    v.b.soh / v.b.capacity are derived from it against the pack's nominal capacity. Only the
+    96-cell pack (2022-24) has an established nominal, so on other pack variants v.b.soh and
+    v.b.capacity stay empty until you set the nominal yourself — an incorrect nominal produces a
+    believable but wrong percentage, so no value is published rather than a guessed one. Note
+    that state of health is NOT clamped at 100%: a reading above 100% means the configured
+    nominal does not match the pack, and is reported as-is so the misconfiguration is visible.
+    Third-party app percentages are not comparable unless they use the same nominal.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the charge report's implied-capacity estimate
+    is now computed from BMS state of charge instead of the displayed percentage. The displayed
+    percentage spans only the usable part of the pack and stops at 100% once the BMS reaches
+    about 95%, so the old estimate read roughly 10% low and was wrong entirely for any session
+    ending at a full charge. The report also now shows the BMS-measured capacity next to the
+    implied one for comparison.
+- Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the charge-session CSV records three further
+    columns ("lifetime_min", "lifetime_acc", "delivered_ah") holding two lifetime counters read
+    from the battery ECU alongside the module's own charge integral. The counters' units are not
+    yet established, so they are logged raw for analysis. As before the columns are appended at
+    the end of each row, so existing tooling is unaffected.
+
+New configs:
+- [xte] bat.nominal.ah: pack nominal full-charge capacity in Ah, used as the denominator for
+    v.b.soh. Default 0 = derive from the detected pack (96-cell only).
+- [xte] bat.nominal.volt: pack nominal voltage in V, used to convert capacity to kWh for
+    v.b.capacity. Default 0 = derive from the detected pack (96-cell only).
+
 - Toyota e-TNGA (Subaru Solterra / Toyota bZ4X): the charge-session CSV now also records the
     coolest and hottest pack temperature sensors ("batt_tmin_c" / "batt_tmax_c") alongside the
     existing average. The battery derates on its hottest sensor, so charging-curve analysis
