@@ -287,11 +287,20 @@ no components). This is by default done every 60 seconds. If you use the auto sh
 the vehicle operational state, consider lowering this to e.g. 15 seconds to get a quick detection
 of the vehicle being switched on.
 
+The wakeup test runs before any peripherals are powered up, so it measures the unloaded battery
+voltage, while the shutdown test measures the battery under the module's own load. On a weak
+battery the difference can be more than a volt, so the wakeup level needs to sit above the
+shutdown level by a margin, or the module boots straight into another shutdown and keeps cycling.
+If you do not configure ``12v.wakeup`` explicitly, the wakeup level is derived from the shutdown
+level plus ``12v.wakeup_margin`` (1.5V by default). An explicitly configured ``12v.wakeup`` is
+used as-is if it is higher than that.
+
 Configuration can be done via the web UI or by these config variables::
 
   config set vehicle 12v.shutdown <voltage>
   config set vehicle 12v.shutdown_delay <minutes>
   config set vehicle 12v.wakeup <voltage>
+  config set vehicle 12v.wakeup_margin <voltage>
   config set vehicle 12v.wakeup_interval <seconds>
 
 

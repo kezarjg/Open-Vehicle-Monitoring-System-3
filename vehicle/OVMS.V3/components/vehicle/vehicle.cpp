@@ -999,6 +999,15 @@ void OvmsVehicle::VehicleTicker1(std::string event, void* data)
         int shutdown_delay = MyConfig.GetParamValueInt("vehicle", "12v.shutdown_delay", 2);
         if (m_12v_low_ticker > shutdown_delay)
           {
+          // Set the wakeup level for the boot check: Boot::Boot() reads the ADC before any
+          //  peripherals are powered up, so it sees the unloaded battery voltage, while the
+          //  shutdown check above sees the battery under the module's own load. Waking at the
+          //  bare shutdown threshold would boot into another shutdown, looping the module on an
+          //  already depleted battery, so add a margin covering the loaded/unloaded difference.
+          //  An explicitly configured wakeup level is never lowered by this:
+          float wakeup_margin = MyConfig.GetParamValueFloat("vehicle", "12v.wakeup_margin", 1.5);
+          float wakeup_level = MyConfig.GetParamValueFloat("vehicle", "12v.wakeup", 0);
+          MyBoot.SetMin12VLevel(std::max(wakeup_level, shutdown_threshold + wakeup_margin));
           MyEvents.SignalEvent("vehicle.alert.12v.shutdown", NULL);
           if (m_autonotifications) Notify12vShutdown();
           // shutdown in 10 seconds to allow for scripts & notifications:
