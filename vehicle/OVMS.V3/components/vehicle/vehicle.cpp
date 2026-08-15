@@ -974,16 +974,20 @@ void OvmsVehicle::VehicleTicker1(std::string event, void* data)
     float alert_threshold = MyConfig.GetParamValueFloat("vehicle", "12v.alert", 1.6);
     if (!alert_on && volt > 0 && vref > 0 && vref-volt > alert_threshold)
       {
-      StandardMetrics.ms_v_bat_12v_voltage_alert->SetValue(true);
+      alert_on = true;
       MyEvents.SignalEvent("vehicle.alert.12v.on", NULL);
       if (m_autonotifications) Notify12vCritical();
       }
     else if (alert_on && volt > 0 && vref > 0 && vref-volt < alert_threshold*0.6)
       {
-      StandardMetrics.ms_v_bat_12v_voltage_alert->SetValue(false);
+      alert_on = false;
       MyEvents.SignalEvent("vehicle.alert.12v.off", NULL);
       if (m_autonotifications) Notify12vRecovered();
       }
+    // …publish on every check, not only on transitions, so the metric is defined as soon as a
+    //  12V reading is available and does not go stale while the state is simply unchanged:
+    if (volt > 0)
+      StandardMetrics.ms_v_bat_12v_voltage_alert->SetValue(alert_on);
 
     // Check for shutdown level:
     if (!m_12v_shutdown_ticker && !MyBoot.IsShuttingDown())
