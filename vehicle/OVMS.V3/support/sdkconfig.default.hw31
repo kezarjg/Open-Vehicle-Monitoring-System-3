@@ -500,6 +500,7 @@ CONFIG_HEAP_TASK_TRACKING=y
 #
 # libsodium
 #
+CONFIG_LIBSODIUM_USE_MBEDTLS_SHA=y
 
 #
 # Log output

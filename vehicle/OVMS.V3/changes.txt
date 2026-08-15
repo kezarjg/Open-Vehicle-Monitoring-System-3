@@ -135,6 +135,21 @@ Open Vehicle Monitor System v3 - Change log
     v.e.handbrake                         -- Electric parking brake applied
   New metric:
     xte.v.e.awd                           -- AWD / X-MODE status (0=Normal,2=Snow/Dirt,3=Deep Snow/Mud)
+- Server V2 & V3: suspend periodic reconnect attempts on authentication failures (incorrect credentials)
+    to avoid blocking of shared public IP addresses (mobile network proxies/gateways). A new reconnect
+    attempt is triggered by changing the configuration. Changing the server configuration now also
+    automatically triggers a reconnect, and the web UI assists in tracking config change results by
+    showing the respective status and start/stop buttons after a change.
+  New notifications (+ implied events):
+    - [alert] server.v2.auth.failure         -- Incorrect server V2 login credentials
+    - [alert] server.v3.auth.failure         -- Incorrect server V3 login credentials
+- VW e-Golf: set v.e.drivemode from the Charisma / Fahrprofilauswahl active profile
+    (KCAN 0x386): Normal/Eco/Eco+ -> 1/2/3 (matching the e-Up module), replacing the
+    incorrect B-gear-derived value.
+- VW e-Golf: add regenerative-braking strength metric xvg.v.recup (0..4: D0=0, D1=1,
+    D2=2, D3=3, B=4; -1 = N/A), decoded from the gear-selector frame 0x187.
+- VW e-Golf: correct v.b.current / v.b.power sign to the OVMS output=positive convention
+    (discharge positive, charge negative).
 - vehicle_cadillac_ct5:
     Set the acceptance filter to allow 0x063 (v.on) and 0x5E4 (v.b.soc).
     The high frame rate of this vehicle (> 1600/sec) causes watchdog
@@ -151,6 +166,13 @@ Open Vehicle Monitor System v3 - Change log
 - VW e-Golf: v.e.parktime no longer clamped — the 0x6B7 CAN park-time field is 17-bit
     (saturates at ~36.5 h), so the saturated max is ignored and OVMS's native (uncapped)
     park-time counter is used instead.
+- OTA: Web UI firmware upload — the firmware setup page "Flash from file" tab can now upload a
+    firmware image directly from the browser and flash it to the inactive OTA partition, with no
+    SD card needed. The upload is streamed to flash (not buffered in RAM); the SD-card path flow
+    is unchanged. New endpoint: POST /api/firmware/upload (cookie/apikey authorized). A progress
+    bar tracks the upload, switching to a "finalising" indicator while the module writes the last
+    of the image to flash. The image size is sent (?size=) so only the needed flash is erased
+    (faster start) and an oversized image is rejected up front.
 
 
 2026-07-18 MB   3.3.006  OTA release
