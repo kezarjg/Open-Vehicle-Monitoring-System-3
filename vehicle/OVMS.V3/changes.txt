@@ -5,8 +5,10 @@ Open Vehicle Monitor System v3 - Change log
     published. v.b.cac reports the pack's full-charge capacity as measured by the BMS, and
     v.b.soh / v.b.capacity are derived from it against the pack's nominal capacity. Only the
     96-cell pack (2022-24) has an established nominal, so on other pack variants v.b.soh and
-    v.b.capacity stay empty until you set the nominal yourself — an incorrect nominal produces a
-    believable but wrong percentage, so no value is published rather than a guessed one. Note
+    v.b.capacity stay empty until you set the nominal yourself under "Battery capacity reference"
+    on the vehicle configuration page — an incorrect nominal produces a believable but wrong
+    percentage, so no value is published rather than a guessed one. That page also shows the
+    detected pack and the reference currently in use. Note
     that state of health is NOT clamped at 100%: a reading above 100% means the configured
     nominal does not match the pack, and is reported as-is so the misconfiguration is visible.
     Third-party app percentages are not comparable unless they use the same nominal.
