@@ -1,0 +1,217 @@
+name: Firmware build
+
+# Compile-checks the OVMS.V3 firmware on every push and pull request, using the
+# legacy ESP-IDF 3.3.x make build with the hw3.1 sdkconfig preset. To keep CI
+# fast and failures attributable to our own code, only the base (NONE) stub plus
+# the vehicle modules under development are compiled (see ENABLE_VEHICLES below),
+# not the full vehicle set. This only verifies compilation; there is no on-device
+# test stage.
+
+on:
+  push:
+    branches: [master]
+    # Skip the firmware build for changes that can't affect it (docs, web
+    # plugins, marketing assets). A mixed change still builds, because
+    # paths-ignore only skips when *every* changed file matches.
+    # (Kept in sync with the pull_request list below — Actions YAML doesn't
+    # reliably support anchors, so the list is duplicated deliberately.)
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '**/*.rst'
+      # Vehicle component docs live under vehicle/**/docs and are symlinked into
+      # docs/source; they're doc sources, not firmware inputs.
+      - 'vehicle/**/docs/**'
+      - 'plugins/**'
+      - 'flyer/**'
+      - 'logo/**'
+      - '.readthedocs.yaml'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '**/*.rst'
+      # Vehicle component docs live under vehicle/**/docs and are symlinked into
+      # docs/source; they're doc sources, not firmware inputs.
+      - 'vehicle/**/docs/**'
+      - 'plugins/**'
+      - 'flyer/**'
+      - 'logo/**'
+      - '.readthedocs.yaml'
+  workflow_dispatch:
+
+# Cancel an in-progress run when a newer commit is pushed to the same ref.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+# Note on cache warmth: GitHub scopes caches by branch/ref. Caches saved by a
+# pull_request run live in that PR's scope; a push to master saves to master's
+# scope, which every PR and master run can then read. So the first run after a
+# given cache is created is cold; subsequent same-scope runs are warm.
+
+env:
+  # Pinned to match .travis.yml / .devcontainer to keep CI reproducible.
+  TOOLCHAIN_URL: https://dl.espressif.com/dl/xtensa-esp32-elf-linux64-1.22.0-97-gc752ad5-5.2.0.tar.gz
+  IDF_REPO: https://github.com/openvehicles/esp-idf.git
+  # Pinned commit of the (frozen 3.3.x) esp-idf fork, so the clone can be cached.
+  # Bump this SHA to pull in upstream esp-idf changes; it also keys the cache.
+  IDF_REF: 9063c8662ca5d67b5490c1503bd4377b380feed3
+  IDF_PATH: ${{ github.workspace }}/esp/esp-idf
+  TOOLCHAIN_DIR: ${{ github.workspace }}/esp/xtensa-esp32-elf
+  # ccache caches compiled objects across runs; the heavy framework libs
+  # (wolfssl, wolfssh, mongoose, ...) rarely change, so warm builds are far
+  # faster than the ~2min cold compile.
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 500M
+  CCACHE_COMPILERCHECK: content
+  # Firmware output goes to the self-hosted MinIO artifact store (reachable from
+  # the ovms3 runner) instead of GitHub Actions artifacts (account-wide 500MB
+  # Free-tier quota). Objects keyed by github.run_id; ovms-modern's network-flash
+  # vintage path downloads ovms3.bin from there by run_id. 30-day bucket lifecycle.
+  MINIO_ENDPOINT: http://10.20.5.228:9000
+  MC_VERSION: RELEASE.2025-08-13T08-35-41Z
+
+jobs:
+  build:
+    # Self-hosted (SH K3s, the `ovms3` ARC scale set) so the firmware build can
+    # push its output to the in-cluster MinIO artifact store (10.20.5.228) — a
+    # private IP that GitHub-hosted runners can't reach. The runner image
+    # (ovms-ci-runner) runs as root with apt/sudo/python3/ccache/git present, so
+    # this legacy ESP-IDF 3.3 build (which fetches its own toolchain + esp-idf)
+    # runs unchanged. docs.yml (Pages) and web-assets-check.yml stay GitHub-hosted.
+    runs-on: ovms3
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v6
+        with:
+          # mongoose, zlib, libzip, wolfssh, wolfssl are git submodules and are
+          # required for a full firmware build.
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bison ccache dos2unix flex gperf libncurses-dev wget
+
+      # ESP-IDF 3.3.x ships pinned, older Python deps; 3.8 installs them cleanly.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.8'
+
+      - name: Cache xtensa toolchain
+        id: cache-toolchain
+        uses: actions/cache@v5
+        with:
+          path: esp/xtensa-esp32-elf
+          key: xtensa-esp32-elf-1.22.0-97-gc752ad5-5.2.0
+
+      - name: Download xtensa toolchain
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p esp
+          wget -qO- "$TOOLCHAIN_URL" | tar xz -C esp
+
+      - name: Cache ESP-IDF
+        id: cache-idf
+        uses: actions/cache@v5
+        with:
+          path: esp/esp-idf
+          key: esp-idf-${{ env.IDF_REF }}
+
+      - name: Clone ESP-IDF (openvehicles fork, pinned)
+        if: steps.cache-idf.outputs.cache-hit != 'true'
+        run: |
+          # Shallow-fetch only the pinned commit and its submodules.
+          git init "$IDF_PATH"
+          git -C "$IDF_PATH" remote add origin "$IDF_REPO"
+          git -C "$IDF_PATH" fetch --depth 1 origin "$IDF_REF"
+          git -C "$IDF_PATH" checkout --detach FETCH_HEAD
+          git -C "$IDF_PATH" submodule update --init --recursive --depth 1
+
+      - name: Install ESP-IDF Python requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r "$IDF_PATH/requirements.txt"
+
+      - name: Cache ccache
+        uses: actions/cache@v5
+        with:
+          path: .ccache
+          # Per-commit key with a rolling fallback, so each run starts from the
+          # most recent cache and saves its own updated copy.
+          key: ccache-${{ github.sha }}
+          restore-keys: |
+            ccache-
+
+      - name: Build firmware (base NONE stub only)
+        working-directory: vehicle/OVMS.V3
+        env:
+          # Clean-upstream test branch: compile the base (NONE) stub only, so a
+          # failure is attributable to the change under test. The fork's vehicle
+          # symbols do not exist on an upstream base.
+          ENABLE_VEHICLES: >-
+            
+        run: |
+          # Route the cross-compilers through ccache via a PATH shim: invoked as
+          # e.g. xtensa-esp32-elf-gcc, ccache finds the real compiler next on PATH.
+          # ESP-IDF 3.3 make has no native ccache switch, so this masquerade is
+          # how we hook it in.
+          SHIM="$RUNNER_TEMP/ccache-shim"
+          mkdir -p "$SHIM"
+          for c in xtensa-esp32-elf-gcc xtensa-esp32-elf-g++ xtensa-esp32-elf-c++ xtensa-esp32-elf-cc; do
+            ln -sf "$(command -v ccache)" "$SHIM/$c"
+          done
+          export PATH="$SHIM:$TOOLCHAIN_DIR/bin:$PATH"
+          ccache --zero-stats
+
+          cp support/sdkconfig.default.hw31 sdkconfig
+
+          # 1. Realise a complete config non-interactively. The committed preset
+          #    predates some Kconfig options; `defconfig` fills them with their
+          #    defaults instead of prompting (which aborts under CI's redirected
+          #    stdin). After this, every vehicle toggle is materialised in sdkconfig.
+          make defconfig
+
+          # 2. Turn every specific-vehicle toggle off (keep only the base NONE
+          #    stub) so CI builds just our modules — faster, and failures are
+          #    attributable to our own code. Vehicle toggles are booleans (=y);
+          #    the int framework params (=<number>) don't match and are untouched.
+          sed -ri '/^CONFIG_OVMS_VEHICLE_NONE=y$/!s/^(CONFIG_OVMS_VEHICLE_[A-Z0-9_]+)=y$/# \1 is not set/' sdkconfig
+
+          # 3. Enable the modules under development (e-TNGA follows transitively).
+          for sym in $ENABLE_VEHICLES; do
+            printf '%s=y\n' "$sym" >> sdkconfig
+          done
+
+          # 4. Normalise the edited config (no new prompts now) and build.
+          make defconfig
+          make -j"$(nproc)"
+
+          ccache --show-stats
+
+      - name: Upload firmware to MinIO
+        # ovms3.bin is the app image (flash via `ota flash vfs`, as
+        # scripts/ovms-deploy.sh does). The other three .bin are also needed for a
+        # fresh serial flash (`make flash`). ovms3.elf + ovms3.map carry the debug
+        # symbols / link map needed to decode a crash backtrace (`boot status`)
+        # back to functions and source lines. All keyed by run_id under ovms3/.
+        env:
+          MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
+          MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://dl.min.io/client/mc/release/linux-amd64/archive/mc.${MC_VERSION}" -o "$RUNNER_TEMP/mc"
+          chmod +x "$RUNNER_TEMP/mc"
+          "$RUNNER_TEMP/mc" alias set sh "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
+          "$RUNNER_TEMP/mc" cp \
+            vehicle/OVMS.V3/build/ovms3.bin \
+            vehicle/OVMS.V3/build/ovms3.elf \
+            vehicle/OVMS.V3/build/ovms3.map \
+            vehicle/OVMS.V3/build/bootloader/bootloader.bin \
+            vehicle/OVMS.V3/build/partitions.bin \
+            vehicle/OVMS.V3/build/ota_data_initial.bin \
+            "sh/ci-artifacts/${RUN_ID}/ovms3/"
