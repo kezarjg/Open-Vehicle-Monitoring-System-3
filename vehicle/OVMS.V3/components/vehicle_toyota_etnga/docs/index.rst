@@ -266,9 +266,28 @@ Driver inputs and TPMS
 PID Polling Logic
 =================
 
-The poll list uses seven columns corresponding to the seven ``PollState`` values.  The number in
-each column is the poll interval in seconds (``0`` = not polled in that state).  All rows use
-``ISOTP_STD`` addressing unless noted.
+The table below shows seven columns, one per ``PollState`` value.  The number in each column is
+the poll interval in seconds (``0`` = not polled in that state).  All rows use ``ISOTP_STD``
+addressing unless noted.
+
+The seven columns are a **merged view**.  A poll list supports only ``VEHICLE_POLL_NSTATES`` (4)
+states, so the implementation splits the seven states across two poll series in
+``vehicle_toyota_etnga.cpp``:
+
+* ``obdii_polls_base`` at state offset 0, whose four columns map to
+  ``SLEEP`` / ``AWAKE`` / ``DRIVING`` / (unused);
+* ``obdii_polls_charge`` registered at offset ``CHARGE_HANDSHAKE`` (3), whose four columns map to
+  ``CHARGE_HANDSHAKE`` / ``CHARGE_WAIT`` / ``CHARGE_AC`` / ``CHARGE_DC``.
+
+A PID polled in both a non-charge and a charge state therefore appears in **both** arrays, each
+carrying only its own side's cadences; the row below is the union of the two.  The fourth column
+of ``obdii_polls_base`` must stay ``0`` in every row — it aliases ``CHARGE_HANDSHAKE``, which
+block B owns, and a nonzero value there would double-poll during handshake.
+
+Within ``obdii_polls_charge`` the row order is also load-bearing: the poller services the list
+top-down each cycle and may not finish before the next tick, so the per-second power and SOC
+channels are listed first and the heavy multiframe arrays last, which makes a cut-short cycle
+defer the slow arrays rather than the live readings.
 
 .. list-table::
    :header-rows: 1
@@ -386,6 +405,18 @@ each column is the poll interval in seconds (``0`` = not polled in that state). 
      - 60
      - 60
      - 8× parallel capacity array; function unconfirmed; data collection
+   * - ``PID_BATTERY_LIFETIME`` (``0x1D70``)
+     - HV Battery
+     - 0
+     - 0
+     - 60
+     - 0
+     - 0
+     - 30
+     - 30
+     - Lifetime counters (244 B, ~36 frames) → ``xte.v.b.lifetime.acc`` / ``.min``;
+       units unresolved, logged raw for analysis (``xte.v.b.lifetime.min`` is the
+       second counter in the same reply)
    * - ``PID_VEHICLE_SPEED`` (``0x1F0D``)
      - Hybrid Control
      - 0
@@ -426,6 +457,59 @@ each column is the poll interval in seconds (``0`` = not polled in that state). 
      - 0
      - 0
      - HVAC power while driving @1 s; feeds cabin-energy integrator
+   * - ``PID_THROTTLE`` (``0x1060``)
+     - Hybrid Control
+     - 0
+     - 0
+     - 1
+     - 0
+     - 0
+     - 0
+     - 0
+     - Accelerator position (byte 1) → ``v.e.throttle``; DRIVING only
+   * - ``PID_DRIVE_MODE_SELECT`` (``0x1004``)
+     - Hybrid Control
+     - 0
+     - 0
+     - 5
+     - 0
+     - 0
+     - 0
+     - 0
+     - Drive mode Eco/Normal/Power (byte 1) → ``v.e.drivemode``; DRIVING only.
+       Note this DID number is ``0x1004`` **on the Hybrid Control ECU**; the same
+       number on the TPMS gateway is tyre temperatures
+   * - ``PID_AWD_MODE`` (``0x1087``)
+     - Hybrid Control
+     - 0
+     - 0
+     - 5
+     - 0
+     - 0
+     - 0
+     - 0
+     - AWD / X-MODE status (byte 2) → ``xte.v.e.awd``; DRIVING only
+   * - ``PID_BRAKE_PEDAL_STROKE`` (``0x104C``)
+     - Brake/EPB (``0x7B0``)
+     - 0
+     - 0
+     - 1
+     - 0
+     - 0
+     - 0
+     - 0
+     - Brake pedal stroke (byte 1) → ``v.e.footbrake``; DRIVING only
+   * - ``PID_EPB_STATUS`` (``0x1045``)
+     - Brake/EPB (``0x7B0``)
+     - 0
+     - 5
+     - 5
+     - 0
+     - 0
+     - 0
+     - 0
+     - Electric parking brake actuator status (byte 1) → ``v.e.handbrake``.
+       Polled in AWAKE too: the EPB stays alive in the parked body tail
    * - ``PID_AMBIENT_TEMPERATURE`` (``0x1002``)
      - Air Conditioner
      - 0
@@ -852,7 +936,8 @@ The CSV is streamed to disk one row per second during active charging (``CHARGE_
     station_max_kw, station_max_a, station_max_v,
     car_perm_kw, car_target_a,
     station_grid_kw, station_present_v, station_present_a, obc_kw,
-    batt_tmin_c, batt_tmax_c
+    batt_tmin_c, batt_tmax_c,
+    lifetime_min, lifetime_acc, delivered_ah
 
 Grouped by what each column represents:
 
@@ -882,6 +967,11 @@ Grouped by what each column represents:
   ``station_present_a`` (zero when not applicable).
 * **``obc_kw``** — diagnostic only: the raw DID ``0x10D4`` reading, which under-reads on
   DC charging.  Use ``battery_kw`` for real power.
+* **Lifetime counters and delivered charge** — ``lifetime_min`` and ``lifetime_acc`` are the
+  two counters read from DID ``0x1D70`` on the HV Battery ECU, logged raw because their units
+  are not established; ``delivered_ah`` is the module's own charge integral for the session.
+  The three are recorded together so the counters can be calibrated against a known
+  ampere-hour figure offline.
 
 .. note::
 
@@ -897,6 +987,42 @@ Grouped by what each column represents:
    ``hvac_kw`` measurements, ``obc_kw`` was added at the end, and ``target_a`` / ``grid_kw``
    / ``present_v`` / ``present_a`` were renamed to their ``car_`` and ``station_``
    prefixed forms.
+
+Configuration
+=============
+
+All e-TNGA vehicles share the ``xte`` config instance, registered by the base module.  Every
+parameter can be set from the shell with ``config set xte <param> <value>`` or from the
+``/xte/config`` web page.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 12 60
+
+   * - Parameter
+     - Default
+     - Meaning
+   * - ``tpms.pressure.warn``
+     - 240
+     - Tyre pressure (kPa) below which a warning is raised
+   * - ``tpms.pressure.alert``
+     - 220
+     - Tyre pressure (kPa) below which an alert is raised
+   * - ``tpms.temp.warn``
+     - 90
+     - Tyre temperature (°C) above which a warning is raised
+   * - ``tpms.temp.alert``
+     - 100
+     - Tyre temperature (°C) above which an alert is raised
+   * - ``bat.nominal.ah``
+     - 0
+     - Pack nominal full-charge capacity (Ah), the denominator for ``v.b.soh``.
+       ``0`` means derive it from the detected pack, which is only established for
+       the 96-cell pack; on other variants ``v.b.soh`` stays empty until this is set
+   * - ``bat.nominal.volt``
+     - 0
+     - Pack nominal voltage (V), used to convert the capacity to kWh for
+       ``v.b.capacity``.  ``0`` derives it from the detected pack, 96-cell only
 
 Metrics
 =======
@@ -927,7 +1053,8 @@ odometer, temperature, and VIN):
   deliberately **not** clamped at 100 % — a reading above 100 % means the configured
   nominal does not match the pack
 
-Key custom metrics (``xte.*`` namespace, 18 total ``xte.v.c.*`` plus supporting metrics):
+Custom metrics (``xte.*`` namespace; 18 ``xte.v.c.*`` charge metrics plus the battery,
+12 V and climate metrics below):
 
 * ``xte.v.c.gridpower`` — Grid input power (kW) from DID ``0x161D``; AC charging only
   (the grid-side companion to ``v.c.power``)
@@ -938,6 +1065,35 @@ Key custom metrics (``xte.*`` namespace, 18 total ``xte.v.c.*`` plus supporting 
   both AC and DC
 * ``xte.v.e.hvac.kwh.drive`` — Per-trip driving cabin/HVAC energy (kWh); time-integral of
   HVAC power while in the DRIVING state, reset at trip start
+* ``xte.v.c.hlcstate`` / ``xte.v.c.piswraw`` — The two raw charge-protocol signals the state
+  machine runs on: the DC HLC state from ``0x1666`` and the PISW cable-seated signal from
+  ``0x1669``, both on the Plug-In Control ECU.  Exposed unmodified so a session can be
+  followed, or a stuck handshake diagnosed, from the metrics alone.  See
+  :doc:`state_machine` for the values each transition tests
+
+HV battery internals (``0x747`` unless noted):
+
+* ``xte.v.b.soc.bms`` — SOC as the BMS reports it (``0x1F5B``), which differs from the
+  displayed ``v.b.soc``: the displayed figure spans only the usable part of the pack and
+  reaches 100 % at roughly 95 % BMS
+* ``xte.v.b.temp.coolant`` / ``xte.v.b.temp.heater`` — Battery coolant and coolant-heater
+  temperatures (°C)
+* ``xte.v.b.heater`` — Battery coolant heater relay engaged
+* ``xte.v.b.cap.full`` / ``xte.v.b.cap.alt`` — The raw eight-slot per-module capacity arrays
+  from ``0x1D3E`` and ``0x1D3F``.  ``cap.full`` is what ``v.b.cac`` is summed from; ``cap.alt``
+  is collected for analysis only, its function unconfirmed
+* ``xte.v.b.lifetime.acc`` / ``xte.v.b.lifetime.min`` — The two lifetime counters from
+  ``0x1D70``, logged raw because their units are unresolved
+
+12 V auxiliary battery (EV ECU ``0x7D2``; see the poll table for the DIDs and scaling):
+
+* ``xte.v.b.12v.voltage`` — Hi-res aux voltage from ``0x15EE``, alongside the module's own
+  ADC reading in ``v.b.12v.voltage``
+* ``xte.v.b.12v.temp`` — Aux battery temperature (°C) from ``0x15F8``
+* ``xte.v.b.12v.cac`` — Aux battery full-charge capacity (Ah) from ``0x15E5``
+* ``xte.v.b.12v.charge.ah`` / ``xte.v.b.12v.discharge.ah`` / ``xte.v.b.12v.readyon.h`` —
+  Lifetime charge and discharge integrals (Ah) and integrated Ready-ON time (h), all from
+  ``0x15E8``
 
 .. toctree::
    :maxdepth: 1

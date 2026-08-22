@@ -132,8 +132,14 @@ Transition diagram
                      (DRIVING → AWAKE)
 
 There is no direct ``DRIVING → SLEEP`` or charge-state → ``SLEEP`` edge
-(except ``CHARGE_WAIT`` on bus-dead) — most paths pass through ``AWAKE``.
+except from ``CHARGE_WAIT`` — most paths pass through ``AWAKE``.
 There is also no direct edge between ``DRIVING`` and any charge state.
+
+Two edges are deliberately left out of the diagram above to keep it readable,
+both belonging to the ``CHARGE_WAIT`` 12 V-drain cycle described in
+`Sleeping through a charge wait`_: ``CHARGE_WAIT → SLEEP`` on an idle timer
+(not only on a dead bus), and the ``AWAKE → CHARGE_WAIT`` edge that resumes an
+open session on the next wake.  Both appear in the transition table below.
 
 The polling feedback loop
 =========================
@@ -215,6 +221,12 @@ All edges live in ``etnga_poll_states.cpp``.
      - **Changed from old model** (was ``controlstate == CS_CHARGING``).
        Opens the in-RAM charge session if not already open.  Calls
        ``RequestVIN()``.  Sets ``ms_v_charge_state = "prepared"``.
+   * - ``AWAKE → CHARGE_WAIT``
+     - PISW ``≥ 0x02`` AND a charge session is already open
+     - Resume path, not a new plug-in: the module slept during a charge wait and
+       the cable is still seated, so it returns to ``CHARGE_WAIT`` rather than
+       re-running the handshake.  ``m_charge_session.in_session`` is what
+       distinguishes the two.  See `Sleeping through a charge wait`_.
    * - ``AWAKE → SLEEP`` (forced, door watch)
      - ``monotonic - m_awake_entered > 300`` AND charge door never opened
      - 5-minute watchdog when awake with no ``CS_DRIVING`` and charge
@@ -259,6 +271,13 @@ All edges live in ``etnga_poll_states.cpp``.
      - ``IsBusAlive() == false``
      - Bus went dead during scheduled wait (OBC slept or gateway isolated
        OBD).  Arms the escalating cooldown latch.
+   * - ``CHARGE_WAIT → SLEEP`` (12 V drain)
+     - 600 s in ``CHARGE_WAIT`` without charge engaging — or 15 s if this wait
+       was re-entered after a previous wait-sleep
+     - Stops polling so the bus idles and 12 V recovers.  The charge session is
+       **preserved** across the sleep and resumes via ``AWAKE → CHARGE_WAIT``.
+       Arms the escalating cooldown latch.  See
+       `Sleeping through a charge wait`_.
    * - ``CHARGE_AC → CHARGE_WAIT``
      - ``ac_op == 0x00`` (Stop) OR PISW ``== 0x00``
      - Phase ended cleanly or cable pulled.  Sets
@@ -586,6 +605,46 @@ OBC, ``0x745``) **and** in ``DRIVING`` (from the hybrid control ECU,
    exactly this bug; fixed 2026-06-03 — a real DC session that tapered
    from 61.8 → 51.3 kW under a 100 kW station was wrongly reported
    "station 60.6 kW" before the fix.)
+
+Sleeping through a charge wait
+==============================
+
+A scheduled or delayed charge can leave the module sitting in ``CHARGE_WAIT``
+for hours with the cable seated and nothing happening.  Polling through that
+window at the handshake cadence drained the 12 V battery far enough to miss the
+charge it was waiting for, so ``CHARGE_WAIT`` sleeps instead of waiting awake.
+
+Two thresholds govern it (``etnga_poll_states.cpp``)::
+
+    CHARGE_WAIT_SLEEP_SECS   = 600   // first wait with no charge -> sleep
+    CHARGE_WAIT_RESLEEP_SECS = 15    // wait re-entered after a wait-sleep -> sleep fast
+
+The first wait of a session gets a responsive 10-minute window.  Once the
+module has slept out of a wait at least once (``m_charge_wait_slept``), every
+later wait re-sleeps after 15 s, which keeps the duty cycle of the
+wake/check/sleep oscillation low over a long delay.
+
+The cycle is:
+
+#. ``CHARGE_WAIT`` idles past its threshold → ``TransitionToSleepState()``.
+   The in-RAM charge session is **not** reset — ``in_session`` stays true and
+   the streamed CSV stays open.
+#. ``SLEEP`` wakes normally, on CAN traffic or a 12 V rising edge, subject to
+   the escalating cooldown.
+#. ``HandleAwakeState`` sees PISW ``≥ 0x02`` with a session already open and
+   takes ``AWAKE → CHARGE_WAIT`` rather than ``AWAKE → CHARGE_HANDSHAKE``, so
+   the handshake is not re-run and the session is not reopened.
+#. From ``CHARGE_WAIT`` the ordinary engage checks apply: ``ac_op`` of ``0x01``
+   or ``0x02`` enters ``CHARGE_AC``, an HLC state of ``0x0A``–``0x12`` enters
+   ``CHARGE_DC``.  Both are polled at 10 s in ``CHARGE_WAIT``, so a charge that
+   starts during a waking window is caught within 10 s.
+
+The consequence to keep in mind when changing any of this: while the module is
+asleep mid-wait it is not watching the cable.  A cable removed during the sleep
+gap is detected on the next wake by the PISW reconcile in ``HandleAwakeState``,
+which needs two consecutive fresh ``0x00`` reads before it finalizes the
+session — that debounce is what stops the ~30 s post-wake OBC transient from
+closing a session that is still plugged in.
 
 Cooldown latch
 ==============
