@@ -190,6 +190,9 @@ protected:
 
     // INC-3: charge-fault diagnostic DID dump (raw one-shot snapshot of OBC DIDs on a fault).
     std::atomic<bool> m_charge_fault_pending{false};   // set on poller task (0x1688 fault), consumed on Events task
+    std::atomic<bool> m_charge_engaged{false};         // true once this session actually reached CHARGE_AC/CHARGE_DC;
+                                                       // gates the fault flag so a RETAINED 0x1688 code read while
+                                                       // waiting for a scheduled charge cannot fake a fault
     std::atomic<int>  m_dump_remaining{0};             // OnceOffPolls still outstanding
     std::map<uint16_t,std::string> m_dump_results;     // pid -> raw response bytes ("" = no reply)
     OvmsMutex         m_dump_mutex;                     // guards m_dump_results (poller task writes, Events task reads)
@@ -439,7 +442,7 @@ private:
     void SetAcUsable(float v);
     void SetMyRoom(bool active);
     void SetHvacPower(float kw);
-    void SetChargeOutcome(int v);
+    bool SetChargeOutcome(int v);   // returns true if the 0x1688 code actually changed
     void SetChargeStopReq(int v);
     void SetThrottle(float pct);
     void SetDriveMode(int mode);

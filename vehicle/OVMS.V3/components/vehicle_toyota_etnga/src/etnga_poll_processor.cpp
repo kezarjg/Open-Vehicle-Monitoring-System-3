@@ -405,9 +405,20 @@ void OvmsVehicleToyotaETNGA::IncomingPlugInControlSystem(uint16_t pid)
         }
         case PID_CHARGE_HISTORY: {
             int outcome_code = CalculateChargeOutcome(m_rxbuf);
-            SetChargeOutcome(outcome_code);
+            bool outcome_changed = SetChargeOutcome(outcome_code);
             // INC-3: flag a diagnostic dump on a genuine charge fault (consumed on CHARGE_WAIT entry).
-            if (IsChargeFaultCode(outcome_code)) {
+            //
+            // 0x1688 RETAINS the last stop reason across sessions and does not reset on plug-in, so
+            // the raw code is NOT evidence of a live fault: on a scheduled (timer-delayed) charge the
+            // module wakes, reads the retained code, and would fire a 30-DID burst at a perfectly
+            // healthy car still waiting for its start time. Two gates are needed, and neither alone
+            // is sufficient:
+            //   - outcome_changed: only a transition INTO a fault code counts, not every re-read.
+            //   - m_charge_engaged: the metric can start at 0 after a boot, which makes the first
+            //     read of a retained fault code look like a genuine transition. Requiring that this
+            //     session actually reached CHARGE_AC/CHARGE_DC rules that out. A real mid-charge
+            //     abnormal stop always satisfies it, because charging was by definition running.
+            if (outcome_changed && IsChargeFaultCode(outcome_code) && m_charge_engaged.load()) {
                 m_charge_fault_pending = true;
                 m_dump_trigger_outcome = outcome_code;                          // the code that IS the fault
                 m_dump_trigger_phase   = (m_charge_session.cur >= 0)

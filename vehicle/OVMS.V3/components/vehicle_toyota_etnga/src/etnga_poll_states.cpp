@@ -546,6 +546,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
         m_dump_outcome = -1;
         m_dump_remaining = 0;
         m_charge_fault_pending = false;
+        m_charge_engaged = false;   // no charge has engaged yet this session — see PID_CHARGE_HISTORY
         LogChargeEvent("Plugged in — handshake");
         ESP_LOGI(TAG, "Charge session opened (SOC %d%%)", m_charge_session.start_soc);
     }
@@ -567,6 +568,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeAcState()
 {
     m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
     m_charge_wait_slept = false;   // real charge engaged — end the wait
+    m_charge_engaged = true;       // ...and from here a 0x1688 fault code can be believed
     SetPollState(PollState::CHARGE_AC);
     SetChargingStatus(true);
     SetChargeState(PollState::CHARGE_AC);
@@ -579,6 +581,7 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeDcState()
 {
     m_charge_state_entry = StandardMetrics.ms_m_monotonic->AsInt();
     m_charge_wait_slept = false;   // real charge engaged — end the wait
+    m_charge_engaged = true;       // ...and from here a 0x1688 fault code can be believed
     SetPollState(PollState::CHARGE_DC);
     SetChargingStatus(true);
     SetChargeState(PollState::CHARGE_DC);
