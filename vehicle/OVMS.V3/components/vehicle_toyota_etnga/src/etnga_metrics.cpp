@@ -59,10 +59,7 @@ void OvmsVehicleToyotaETNGA::InitializeMetrics()
     // unresolved, so applying any scale here would invent precision we do not have.
     m_v_bat_lifetime_min = MyMetrics.InitInt  ("xte.v.b.lifetime.min", SM_STALE_MAX, 0, Other);  // 0x1D70 b0-3  ~1/min tick
     m_v_bat_lifetime_acc = MyMetrics.InitInt64("xte.v.b.lifetime.acc", SM_STALE_MAX, 0, Other);  // 0x1D70 b12-15 load-proportional accumulator
-    m_v_bat_heater_status = MyMetrics.InitBool("xte.v.b.heater", SM_STALE_MID);  // This variable stores the status of the battery coolant heater relay
     m_v_bat_soc_bms = MyMetrics.InitFloat("xte.v.b.soc.bms", SM_STALE_MID, 0.0f, Percentage, true);  // This variable stores the SOC as reported by the BMS
-    m_v_bat_temp_coolant = MyMetrics.InitFloat("xte.v.b.temp.coolant", SM_STALE_MID, 0.0f, Celcius);  // This variable stores the temperature of the battery coolant
-    m_v_bat_temp_heater = MyMetrics.InitFloat("xte.v.b.temp.heater", SM_STALE_MID, 0.0f, Celcius);  // This variable stores the temperature of the battery coolant
     m_v_bat_12v_voltage_pid = MyMetrics.InitFloat("xte.v.b.12v.voltage", SM_STALE_MID, 0.0f, Volts);  // 0x15EE EV-ECU PID 12V voltage (compare vs hardware v.b.12v.voltage)
     m_v_bat_12v_temp = MyMetrics.InitFloat("xte.v.b.12v.temp", SM_STALE_MID, 0.0f, Celcius);   // 0x15F8 12V aux battery temperature
     m_v_bat_12v_cac  = MyMetrics.InitFloat("xte.v.b.12v.cac",  SM_STALE_MID, 0.0f, AmpHours);  // 0x15E5 12V aux full-charge capacity
