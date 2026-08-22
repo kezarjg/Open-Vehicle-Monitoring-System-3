@@ -58,6 +58,16 @@ static const float AUX_12V_WAKE_SET_V   = 0.2f;   // v12 > ref + this  -> rising
 static const float AUX_12V_WAKE_CLEAR_V = 0.1f;   // v12 < ref + this  -> latch clears
 
 // AWAKE with the charge door never opening for this long forces sleep (door-watch timeout).
+//
+// This watchdog exists because AWAKE cannot exit on its own via the IsBusAlive() stale path.
+// SLEEP -> AWAKE is driven by external CAN2 traffic, but once AWAKE the poller is itself
+// transmitting on that bus and the ECU replies are CAN2 frames, so our own polling keeps
+// refreshing m_last_can2_time and the 120s bus-liveness window never expires. Without this
+// timer a vehicle that never reports CS_DRIVING and never gets a cable plugged in would stay
+// awake indefinitely and drain the 12V battery. It must stay paired with the cooldown latch,
+// or the next poll reply after the forced sleep bounces straight back to AWAKE. Anything that
+// reduces poll throttling, adds PIDs to the AWAKE column of obdii_polls_base[], or shortens
+// this timeout needs to be weighed against that drain.
 static const int AWAKE_NO_ACTIVITY_TIMEOUT_S = 300;
 
 void OvmsVehicleToyotaETNGA::ResetSleepBackoff()

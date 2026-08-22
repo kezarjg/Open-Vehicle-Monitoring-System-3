@@ -26,6 +26,17 @@
 #include "ovms_config.h"
 #include "vehicle_toyota_etnga.h"
 
+// Freshness: TPMS sensors are motion-activated — they transmit only while the wheels are
+// rolling. The ECU receiver holds the last values reported in motion, and those are what we
+// read, so the published values are NOT guaranteed fresh for a car that has been parked a
+// while. This is inherent to the sensors, not a polling gap; do not "fix" it by polling more.
+//
+// Slot vs corner: the TPMS ECU numbers sensor SLOTS (physical transmitter positions as learned
+// during the last relearn), not corners. The slot->corner map (PID_TPMS_CORNERS) is therefore
+// re-read on every poll cycle rather than cached once, because the mapping is car-specific and
+// changes after a tyre rotation or a TPMS relearn; re-reading picks up the new assignment
+// within one cycle with no restart.
+
 bool OvmsVehicleToyotaETNGA::TPMSCornerMapValid()
 {
     for (int s = 0; s < TPMS_SLOT_COUNT; s++)
@@ -33,6 +44,11 @@ bool OvmsVehicleToyotaETNGA::TPMSCornerMapValid()
     return false;
 }
 
+// Threshold ordering matters: pressure uses a low-pressure test (<=) and temperature an
+// overheat test (>=), so for the three-level normal/warning/alert behaviour to work the
+// pressure warn threshold must be ABOVE its alert threshold and the temperature warn threshold
+// BELOW its alert threshold. Reversing either collapses the intermediate warning state and a
+// tyre jumps straight from normal to alert.
 void OvmsVehicleToyotaETNGA::UpdateTPMSAlert()
 {
     float p_warn  = MyConfig.GetParamValueFloat("xte", "tpms.pressure.warn",  240.0f);  // kPa
