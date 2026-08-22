@@ -537,10 +537,12 @@ void OvmsVehicleToyotaETNGA::SetHvacPower(float kw)
 }
 
 int OvmsVehicleToyotaETNGA::CalculateChargeOutcome(const std::string& data)  { return GetRxBByte(data, 0); }  // 0x1688 26-state enum; RETAINED between sessions (does not reset on plug-in) — report must scope it per-session
-void OvmsVehicleToyotaETNGA::SetChargeOutcome(int v)
+bool OvmsVehicleToyotaETNGA::SetChargeOutcome(int v)
 {
-    if (m_v_charge_outcome->SetValue(v))
+    bool changed = m_v_charge_outcome->SetValue(v);
+    if (changed)
         ESP_LOGD(TAG, "Charge Outcome changed: 0x%02X (%d)", v, v);
+    return changed;
 }
 
 int OvmsVehicleToyotaETNGA::CalculateChargeStopReq(const std::string& data)  { return GetRxBByte(data, 0); }  // 0x1667 enum (partial)
