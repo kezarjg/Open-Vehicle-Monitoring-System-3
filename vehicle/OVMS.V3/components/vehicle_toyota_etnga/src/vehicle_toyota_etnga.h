@@ -232,10 +232,7 @@ protected:
     OvmsMetricInt*   m_v_bat_lifetime_min;   // xte.v.b.lifetime.min 0x1D70 bytes 0-3, raw u32 — ticks ~1/min, load-independent
     OvmsMetricInt64* m_v_bat_lifetime_acc;   // xte.v.b.lifetime.acc 0x1D70 bytes 12-15, raw u32 — load-proportional accumulator, UNITS UNKNOWN.
                                              // int64 because the u32 is already at 3.15e8 and climbs ~36/s: it passes INT32_MAX in ~1.6 years.
-    OvmsMetricBool* m_v_bat_heater_status;
     OvmsMetricFloat* m_v_bat_soc_bms;
-    OvmsMetricFloat* m_v_bat_temp_coolant;
-    OvmsMetricFloat* m_v_bat_temp_heater;
     OvmsMetricFloat* m_v_bat_12v_voltage_pid;  // xte.v.b.12v.voltage 0x15EE EV-ECU PID read (compare vs hardware v.b.12v.voltage)
     OvmsMetricFloat* m_v_bat_12v_temp;     // xte.v.b.12v.temp 0x15F8 12V aux temperature (C)
     OvmsMetricFloat* m_v_bat_12v_cac;      // xte.v.b.12v.cac 0x15E5 12V aux full-charge capacity (Ah)

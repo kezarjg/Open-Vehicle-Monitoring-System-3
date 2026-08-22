@@ -487,7 +487,7 @@ OVMS metrics:
      - AC grid energy delivered this session and lifetime (AC only; reads 0 during DC)
    * - ``v.b.cac``
      - HV Battery ECU ``0x747``, ``0x1D3E``
-     - Pack full-charge capacity (Ah) as measured by the BMS, summed from eight per-module slots
+     - Pack full-charge capacity (Ah) as measured by the BMS: the mean of eight per-module slots
    * - ``v.b.soh`` / ``v.b.capacity``
      - derived from ``v.b.cac``
      - State of health (%) and usable capacity (kWh) against the pack nominal.  Only the
@@ -600,16 +600,10 @@ HV battery internals:
      - HV Battery ECU ``0x747``, ``0x1F5B``
      - SOC as the BMS reports it, which differs from the displayed ``v.b.soc``: the displayed
        figure spans only the usable part of the pack and reaches 100 % at roughly 95 % BMS
-   * - ``xte.v.b.temp.coolant`` / ``xte.v.b.temp.heater`` /
-       ``xte.v.b.heater``
-     - not currently populated
-     - Battery coolant and coolant-heater temperatures (°C) and the coolant heater relay
-       state.  The metrics are registered so the names are stable, but no DID has been
-       identified for them yet, so they never leave their initial value.  Do not read them
    * - ``xte.v.b.cap.full`` / ``xte.v.b.cap.alt``
      - HV Battery ECU ``0x747``, ``0x1D3E`` / ``0x1D3F``
      - The raw eight-slot per-module capacity arrays.  ``cap.full`` is what ``v.b.cac`` is
-       summed from; ``cap.alt`` is collected for analysis only, its function unconfirmed
+       averaged from; ``cap.alt`` is collected for analysis only, its function unconfirmed
    * - ``xte.v.b.lifetime.acc`` / ``xte.v.b.lifetime.min``
      - HV Battery ECU ``0x747``, ``0x1D70``
      - The two lifetime counters, logged raw because their units are unresolved
