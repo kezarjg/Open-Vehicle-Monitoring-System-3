@@ -56,6 +56,17 @@ Others                      VIN
    per-cell history, deviation flags, and pack statistics work across pack variants (96-cell
    2022-24; 78-cell and 104-cell 2025/26 refresh). Only the 96-cell pack is on-vehicle validated.
 
+   The pack variant follows the **model year and drivetrain**, not the badge — the 2025/26
+   refresh is 78-cell FWD or 104-cell AWD — which is why the count is derived at runtime rather
+   than declared per vehicle.  The pack itself, and the platform-wide limits and alert
+   thresholds the base constructor declares, are:
+
+   * Cells: CATL
+   * Cell arrangement (96-cell pack): 96 voltages in 4 modules of 24; 24 temperature sensors,
+     6 per module
+   * Accept limits: 2.5 to 4.3 V per cell; -30 to +60 °C
+   * Deviation thresholds: 20 mV warn / 30 mV alert; 4 °C warn / 8 °C alert
+
 Validation status
 =================
 
