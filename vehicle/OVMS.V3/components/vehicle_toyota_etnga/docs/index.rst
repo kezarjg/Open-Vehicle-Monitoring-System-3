@@ -31,13 +31,22 @@ Temperature Display         Yes
 BMS v+t Display             Yes (see note below)
 TPMS Display                Yes
 Charge Status Display       Yes
-Charge Interruption Alerts  No
+Charge Interruption Alerts  Yes (see note below)
 Charge Control              No
 Cabin Pre-heat/cool Control No
 Lock/Unlock Vehicle         No
 Valet Mode Control          No
 Others                      VIN
 =========================== ==============
+
+.. note::
+
+   **Charge Interruption Alerts** are produced by the OVMS framework, not by this module:
+   e-TNGA writes ``ms_v_charge_state = "stopped"`` whenever a charge phase ends, and the
+   ``OvmsVehicle`` base turns that into a ``charge.stopped`` notification.  The module does
+   not set ``ms_v_charge_substate``, so the notification is raised at **alert** priority
+   rather than **info** — including at an ordinary phase boundary, such as a scheduled
+   charge pausing and resuming, which is not a fault.
 
 .. note::
 
@@ -73,7 +82,7 @@ Unvalidated
    Reasoned from a specification, an analogous DID, or another platform.  Never
    exercised on hardware.
 
-Last reviewed: 2026-07-26.
+Last reviewed: 2026-08-22.
 
 State machine and sleep
 -----------------------
@@ -138,9 +147,12 @@ Charging
      - Energy reconciliation on 2026-06-24: 88% efficiency, station 0.17 kWh ≈
        battery 0.15 kWh, replacing earlier 52%/158% garbage.
    * - Charge-fault diagnostic DID dump
-     - Vehicle-validated
+     - Vehicle-validated (partial)
      - A real ``0x29`` fault on 2026-06-24 fired the dump, labelled the triggering
-       outcome correctly, and rendered decoded values.
+       outcome correctly, and rendered decoded values.  The trigger also fired on
+       *healthy* scheduled AC charges, because it read the retained ``0x1688``
+       value rather than a live fault; that false positive was fixed on
+       2026-08-22 and the fix awaits one scheduled charge to confirm.
    * - CAN-stale logging/accounting suspend
      - Vehicle-validated
      - A real lock produced an 85 s CSV gap with no stale rows, 2026-06-24.
@@ -193,11 +205,25 @@ Battery and 12V
        resolved from this reply and drives temperature grouping, so a module
        booting straight into an AC charge previously kept its constructor default
        for the whole session — harmless on the 96-cell pack, wrong on 78/104.
-   * - Capacity arrays ``0x1D3E`` / ``0x1D3F`` (HV Battery ECU ``0x747``/``0x74F``)
+   * - ``v.b.cac`` / ``v.b.soh`` / ``v.b.capacity`` from ``0x1D3E``
+       (HV Battery ECU ``0x747``/``0x74F``)
+     - Vehicle-validated
+     - Five weeks of logs showed ``0x1D3E`` declining monotonically; it is now
+       summed into ``v.b.cac``, with ``v.b.soh`` and ``v.b.capacity`` derived
+       against the pack nominal.  Confirmed on-module 2026-08-22: the live
+       metrics reproduce exactly from the eight raw per-module slots
+       (197.656 Ah / 98.2875 % / 62.96 kWh).  Only the 96-cell pack has an
+       established nominal; on any other pack ``v.b.soh`` and ``v.b.capacity``
+       stay empty until ``[xte] bat.nominal.ah`` is set by hand.
+   * - Capacity array ``0x1D3F`` (HV Battery ECU ``0x747``/``0x74F``)
      - Log-inferred
-     - Five weeks of logs show ``0x1D3E`` declining monotonically — a good
-       ``v.b.cac`` candidate — while ``0x1D3F`` re-latches each cycle with no trend.
-       Semantics unconfirmed, which is why neither is exposed as ``v.b.cac``.
+     - Re-latches each cycle with no trend; semantics unconfirmed, so it is
+       collected (``xte.v.b.cap.alt``) but not exposed as a standard metric.
+   * - Lifetime counters ``0x1D70`` (HV Battery ECU ``0x747``/``0x74F``)
+     - Unvalidated
+     - Collected raw into ``xte.v.b.lifetime.acc`` / ``.min`` and the charge CSV;
+       the accumulator's scale is unresolved.  It is frozen across a whole AC
+       charge, so resolving it needs a **drive**, not a charge session.
    * - ``v.e.charging12v`` union rule
      - Vehicle-validated
      - The 2026-07-16→20 road trip closed the last two gaps: the ``CHARGE_DC``
@@ -264,10 +290,11 @@ each column is the poll interval in seconds (``0`` = not polled in that state). 
      - 1
      - 1
      - 1
+     - 10
      - 1
      - 1
-     - 1
-     - Control mode (CS_NONE / CS_DRIVING / CS_CHARGING); all active states @1 s
+     - Control mode (CS_NONE / CS_DRIVING / CS_CHARGING); @1 s except WAIT@10 s
+       (slowed to protect the 12 V battery during a scheduled wait)
    * - ``PID_CHARGING_LID`` (``0x1625``)
      - Plug-In Control
      - 0
@@ -325,9 +352,9 @@ each column is the poll interval in seconds (``0`` = not polled in that state). 
      - 10
      - 0
      - 0
-     - 0
+     - 30
      - 20
-     - Cell-temperature array; DRIVING@10 s, DC@20 s
+     - Cell-temperature array; DRIVING@10 s, AC@30 s, DC@20 s
    * - ``PID_BATTERY_CELL_VOLTAGES`` (``0x182E``)
      - HV Battery
      - 0
@@ -347,7 +374,8 @@ each column is the poll interval in seconds (``0`` = not polled in that state). 
      - 0
      - 60
      - 60
-     - 8× per-module full-charge capacity (Ah); data collection
+     - 8× per-module full-charge capacity (Ah) → ``v.b.cac``, and ``v.b.soh`` /
+       ``v.b.capacity`` derived from it against the pack nominal
    * - ``PID_BATTERY_CAPACITY_ALT`` (``0x1D3F``)
      - HV Battery
      - 0
@@ -453,11 +481,13 @@ each column is the poll interval in seconds (``0`` = not polled in that state). 
      - 0
      - 0
      - 0
-     - 0
-     - 0
-     - 0
-     - 0
-     - Not polled in any state; deferred until confirmed useful
+     - 30
+     - 30
+     - 30
+     - 30
+     - Ambient temperature during charging; all four charge states @30 s.  The
+       A/C ECU (``0x7C4``) sleeps while charging, so its ``0x1002`` ambient is
+       DRIVING-only and this is the in-charge source (``ambient_c`` in the CSV)
    * - ``PID_PISW_STATUS`` (``0x1669``)
      - Plug-In Control
      - 0
@@ -484,20 +514,22 @@ each column is the poll interval in seconds (``0`` = not polled in that state). 
      - 0
      - 0
      - 1
-     - 30
+     - 10
      - 1
      - 1
-     - AC charger operation status; drives HANDSHAKE→AC transition
+     - AC charger operation status; drives HANDSHAKE→AC transition.  WAIT@10 s
+       (slowed from 1 s for 12 V; an AC engage is still caught within 10 s)
    * - ``PID_HLC_STATE`` (``0x1666``)
      - Plug-In Control
      - 0
      - 0
      - 0
      - 1
-     - 30
+     - 10
      - 0
      - 1
-     - DC HLC state; drives HANDSHAKE→DC / DC→WAIT transitions
+     - DC HLC state; drives HANDSHAKE→DC / DC→WAIT transitions.  WAIT@10 s
+       (slowed from 1 s for 12 V; a DC re-engage is still caught within 10 s)
    * - ``PID_MIN_PERMISSION_POWER`` (``0x16A1``)
      - Plug-In Control
      - 0
@@ -777,8 +809,9 @@ Solterra" or "Toyota bZ4X").
      - Serves one stored report or CSV by filename (linked from ``/xte/reports``).
    * - ``/xte/config``
      - Vehicle
-     - TPMS alert threshold configuration — sets ``[xte] tpms.*`` config parameters via a
-       form rather than the shell ``config set`` command.
+     - Vehicle configuration — TPMS alert thresholds and the battery capacity reference,
+       i.e. all six ``[xte]`` parameters, via a form rather than the shell ``config set``
+       command.  Also displays the detected pack and the nominal currently in use.
 
 Charge session report
 =====================
@@ -885,6 +918,14 @@ odometer, temperature, and VIN):
   valid for both AC and DC charging
 * ``v.c.kwh.grid`` / ``v.c.kwh.grid.total`` — AC grid energy delivered this session /
   lifetime, integrated from ``0x161D`` (AC only; reads 0 during DC)
+* ``v.b.cac`` — Pack full-charge capacity (Ah) as measured by the BMS, summed from the
+  eight per-module slots of ``0x1D3E`` on the HV Battery ECU (``0x747``)
+* ``v.b.soh`` / ``v.b.capacity`` — State of health (%) and usable capacity (kWh), derived
+  from ``v.b.cac`` against the pack nominal.  Only the 96-cell pack has a built-in nominal;
+  on other variants both stay empty until ``[xte] bat.nominal.ah`` / ``bat.nominal.volt``
+  are set, since a wrong nominal yields a believable but wrong percentage.  ``v.b.soh`` is
+  deliberately **not** clamped at 100 % — a reading above 100 % means the configured
+  nominal does not match the pack
 
 Key custom metrics (``xte.*`` namespace, 18 total ``xte.v.c.*`` plus supporting metrics):
 

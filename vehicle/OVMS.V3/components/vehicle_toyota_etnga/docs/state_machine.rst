@@ -87,8 +87,9 @@ Transition diagram
           └─────────────────┘                      │       │
               │     ▲                              │       │
    CAN traffic│     │ bus idle (~120 s)             │       │
-   OR 12V >   │     │ OR 5-min / 15-min watchdog    │       │
-   ref+0.2 V  │     │ (arms escalating cooldown)    │       │
+   OR 12V ↑   │     │ OR 5-min / 15-min watchdog    │       │
+   past       │     │ (arms escalating cooldown)    │       │
+   ref+0.2 V  │     │                               │       │
               ▼     │                              │       │
           ┌─────────────────┐                      │       │
           │      AWAKE      │◄──────────────────┐  │       │
@@ -193,9 +194,12 @@ All edges live in ``etnga_poll_states.cpp``.
      - ``m_last_can2_time`` updated by ``IncomingFrameCan2()`` on any
        CAN2 frame, gated by the cooldown latch (see below).
    * - ``SLEEP → AWAKE``
-     - 12 V > 12 V-ref + 0.2 V
-     - Issues ``m_can2->Reset()`` first to recover from a stuck bus.
-       **Not** gated by the cooldown latch.
+     - 12 V **rising edge** past 12 V-ref + 0.2 V
+     - Edge-triggered, not level-triggered: the latch sets above ref + 0.2 V and
+       clears only below ref + 0.1 V, and is seeded from the current reading on
+       sleep entry, so a level that is merely high does not wake the driver.
+       Issues ``m_can2->Reset()`` first to recover from a stuck bus.  **Not**
+       gated by the cooldown latch, and resets the backoff index.
    * - ``AWAKE → SLEEP``
      - ``IsBusAlive() == false``
      - Triggered when ``m_last_can2_time`` goes stale (~120 s of no
@@ -608,9 +612,10 @@ activity event — drive start, charge start, charge-door open, or 12 V
 bump — calls ``ResetSleepBackoff()`` which returns the index to 0 so the
 next sleep uses the shortest (10 s) window again.
 
-The 12 V-based wake path is **not** gated by ``m_allow_wake`` — high aux
-voltage will pull the driver out of ``SLEEP`` even mid-cooldown, and also
-resets the backoff index.
+The 12 V-based wake path is **not** gated by ``m_allow_wake`` — a rising
+edge on aux voltage will pull the driver out of ``SLEEP`` even mid-cooldown,
+and also resets the backoff index.  It lifts the cooldown gate as it goes, so
+incoming CAN frames can then hold the driver awake.
 
 ``CHARGE_WAIT → SLEEP`` also arms the cooldown latch (using the current
 backoff window) to prevent immediate re-wake from bus noise after the OBC
@@ -663,6 +668,14 @@ Notes and quirks
   ``HandleSleepState`` compares against
   ``ms_v_bat_12v_voltage_ref + 0.2``; on an uncalibrated module the
   CAN-frame path is the reliable wake mechanism.
+* **The 12 V wake is a rising edge, deliberately.**  An earlier
+  level-triggered version oscillated: post-drive and post-charge surface
+  charge holds 12 V above ``ref + 0.2`` for a long time with a dead bus, so
+  every ``SLEEP`` tick reset the backoff, reset the CAN controller and bounced
+  to ``AWAKE`` — a ~2 s SLEEP/AWAKE loop with one CAN reset per cycle, whose
+  sleep re-entry also restarted the cooldown so frame-wake never re-enabled
+  until 12 V decayed.  The ``m_12v_was_high`` latch and its 0.1 V hysteresis
+  band exist to prevent that; do not simplify them back to a level test.
 * **Driving-state exit clears more than charge-state exit.**
   ``HandleDrivingState`` clears speed, gear, and temperatures; charge
   states clean up via ``SetChargingStatus(false)`` and ``SetChargeState``
