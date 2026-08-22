@@ -34,7 +34,7 @@ class OvmsVehicleToyotaBz4x : public OvmsVehicleToyotaETNGA
   public:
     OvmsVehicleToyotaBz4x();  // Constructor for the Toyota Bz4x vehicle module
     ~OvmsVehicleToyotaBz4x();  // Destructor for the Toyota Bz4x vehicle module
-    static constexpr const char* TAG = "v-toyota-bz4x";
+    static constexpr const char* TAG = "v-toybz4x";
 
   };
 
