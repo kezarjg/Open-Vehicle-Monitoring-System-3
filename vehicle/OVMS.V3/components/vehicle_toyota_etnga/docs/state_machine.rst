@@ -87,8 +87,9 @@ Transition diagram
           └─────────────────┘                      │       │
               │     ▲                              │       │
    CAN traffic│     │ bus idle (~120 s)             │       │
-   OR 12V >   │     │ OR 5-min / 15-min watchdog    │       │
-   ref+0.2 V  │     │ (arms escalating cooldown)    │       │
+   OR 12V ↑   │     │ OR 5-min / 15-min watchdog    │       │
+   past       │     │ (arms escalating cooldown)    │       │
+   ref+0.2 V  │     │                               │       │
               ▼     │                              │       │
           ┌─────────────────┐                      │       │
           │      AWAKE      │◄──────────────────┐  │       │
@@ -131,8 +132,14 @@ Transition diagram
                      (DRIVING → AWAKE)
 
 There is no direct ``DRIVING → SLEEP`` or charge-state → ``SLEEP`` edge
-(except ``CHARGE_WAIT`` on bus-dead) — most paths pass through ``AWAKE``.
+except from ``CHARGE_WAIT`` — most paths pass through ``AWAKE``.
 There is also no direct edge between ``DRIVING`` and any charge state.
+
+Two edges are deliberately left out of the diagram above to keep it readable,
+both belonging to the ``CHARGE_WAIT`` 12 V-drain cycle described in
+`Sleeping through a charge wait`_: ``CHARGE_WAIT → SLEEP`` on an idle timer
+(not only on a dead bus), and the ``AWAKE → CHARGE_WAIT`` edge that resumes an
+open session on the next wake.  Both appear in the transition table below.
 
 The polling feedback loop
 =========================
@@ -193,9 +200,12 @@ All edges live in ``etnga_poll_states.cpp``.
      - ``m_last_can2_time`` updated by ``IncomingFrameCan2()`` on any
        CAN2 frame, gated by the cooldown latch (see below).
    * - ``SLEEP → AWAKE``
-     - 12 V > 12 V-ref + 0.2 V
-     - Issues ``m_can2->Reset()`` first to recover from a stuck bus.
-       **Not** gated by the cooldown latch.
+     - 12 V **rising edge** past 12 V-ref + 0.2 V
+     - Edge-triggered, not level-triggered: the latch sets above ref + 0.2 V and
+       clears only below ref + 0.1 V, and is seeded from the current reading on
+       sleep entry, so a level that is merely high does not wake the driver.
+       Issues ``m_can2->Reset()`` first to recover from a stuck bus.  **Not**
+       gated by the cooldown latch, and resets the backoff index.
    * - ``AWAKE → SLEEP``
      - ``IsBusAlive() == false``
      - Triggered when ``m_last_can2_time`` goes stale (~120 s of no
@@ -211,6 +221,12 @@ All edges live in ``etnga_poll_states.cpp``.
      - **Changed from old model** (was ``controlstate == CS_CHARGING``).
        Opens the in-RAM charge session if not already open.  Calls
        ``RequestVIN()``.  Sets ``ms_v_charge_state = "prepared"``.
+   * - ``AWAKE → CHARGE_WAIT``
+     - PISW ``≥ 0x02`` AND a charge session is already open
+     - Resume path, not a new plug-in: the module slept during a charge wait and
+       the cable is still seated, so it returns to ``CHARGE_WAIT`` rather than
+       re-running the handshake.  ``m_charge_session.in_session`` is what
+       distinguishes the two.  See `Sleeping through a charge wait`_.
    * - ``AWAKE → SLEEP`` (forced, door watch)
      - ``monotonic - m_awake_entered > 300`` AND charge door never opened
      - 5-minute watchdog when awake with no ``CS_DRIVING`` and charge
@@ -255,6 +271,13 @@ All edges live in ``etnga_poll_states.cpp``.
      - ``IsBusAlive() == false``
      - Bus went dead during scheduled wait (OBC slept or gateway isolated
        OBD).  Arms the escalating cooldown latch.
+   * - ``CHARGE_WAIT → SLEEP`` (12 V drain)
+     - 600 s in ``CHARGE_WAIT`` without charge engaging — or 15 s if this wait
+       was re-entered after a previous wait-sleep
+     - Stops polling so the bus idles and 12 V recovers.  The charge session is
+       **preserved** across the sleep and resumes via ``AWAKE → CHARGE_WAIT``.
+       Arms the escalating cooldown latch.  See
+       `Sleeping through a charge wait`_.
    * - ``CHARGE_AC → CHARGE_WAIT``
      - ``ac_op == 0x00`` (Stop) OR PISW ``== 0x00``
      - Phase ended cleanly or cable pulled.  Sets
@@ -583,6 +606,46 @@ OBC, ``0x745``) **and** in ``DRIVING`` (from the hybrid control ECU,
    from 61.8 → 51.3 kW under a 100 kW station was wrongly reported
    "station 60.6 kW" before the fix.)
 
+Sleeping through a charge wait
+==============================
+
+A scheduled or delayed charge can leave the module sitting in ``CHARGE_WAIT``
+for hours with the cable seated and nothing happening.  Polling through that
+window at the handshake cadence drained the 12 V battery far enough to miss the
+charge it was waiting for, so ``CHARGE_WAIT`` sleeps instead of waiting awake.
+
+Two thresholds govern it (``etnga_poll_states.cpp``)::
+
+    CHARGE_WAIT_SLEEP_SECS   = 600   // first wait with no charge -> sleep
+    CHARGE_WAIT_RESLEEP_SECS = 15    // wait re-entered after a wait-sleep -> sleep fast
+
+The first wait of a session gets a responsive 10-minute window.  Once the
+module has slept out of a wait at least once (``m_charge_wait_slept``), every
+later wait re-sleeps after 15 s, which keeps the duty cycle of the
+wake/check/sleep oscillation low over a long delay.
+
+The cycle is:
+
+#. ``CHARGE_WAIT`` idles past its threshold → ``TransitionToSleepState()``.
+   The in-RAM charge session is **not** reset — ``in_session`` stays true and
+   the streamed CSV stays open.
+#. ``SLEEP`` wakes normally, on CAN traffic or a 12 V rising edge, subject to
+   the escalating cooldown.
+#. ``HandleAwakeState`` sees PISW ``≥ 0x02`` with a session already open and
+   takes ``AWAKE → CHARGE_WAIT`` rather than ``AWAKE → CHARGE_HANDSHAKE``, so
+   the handshake is not re-run and the session is not reopened.
+#. From ``CHARGE_WAIT`` the ordinary engage checks apply: ``ac_op`` of ``0x01``
+   or ``0x02`` enters ``CHARGE_AC``, an HLC state of ``0x0A``–``0x12`` enters
+   ``CHARGE_DC``.  Both are polled at 10 s in ``CHARGE_WAIT``, so a charge that
+   starts during a waking window is caught within 10 s.
+
+The consequence to keep in mind when changing any of this: while the module is
+asleep mid-wait it is not watching the cable.  A cable removed during the sleep
+gap is detected on the next wake by the PISW reconcile in ``HandleAwakeState``,
+which needs two consecutive fresh ``0x00`` reads before it finalizes the
+session — that debounce is what stops the ~30 s post-wake OBC transient from
+closing a session that is still plugged in.
+
 Cooldown latch
 ==============
 
@@ -608,9 +671,10 @@ activity event — drive start, charge start, charge-door open, or 12 V
 bump — calls ``ResetSleepBackoff()`` which returns the index to 0 so the
 next sleep uses the shortest (10 s) window again.
 
-The 12 V-based wake path is **not** gated by ``m_allow_wake`` — high aux
-voltage will pull the driver out of ``SLEEP`` even mid-cooldown, and also
-resets the backoff index.
+The 12 V-based wake path is **not** gated by ``m_allow_wake`` — a rising
+edge on aux voltage will pull the driver out of ``SLEEP`` even mid-cooldown,
+and also resets the backoff index.  It lifts the cooldown gate as it goes, so
+incoming CAN frames can then hold the driver awake.
 
 ``CHARGE_WAIT → SLEEP`` also arms the cooldown latch (using the current
 backoff window) to prevent immediate re-wake from bus noise after the OBC
@@ -663,6 +727,14 @@ Notes and quirks
   ``HandleSleepState`` compares against
   ``ms_v_bat_12v_voltage_ref + 0.2``; on an uncalibrated module the
   CAN-frame path is the reliable wake mechanism.
+* **The 12 V wake is a rising edge, deliberately.**  An earlier
+  level-triggered version oscillated: post-drive and post-charge surface
+  charge holds 12 V above ``ref + 0.2`` for a long time with a dead bus, so
+  every ``SLEEP`` tick reset the backoff, reset the CAN controller and bounced
+  to ``AWAKE`` — a ~2 s SLEEP/AWAKE loop with one CAN reset per cycle, whose
+  sleep re-entry also restarted the cooldown so frame-wake never re-enabled
+  until 12 V decayed.  The ``m_12v_was_high`` latch and its 0.1 V hysteresis
+  band exist to prevent that; do not simplify them back to a level test.
 * **Driving-state exit clears more than charge-state exit.**
   ``HandleDrivingState`` clears speed, gear, and temperatures; charge
   states clean up via ``SetChargingStatus(false)`` and ``SetChargeState``
