@@ -15,7 +15,7 @@ Vehicle identity
 
 :Short type code: TOYBZ4X
 :Vehicle name: Toyota bZ4X
-:Log tag: ``v-toyota-bz4x`` (wrapper only). Nearly all logging comes from the shared
+:Log tag: ``v-toybz4x`` (wrapper only). Nearly all logging comes from the shared
    e-TNGA platform under ``v-etnga`` — set that one to collect diagnostics, e.g.
    ``log level verbose v-etnga``.
 :Config namespace: ``xte`` (inherited from the e-TNGA base; the bZ4X registers no
