@@ -101,6 +101,7 @@ void powermgmt::Ticker1(std::string event, void* data)
 #ifdef CONFIG_OVMS_COMP_WIFI
       if (m_wifi_off)
         {
+        ESP_LOGI(TAG,"Powering on wifi, restoring autostart mode");
         MyPeripherals->m_esp32wifi->SetPowerMode(On);
         // PowerUp only initializes the driver, restore the autostart mode:
         MyPeripherals->m_esp32wifi->AutoInit();
@@ -110,6 +111,7 @@ void powermgmt::Ticker1(std::string event, void* data)
 #ifdef CONFIG_OVMS_COMP_CELLULAR
       if (m_modem_off)
         {
+        ESP_LOGI(TAG,"Powering on cellular modem");
         MyPeripherals->m_cellular_modem->SetPowerMode(On);
         m_modem_off = false;
         }
