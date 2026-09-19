@@ -70,7 +70,6 @@ env:
   # Free-tier quota). Objects keyed by github.run_id; ovms-modern's network-flash
   # vintage path downloads ovms3.bin from there by run_id. 30-day bucket lifecycle.
   MINIO_ENDPOINT: http://10.20.5.228:9000
-  MC_VERSION: RELEASE.2025-08-13T08-35-41Z
 
 jobs:
   build:
@@ -199,20 +198,17 @@ jobs:
         # fresh serial flash (`make flash`). ovms3.elf + ovms3.map carry the debug
         # symbols / link map needed to decode a crash backtrace (`boot status`)
         # back to functions and source lines. All keyed by run_id under ovms3/.
+        # Plain SigV4-signed S3 PUTs from a stdlib-only script: dl.min.io stopped
+        # serving the mc client (HTTP 410), and curl < 7.86 mis-signs uploads.
         env:
           MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
           MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          set -euo pipefail
-          curl -fsSL "https://dl.min.io/client/mc/release/linux-amd64/archive/mc.${MC_VERSION}" -o "$RUNNER_TEMP/mc"
-          chmod +x "$RUNNER_TEMP/mc"
-          "$RUNNER_TEMP/mc" alias set sh "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
-          "$RUNNER_TEMP/mc" cp \
+          python3 .github/scripts/minio_put.py "$MINIO_ENDPOINT" "ci-artifacts/${RUN_ID}/ovms3" \
             vehicle/OVMS.V3/build/ovms3.bin \
             vehicle/OVMS.V3/build/ovms3.elf \
             vehicle/OVMS.V3/build/ovms3.map \
             vehicle/OVMS.V3/build/bootloader/bootloader.bin \
             vehicle/OVMS.V3/build/partitions.bin \
-            vehicle/OVMS.V3/build/ota_data_initial.bin \
-            "sh/ci-artifacts/${RUN_ID}/ovms3/"
+            vehicle/OVMS.V3/build/ota_data_initial.bin
