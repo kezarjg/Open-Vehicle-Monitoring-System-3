@@ -95,17 +95,23 @@ void powermgmt::Ticker1(std::string event, void* data)
       {
       ESP_LOGI(TAG,"Charging 12V battery..");
       m_charging=true;
+      // Restart the delays, else the check below powers off again immediately:
+      m_notcharging_timer=0;
       // Turn on WiFi and modem if they were previously turned off by us
 #ifdef CONFIG_OVMS_COMP_WIFI
       if (m_wifi_off)
         {
+        ESP_LOGI(TAG,"Powering on wifi, restoring autostart mode");
         MyPeripherals->m_esp32wifi->SetPowerMode(On);
+        // PowerUp only initializes the driver, restore the autostart mode:
+        MyPeripherals->m_esp32wifi->AutoInit();
         m_wifi_off = false;
         }
 #endif
 #ifdef CONFIG_OVMS_COMP_CELLULAR
       if (m_modem_off)
         {
+        ESP_LOGI(TAG,"Powering on cellular modem");
         MyPeripherals->m_cellular_modem->SetPowerMode(On);
         m_modem_off = false;
         }
