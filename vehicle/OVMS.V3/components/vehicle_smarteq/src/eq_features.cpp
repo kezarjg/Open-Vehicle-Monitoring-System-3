@@ -48,6 +48,8 @@ void OvmsVehicleSmartEQ::setTPMSValue() {
   static const float PRESSURE_MAX = 500.0f;  // Above this = invalid reading
   static const float TEMP_MIN = -40.0f;
   static const float TEMP_MAX = 90.0f;
+  static const uint32_t TPMS_ALERT_INTERVAL = 24u * 3600u;
+  const uint32_t now = StdMetrics.ms_m_timeutc->AsInt();
 
   for (int i = 0; i < count; i++)
     {
@@ -73,34 +75,54 @@ void OvmsVehicleSmartEQ::setTPMSValue() {
       float ref_pressure  = (i < (count / 2)) ? m_front_pressure : m_rear_pressure;
       float abs_deviation = std::abs(pressure - ref_pressure);
       short alert         = 0;
+      bool notify_allowed = (m_tpms_last_notify_time[i] == 0) ||
+                            ((now - m_tpms_last_notify_time[i]) >= TPMS_ALERT_INTERVAL);
+      bool notify_alert_allowed = (m_tpms_last_alert_time[i] == 0) ||
+                            ((now - m_tpms_last_alert_time[i]) >= TPMS_ALERT_INTERVAL);
 
       if (lowbatt)
         {
         alert = 1;
-        MyNotify.NotifyStringf("alert", "tpms.lowbatt",
-                               "TPMS low battery on wheel %s",
-                               tpms_layout[i].c_str());
+        if (notify_allowed)
+          {
+          MyNotify.NotifyStringf("alert", "tpms.lowbatt",
+                                 "TPMS low battery on wheel %s",
+                                 tpms_layout[i].c_str());
+          m_tpms_last_notify_time[i] = now;
+          }
         }
       else if (missing_tx)
         {
         alert = 2;
-        MyNotify.NotifyStringf("alert", "tpms.missing_tx",
-                               "TPMS missing transmission on wheel %s",
-                               tpms_layout[i].c_str());
+        if (notify_allowed)
+          {
+          MyNotify.NotifyStringf("alert", "tpms.missing_tx",
+                                 "TPMS missing transmission on wheel %s",
+                                 tpms_layout[i].c_str());
+          m_tpms_last_notify_time[i] = now;
+          }
         }
       else if (abs_deviation > m_pressure_alert)
         {
         alert = 2;
-        MyNotify.NotifyStringf("alert", "tpms.alert",
-                               "TPMS pressure alert on wheel %s: %.1f kPa (ref: %.1f kPa)",
-                               tpms_layout[i].c_str(), pressure, ref_pressure);
+        if (notify_alert_allowed)
+          {
+          MyNotify.NotifyStringf("alert", "tpms.alert",
+                                 "TPMS pressure alert on wheel %s: %.1f kPa (ref: %.1f kPa)",
+                                 tpms_layout[i].c_str(), pressure, ref_pressure);
+          m_tpms_last_alert_time[i] = now;
+          }
         }
       else if (abs_deviation > m_pressure_warning)
         {
         alert = 1;
-        MyNotify.NotifyStringf("alert", "tpms.warning",
-                               "TPMS pressure warning on wheel %s: %.1f kPa (ref: %.1f kPa)",
-                               tpms_layout[i].c_str(), pressure, ref_pressure);
+        if (notify_allowed)
+          {
+          MyNotify.NotifyStringf("alert", "tpms.warning",
+                                 "TPMS pressure warning on wheel %s: %.1f kPa (ref: %.1f kPa)",
+                                 tpms_layout[i].c_str(), pressure, ref_pressure);
+          m_tpms_last_notify_time[i] = now;
+          }
         }
       tpms_alert[i] = alert;
       }
@@ -356,11 +378,9 @@ void OvmsVehicleSmartEQ::smartOn()
   // reset idle ticker when vehicle turned on to prevent trigger every 60 sec.
   m_idle_ticker = 15 * 60;
   // canwrite enable write access, only when car is on
-  if(IsCANwrite()) 
-    {
-    smartCoolDownPolling(5);
-    smartOBDpolling(true);
-    }
+
+  smartCoolDownPolling(5);
+  smartOBDpolling();
   ESP_LOGD(TAG, "smartOn()");
 }
 
@@ -369,23 +389,21 @@ void OvmsVehicleSmartEQ::smartOff()
   // Reset gear
   StdMetrics.ms_v_env_gear->SetValue(0);
   smartCoolDownPolling();
+  smartOBDpolling();
 }
 
 void OvmsVehicleSmartEQ::smartAwake()
 {
   smartCoolDownPolling();
-  // enable active polling when car wakes up (canwrite only)
-  if(m_enable_write)
-    smartOBDpolling(true);
-  else if (m_enable_write_caron && m_can_active)
-    smartOBDpolling(false); // only enable when car is on and CAN write access #2 is enabled
+  // enable active polling when car wakes up
+  smartOBDpolling();
 }
 
 void OvmsVehicleSmartEQ::smartSleep()
 {  
   smartCoolDownPolling(20);
   // disable active polling when car goes to sleep
-  if((m_enable_write_caron && m_can_active) || (m_enable_write_sleep && m_can_active))
+  if(m_disable_write_sleep)
     smartOBDpolling(false);
   ESP_LOGD(TAG, "smartSleep()");
 }
@@ -413,7 +431,7 @@ void OvmsVehicleSmartEQ::smartChargeStart()
     m_ADCfactor_recalc_timer = 2;   // wait at least 2 min. before recalculation
     m_ADCfactor_recalc = true;      // recalculate ADC factor when HV charging
     }
-  smartOBDpolling(true);  
+  smartOBDpolling();  
   ESP_LOGD(TAG, "smartChargeStart()");
 }
 
@@ -473,22 +491,81 @@ void OvmsVehicleSmartEQ::smartCoolDownPolling(int delay_sec)
 }
 
 void OvmsVehicleSmartEQ::smartOBDpolling(bool activate)
-{
-  if(!IsCANwrite())
+{  
+  if (!canCANbusActive())
+    activate = false;
+  if ( m_can_active != activate )
     {
-    PollSetPidList(m_can1, NULL);
-    m_can_active = false;
-    m_poll_on_charge = false;
-    ESP_LOGD(TAG, "smartOBDpolling(): CAN bus polling list cleared (write access disabled)");
-    return;
+    // cool down polling before switching the state
+    smartCoolDownPolling();
+    if(!activate)
+      {
+      m_poll_on_charge = false;
+      ESP_LOGD(TAG, "smartOBDpolling(): CAN bus polling list cleared");
+      }
+    else 
+      {
+      ESP_LOGD(TAG, "smartOBDpolling(): CAN bus polling list will be updated");
+      }    
+    m_can_active = activate;
     }
-    
-  m_can_active = activate;
-  if (activate)
-    ESP_LOGD(TAG, "smartOBDpolling(): CAN bus polling list will be updated");
-  else
-    ESP_LOGD(TAG, "smartOBDpolling(): CAN bus polling list cleared");
+  smartCANbusAccess(activate);
   HandleOBDpolling();
+}
+
+void OvmsVehicleSmartEQ::smartCANbusAccess(bool activate) 
+{
+  if ( m_can_last_acc_state != activate )
+    {
+    ESP_LOGD(TAG, "smartCANbusAccess(): CAN bus access state changed from %s to %s",
+             m_can_active ? "ACTIVE" : "LISTEN-ONLY",
+             activate ? "ACTIVE" : "LISTEN-ONLY");
+    // set CAN bus transceiver to active or listen-only state
+    CAN_mode_t mode = activate ? CAN_MODE_ACTIVE : CAN_MODE_LISTEN;
+    RegisterCanBus(1, mode, CAN_SPEED_500KBPS);
+    m_can_last_acc_state = activate;
+    }
+}
+
+void OvmsVehicleSmartEQ::SendGPSLog()
+{
+  bool modified =
+    StdMetrics.ms_v_pos_odometer->IsModifiedAndClear(m_modifier) |
+    StdMetrics.ms_v_pos_latitude->IsModifiedAndClear(m_modifier) |
+    StdMetrics.ms_v_pos_longitude->IsModifiedAndClear(m_modifier) |
+    StdMetrics.ms_v_pos_altitude->IsModifiedAndClear(m_modifier) |
+    StdMetrics.ms_v_pos_direction->IsModifiedAndClear(m_modifier) |
+    StdMetrics.ms_v_pos_gpsspeed->IsModifiedAndClear(m_modifier) |
+    StdMetrics.ms_v_pos_speed->IsModifiedAndClear(m_modifier) |
+    StdMetrics.ms_v_bat_power->IsModifiedAndClear(m_modifier) |
+    StdMetrics.ms_v_bat_energy_used->IsModifiedAndClear(m_modifier) |
+    StdMetrics.ms_v_bat_energy_recd->IsModifiedAndClear(m_modifier) |
+    StdMetrics.ms_v_bat_current->IsModifiedAndClear(m_modifier);
+
+  if (!modified)
+    return;
+
+  std::ostringstream buf;
+  buf
+    << "XSQ-GPS-Log,"
+    << (long)(StdMetrics.ms_v_pos_odometer->AsFloat(0.0f, Kilometers) * 10.0f)
+    << ",86400"
+    << std::fixed << std::setprecision(6)
+    << "," << StdMetrics.ms_v_pos_latitude->AsFloat(0.0f)
+    << "," << StdMetrics.ms_v_pos_longitude->AsFloat(0.0f)
+    << std::setprecision(0)
+    << "," << StdMetrics.ms_v_pos_altitude->AsFloat(0.0f)
+    << "," << StdMetrics.ms_v_pos_direction->AsFloat(0.0f)
+    << "," << StdMetrics.ms_v_pos_speed->AsFloat(0.0f)
+    << "," << (int)StdMetrics.ms_v_pos_gpslock->AsBool(false)
+    << "," << StdMetrics.ms_v_pos_latitude->Age()
+    << "," << StdMetrics.ms_m_net_sq->AsInt(0)
+    << "," << StdMetrics.ms_v_bat_power->AsFloat(0.0f)
+    << "," << StdMetrics.ms_v_bat_energy_used->AsFloat(0.0f)
+    << "," << StdMetrics.ms_v_bat_energy_recd->AsFloat(0.0f)
+    << "," << StdMetrics.ms_v_bat_current->AsFloat(0.0f);
+
+  MyNotify.NotifyString("data", "xsq.gps.log", buf.str().c_str());
 }
 
 /**

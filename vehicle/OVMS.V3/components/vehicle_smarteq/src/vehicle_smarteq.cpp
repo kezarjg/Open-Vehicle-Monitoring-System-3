@@ -34,6 +34,8 @@ static const char *TAG = "v-smarteq";
 
 #include "vehicle_smarteq.h"
 
+size_t OvmsVehicleSmartEQ::m_modifier = 0;
+
 OvmsVehicleSmartEQ* OvmsVehicleSmartEQ::GetInstance(OvmsWriter* writer)
 {
   OvmsVehicleSmartEQ* smarteq = (OvmsVehicleSmartEQ*) MyVehicleFactory.ActiveVehicle();
@@ -52,6 +54,11 @@ OvmsVehicleSmartEQ* OvmsVehicleSmartEQ::GetInstance(OvmsWriter* writer)
  */
 
 OvmsVehicleSmartEQ::OvmsVehicleSmartEQ() {
+  if (m_modifier == 0) {
+    m_modifier = MyMetrics.RegisterModifier();
+    ESP_LOGD(TAG, "registered metric modifier is #%d", m_modifier);
+  }
+
   ESP_LOGI(TAG, "Start smart EQ vehicle module");
 
   // BMS configuration:
@@ -184,8 +191,8 @@ OvmsVehicleSmartEQ::OvmsVehicleSmartEQ() {
   mt_bms_mfr_id                 = MyMetrics.InitInt("xsq.bms.id.mfr", SM_STALE_NONE, 0,   Other);
   mt_bms_basic_parts            = MyMetrics.InitString("xsq.bms.id.basic.parts", SM_STALE_NONE, "",  Other);
 
-  // Start CAN bus in CAN_MODE_ACTIVE mode
-  RegisterCanBus(1, CAN_MODE_ACTIVE, CAN_SPEED_500KBPS);
+  // Start CAN bus in CAN_MODE_LISTEN mode
+  RegisterCanBus(1, CAN_MODE_LISTEN, CAN_SPEED_500KBPS);
   PollSetState(POLLSTATE_OFF);
 
   // register config container for smart EQ module, with callback to ConfigChanged() on changes
@@ -258,7 +265,7 @@ void OvmsVehicleSmartEQ::ConfigChanged(OvmsConfigParam* param) {
     {
     setTPMSValue();   // update TPMS metrics
     m_ref12V = MyConfig.GetParamValueFloat("vehicle", "12v.ref", 12.5f);
-    m_alert12V = MyConfig.GetParamValueFloat("vehicle", "12v.alert", 0.9f);
+    m_alert12V = MyConfig.GetParamValueFloat("vehicle", "12v.alert", 0.75f);
     }
   if (param && param->GetName() != "xsq")
     return;
@@ -269,7 +276,6 @@ void OvmsVehicleSmartEQ::ConfigChanged(OvmsConfigParam* param) {
   // Note: GetValueBool/Int/Float treat empty string as "not set" and return the default.
   OvmsConfigParam* map = MyConfig.CachedParam("xsq");
   
-  bool stateWrite         = m_enable_write;
   bool obdii_743          = true;
   bool obdii_745          = true;
   bool obdii_745_tpms     = true;
@@ -282,7 +288,8 @@ void OvmsVehicleSmartEQ::ConfigChanged(OvmsConfigParam* param) {
     {
     m_enable_write         = map->GetValueBool("canwrite", false);
     m_enable_write_caron   = map->GetValueBool("canwrite.caron", false);
-    m_enable_write_sleep   = map->GetValueBool("canwrite.sleep", false);
+    m_enable_write_caroff  = map->GetValueBool("canwrite.caroff", false);
+    m_disable_write_sleep  = map->GetValueBool("canwrite.sleep", false);
     m_enable_LED_state     = map->GetValueBool("led", false);
     m_bcvalue              = map->GetValueBool("bcvalue", false);
     m_enable_lock_state    = map->GetValueBool("unlock.warning", true);
@@ -294,6 +301,7 @@ void OvmsVehicleSmartEQ::ConfigChanged(OvmsConfigParam* param) {
     m_tpms_temp_enable     = map->GetValueBool("tpms.temp", true);
     m_12v_charge           = map->GetValueBool("12v.charge", true);
     m_enable_calcADCfactor = map->GetValueBool("calc.adcfactor", false);
+    m_gps_log_enable       = map->GetValueBool("gps.log", false);
     m_indicator            = map->GetValueBool("indicator", false);
     m_extendedStats        = map->GetValueBool("extended.stats", false);
     obdii_79b              = map->GetValueBool("obdii.79b", true);
@@ -328,24 +336,18 @@ void OvmsVehicleSmartEQ::ConfigChanged(OvmsConfigParam* param) {
     }
 #endif
 
-  // set CAN bus transceiver to active or listen-only depending on user selection
-  if ( stateWrite != m_enable_write )
-    {
-    smartCoolDownPolling();
-    smartOBDpolling(m_enable_write);
-    }
-  // disable caron write mode if normal write mode is enabled to avoid conflicts
-  if(m_enable_write_caron && m_enable_write) 
+  // disable caron/off write modes if at least two write modes are enabled
+  if ((m_enable_write && (m_enable_write_caron || m_enable_write_caroff)) ||
+      (m_enable_write_caron && m_enable_write_caroff))
     {
     m_enable_write_caron = false;
+    m_enable_write_caroff = false;
     MyConfig.SetParamValueBool("xsq", "canwrite.caron", false);
+    MyConfig.SetParamValueBool("xsq", "canwrite.caroff", false);
     }
-  // start in listen-only mode if sleep write is enabled and bus is not awake
-  if (m_enable_write_sleep && !IsAwakeEQ())
-    {
-    smartCoolDownPolling();
-    smartOBDpolling(false);
-    }
+
+  // Set the state of the CAN access and polling, according to the user selection
+  smartOBDpolling();
 
   bool do_modify_poll = (
     (obdii_79b != m_obdii_79b) ||

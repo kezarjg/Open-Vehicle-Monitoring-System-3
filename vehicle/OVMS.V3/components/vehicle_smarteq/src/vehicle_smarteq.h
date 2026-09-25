@@ -35,8 +35,8 @@
 
 // --- Constants ---
 #define VERSION "2.2.0"
-#define PRESET_VERSION 20260720        // Configuration preset version
-#define PRESET_VERSION_12VREF 20260706 // Configuration preset version for 12V reference migration, defined separately to allow setting 12V reference migration
+#define PRESET_VERSION 20260823        // Configuration preset version
+#define PRESET_VERSION_12VREF 20260823 // Configuration preset version for 12V reference migration, defined separately to allow setting 12V reference migration
 #define DEFAULT_BATTERY_CAPACITY 16700 // <- net 16700 Wh, gross 17600 Wh
 #define MAX_POLL_DATA_LEN 126
 #define CELLCOUNT 96
@@ -59,6 +59,8 @@
 #include "can.h"
 #include "vehicle.h"
 #include "metrics_standard.h"
+#include "ovms_server_v2.h"
+#include "ovms_server_v3.h"
 
 #include "ovms_config.h"
 #include "ovms_metrics.h"
@@ -115,7 +117,7 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     void HandleCharging();
     void HandleEnergy();
     void HandleTripcounter();
-    void Handlev2Server();
+    void HandleServerCon();
     void UpdateChargeMetrics();
     int  calcMinutesRemaining(float target, float charge_voltage, float charge_current);
     void HandlePollState();
@@ -138,6 +140,7 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     void Notify12Vcharge();
     void NotifySOClimit();
     void NotifyHVCycles(bool alert = false);
+    void SendGPSLog();
 
     // --- Door / Lock state ---
     bool DoorOpen();
@@ -153,7 +156,8 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     void smartChargeStop();
     void smartChargePrepare();
     void smartChargeFinish();
-    void smartOBDpolling(bool activate);
+    void smartOBDpolling(bool activate = true);
+    void smartCANbusAccess(bool activate);
     void smartCoolDownPolling(int delay_sec = 10);
     void smartCAN2Metrics();
 
@@ -232,7 +236,10 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     bool IsOnEQ() { return can_env_on; }
     bool IsChargingEQ() { return can_charge_inprogress; }
     bool IsOnHVACEQ() { return can_hvac; }
-    bool IsCANwrite() { return m_enable_write || m_enable_write_caron; }
+    bool IsCANwrite() { return ( m_enable_write || m_enable_write_caron || m_enable_write_caroff ); }
+    bool canCANbusActive() { return ((m_enable_write) ||
+                                     (m_enable_write_caron && (IsOnEQ() || IsChargingEQ())) || 
+                                     (m_enable_write_caroff && !IsOnEQ()) ); }
     bool Is12VchargeEQ() { return StdMetrics.ms_v_bat_12v_voltage->AsFloat(0.0f) >= 13.1f || 
                                   (m_can_active && StdMetrics.ms_v_charge_12v_voltage->AsFloat(0.0f) >= 13.1f ) || 
                                   (m_can_active && can_charging12v); }
@@ -434,7 +441,8 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     // --- Config-driven member variables ---
     bool m_enable_write = false;            // canwrite enable write access
     bool m_enable_write_caron = false;      // canwrite enable write access, only when car is on
-    bool m_enable_write_sleep = false;      // canwrite disable write access, only when car is asleep
+    bool m_enable_write_caroff = false;     // canwrite enable write access, only when car is off
+    bool m_disable_write_sleep = false;     // canwrite disable write access, only when car is asleep
     bool m_can_active = false;              // true if CAN bus is in active mode, false if in listen-only mode
     bool m_enable_LED_state = false;        // Online LED State
     bool m_enable_lock_state = true;        // Lock State
@@ -449,9 +457,10 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     bool m_12v_charge_state = false;        // 12V charge state
     bool m_extendedStats = false;           // extended stats for trip and maintenance data
     bool m_enable_calcADCfactor = false;    // enable calculation of ADC factor
+    bool m_gps_log_enable = false;          // enable GPS history log (V2 L message), opt-in only
     bool m_cmd_wakeup = false;              // wakeup command issued
     int m_reboot_ticker = 0;                // ticker for network restart
-    int m_reboot_time = 30;                 // Restart Network time
+    int m_reboot_time = 30;                 // Restart Network time (minutes), when Server connection is lost
     int m_TPMS_FL = 0;                      // TPMS Sensor Front Left
     int m_TPMS_FR = 0;                      // TPMS Sensor Front Right
     int m_TPMS_RL = 0;                      // TPMS Sensor Rear Left
@@ -469,7 +478,7 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     std::deque<float> m_adc_factor_history;     // ring buffer (max 10) for ADC factors
     std::deque<float> m_12v_undervolt_history;  // ring buffer (max 10) for 12V undervoltage measurements
     float m_ref12V = 12.5f;                 // reference 12V (12.5V)
-    float m_alert12V = 0.9f;                // alert threshold 12V (0.9V)
+    float m_alert12V = 0.75f;                // alert threshold 12V (0.75V)
     bool m_12v_alerted = false;             // 12V undervolt alert triggered
     int m_12v_alerted_ticker = -1;          // cooldown ticker for 12V undervolt alert reset
 
@@ -482,6 +491,7 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     bool m_notifySOClimit = false;          // notify SOClimit reached one time
     bool m_poll_on_charge = false;          // flag to trigger poll state change actions
     bool m_cmd_locked = false;
+    bool m_can_last_acc_state = false;      // last active/listen state from CAN bus
     int m_adc_samples = 5;                  // number of samples for ADC factor calculation
     int m_ddt4all_ticker = 0;               // DDT4ALL active ticker
     int m_ddt4all_exec = 0;                 // DDT4ALL ticker for next execution
@@ -508,6 +518,7 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
   // private
   // =========================================================================
   private:
+    static size_t m_modifier;
     static OvmsVehicleSmartEQ* GetInstance(OvmsWriter* writer=NULL);
     // ADC factor calculation is needed based on 12V reading, only check when car is on or charging to avoid false recalculations based on 12V drop when car is off
     // activated only after reboot
@@ -576,6 +587,8 @@ class OvmsVehicleSmartEQ : public OvmsVehicle
     bool m_tpms_missing_tx[4] = {};       // 0=ok, 1=missing
     float m_tpms_pressure[4] = {};        // kPa
     float m_tpms_temperature[4] = {};     // °C
+    uint32_t m_tpms_last_notify_time[4] = {};  // last TPMS notification time per wheel (24h throttle)
+    uint32_t m_tpms_last_alert_time[4] = {};   // last TPMS alert notification time per wheel (24h throttle)
 };
 
 #endif //#ifndef __VEHICLE_SMARTEQ_H__
