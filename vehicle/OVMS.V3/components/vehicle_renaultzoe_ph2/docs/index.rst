@@ -115,9 +115,9 @@ You can choose between two methods:
 
 To update BMS firmware, visit a Renault dealer with CLIP and Token access. **Important:** Ensure "COMPUTER DATA" is not rewritten after flashing to prevent issues.
 
-------------------
+--------------
 Remote Control
-------------------
+--------------
 
 All remote control features require a V-CAN connection.
 
@@ -206,9 +206,9 @@ Set up automatic climate control using the global OVMS scheduler.
 - Battery SOC must be above 15%
 - Scheduler must be enabled
 
------------------------
+----------------------
 12V Battery Management
------------------------
+----------------------
 
 Keep your 12V battery healthy with automatic and manual charging features. All features require V-CAN connection.
 
@@ -346,9 +346,9 @@ Configure your Zoe via the web interface at **Renault Zoe Ph2 Setup**.
 - **BMS View**: Monitor individual cell voltages and temperatures
 - **Preconditioning Schedule**: Set up automatic climate control
 
------------------------
+----------------------
 PV/Solar Charging Mode
------------------------
+----------------------
 
 When using a solar/PV-controlled wallbox, charging may start and stop multiple times per day based on available solar power. The PV charging mode suppresses individual notifications and provides a single summary when you unplug.
 
@@ -381,9 +381,9 @@ Or via shell:
 - Session tracking resets when you plug in the cable
 - System restart while plugged: session starts at boot time, not actual plug time
 
--------------------------
+------------------------
 Automatic PTC Activation
--------------------------
+------------------------
 
 The Zoe PH2 integration can automatically enable the PTC heaters based on outside temperature.
 

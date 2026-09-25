@@ -791,9 +791,12 @@ void esp32wifi::Reconnect(OvmsWriter* writer)
   if (writer)
     writer->puts("Starting Wifi client reconnect.");
   else
-    ESP_LOGE(TAG, "Reconnect: starting Wifi client reconnect");
+    ESP_LOGI(TAG, "Reconnect: starting Wifi client reconnect");
   if (!m_sta_connected)
     {
+    // not connected, but a connect attempt may be running (potentially stuck), stop it:
+    esp_wifi_disconnect();
+    // schedule the reconnect via EventTimer1():
     m_sta_reconnect = monotonictime + 1;
     }
   else
@@ -869,7 +872,7 @@ void esp32wifi::AP2ClientSwitch() {
     }
   }
 
-wifi_active_scan_time_t esp32wifi::GetScanTime()
+int esp32wifi::GetScanTime(wifi_active_scan_time_t& active)
   {
   // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/wifi.html#scan-configuration
   // On wifi_active_scan_time_t:
@@ -882,12 +885,15 @@ wifi_active_scan_time_t esp32wifi::GetScanTime()
 
   // Hint: some older Android APs need higher min times, try 200 ms.
 
-  wifi_active_scan_time_t active;
   active.min = MyConfig.GetParamValueInt("network", "wifi.scan.tmin", 120);
   active.max = MyConfig.GetParamValueInt("network", "wifi.scan.tmax", 120);
   if (active.max < active.min)
     active.max = active.min;
-  return active;
+
+  // Calculate scan interval in seconds:
+  int scan_interval = roundup((LIMIT_MIN(active.max, 120) * 14) / 1000, 5) + 5;
+
+  return scan_interval;
   }
 
 void esp32wifi::Scan(OvmsWriter* writer, bool json)
@@ -917,8 +923,6 @@ void esp32wifi::Scan(OvmsWriter* writer, bool json)
 
   m_mode = ESP32WIFI_MODE_SCAN;
   esp_wifi_scan_stop();
-  if (m_sta_reconnect)
-    m_sta_reconnect = monotonictime + 10;
 
   if (!json)
     writer->puts("Scanning for WIFI Access Points...");
@@ -930,7 +934,14 @@ void esp32wifi::Scan(OvmsWriter* writer, bool json)
   scanConf.channel = 0;
   scanConf.show_hidden = true;
   scanConf.scan_type = WIFI_SCAN_TYPE_ACTIVE;
-  scanConf.scan_time.active = GetScanTime();
+  int scan_interval = GetScanTime(scanConf.scan_time.active);
+
+  if (m_sta_reconnect)
+    {
+    // reschedule next regular scan:
+    m_sta_reconnect = monotonictime + scan_interval;
+    }
+
   res = esp_wifi_scan_start(&scanConf, true);
   if (res != ESP_OK)
     {
@@ -1354,6 +1365,9 @@ void esp32wifi::StartConnect()
   // do a scan and connect explicitly to the AP with the strongest signal.
 
   OvmsRecMutexLock exclusive(&m_mutex);
+
+  // stop a still running (potentially stuck) connect attempt or scan:
+  esp_wifi_disconnect();
   esp_wifi_scan_stop();
 
   wifi_scan_config_t scanConf;
@@ -1363,15 +1377,15 @@ void esp32wifi::StartConnect()
   scanConf.channel = 0;
   scanConf.show_hidden = true;
   scanConf.scan_type = WIFI_SCAN_TYPE_ACTIVE;
-  scanConf.scan_time.active = GetScanTime();
+  int scan_interval = GetScanTime(scanConf.scan_time.active);
   esp_err_t res = esp_wifi_scan_start(&scanConf, false);
   if (res != ESP_OK)
     ESP_LOGE(TAG, "StartConnect: error 0x%x starting scan", res);
   else
     ESP_LOGV(TAG, "StartConnect: scan started");
 
-  // next regular scan in 10 seconds:
-  m_sta_reconnect = monotonictime + 10;
+  // schedule timeout / next regular scan:
+  m_sta_reconnect = monotonictime + scan_interval;
   }
 
 void esp32wifi::StartUpgradeScan()
@@ -1389,7 +1403,7 @@ void esp32wifi::StartUpgradeScan()
   scanConf.channel = 0;
   scanConf.show_hidden = true;
   scanConf.scan_type = WIFI_SCAN_TYPE_ACTIVE;
-  scanConf.scan_time.active = GetScanTime();
+  GetScanTime(scanConf.scan_time.active);   // interval not needed: no reconnect scheduling here
   m_sta_upgrade_scan = true;
   esp_err_t res = esp_wifi_scan_start(&scanConf, false);
   if (res != ESP_OK)
@@ -1577,6 +1591,8 @@ void esp32wifi::EventWifiScanDone(std::string event, void* data)
               SetSTAWifiIP();
             else
               StartDhcpClient();
+            // timeout connect in 10 seconds:
+            m_sta_reconnect = monotonictime + 10;
             }
           }
         }

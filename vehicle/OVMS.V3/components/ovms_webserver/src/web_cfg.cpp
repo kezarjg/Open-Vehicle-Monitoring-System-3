@@ -1239,11 +1239,14 @@ void OvmsWebServer::HandleFile(PageEntry_t& p, PageContext_t& c)
     c.head(200);
     if (c.method == "GET") {
       // Stream the file instead of appending the whole body to the connection buffer.
-      // The editor will open any readable path on /store or /sd, so the body is
-      // arbitrarily large; buffering it whole held the load_file target and the mbuf
-      // copy alive at once. Ownership of the body passes to the sender, which frees it
-      // and itself once the transfer completes and emits the terminating chunk — so
-      // this path deliberately does not fall through to c.done().
+      // The API will open any readable path on /store or /sd, so the body is bounded
+      // only by the file. Printing it whole holds three full-size copies at once: the
+      // load_file() target, the by-value argument of print(const extram::string), and
+      // the copy mg_send_http_chunk() appends to the connection mbuf - which cannot
+      // drain while the handler is still running. Streaming keeps only the first.
+      // Ownership of the body passes to the sender, which frees it and itself once the
+      // transfer completes and emits the terminating chunk - so this path deliberately
+      // does not fall through to c.done().
       // An empty body (a directory path, which loads nothing) is handled correctly:
       // the sender sends the terminating chunk on its first event and retires.
       extram::string* body = new extram::string();

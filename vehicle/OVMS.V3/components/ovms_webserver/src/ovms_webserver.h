@@ -334,17 +334,13 @@ class HttpDataSender : public MgHandler
 
 
 /**
- * HttpStringSender transmits a std::string in HTTP chunks of XFER_CHUNK_SIZE size.
+ * HttpStringSenderT transmits a string in HTTP chunks of XFER_CHUNK_SIZE size.
  * Note: the string is deleted after transmission.
- */
-/**
- * HttpStringSenderT: chunked transfer of a string the sender takes ownership of.
- *  The string must not be modified during the transfer; the sender deletes both the
- *  string and itself once the last chunk has gone out, and emits the terminating
- *  zero-length chunk, so the caller must NOT also call PageContext::done().
  *
- *  Two instantiations are provided. Prefer HttpExtRamStringSender for file-sized
- *  bodies so the payload sits in SPIRAM instead of internal 8-bit RAM.
+ * Two instantiations are provided: HttpStringSender for a std::string, and
+ * HttpExtRamStringSender for an extram::string. Prefer the latter for file-sized
+ * bodies: the sender takes ownership of the buffer the body was loaded into and
+ * emits it in place, so serving a large body needs no second full-size allocation.
  */
 template <class StringType>
 class HttpStringSenderT : public MgHandler
@@ -356,37 +352,51 @@ class HttpStringSenderT : public MgHandler
       m_msg = msg;
       m_sent = 0;
       m_keepalive = keepalive;
+      ESP_EARLY_LOGV("webserver", "HttpStringSender[%p]: init msg=%p, %d bytes", nc, m_msg, m_msg->size());
     }
     ~HttpStringSenderT()
     {
+      if (m_sent < m_msg->size()) {
+        ESP_EARLY_LOGV("webserver", "HttpStringSender[%p]: abort msg=%p, %d bytes sent", m_nc, m_msg, m_sent);
+      }
       delete m_msg;
     }
 
   public:
     int HandleEvent(int ev, void* p)
     {
-      if (ev == MG_EV_SEND)                 // last transmission has finished
+      switch (ev)
       {
-        if (m_sent < m_msg->size()) {
-          // send next chunk:
-          size_t remain = m_msg->size() - m_sent;
-          size_t len = (remain < XFER_CHUNK_SIZE) ? remain : (size_t) XFER_CHUNK_SIZE;
-          mg_send_http_chunk(m_nc, (const char*) m_msg->data() + m_sent, len);
-          m_sent += len;
+        case MG_EV_SEND:          // last transmission has finished
+        {
+          if (m_sent < m_msg->size()) {
+            // send next chunk:
+            size_t remain = m_msg->size() - m_sent;
+            size_t len = (remain < (size_t) XFER_CHUNK_SIZE) ? remain : (size_t) XFER_CHUNK_SIZE;
+            mg_send_http_chunk(m_nc, (const char*) m_msg->data() + m_sent, len);
+            m_sent += len;
+            ESP_EARLY_LOGV("webserver", "HttpStringSender[%p] msg=%p sent %d/%d", m_nc, m_msg, m_sent, m_msg->size());
+          }
+          else {
+            // done:
+            if (!m_keepalive)
+              m_nc->flags |= MG_F_SEND_AND_CLOSE;
+            mg_send_http_chunk(m_nc, "", 0);
+            ESP_EARLY_LOGV("webserver", "HttpStringSender[%p]: done msg=%p, %d bytes sent", m_nc, m_msg, m_sent);
+            delete this;
+          }
         }
-        else {
-          // done:
-          if (!m_keepalive)
-            m_nc->flags |= MG_F_SEND_AND_CLOSE;
-          mg_send_http_chunk(m_nc, "", 0);
-          delete this;
-        }
+        break;
+
+        default:
+          break;
       }
+
       return ev;
     }
 
   public:
-    StringType*               m_msg = NULL;           // owned payload
+    StringType*               m_msg = NULL;           // pointer to data
     size_t                    m_sent = 0;             // size sent up to now
     bool                      m_keepalive = false;    // false = close connection when done
 };
