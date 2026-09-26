@@ -1,0 +1,26 @@
+# Draft workflow: .github/workflows/web-assets-check.yml
+#
+# Fails the build if the committed web-asset bundles / .gz files are out of sync
+# with their sources (see .github/scripts/check-web-assets.sh). Lightweight — no
+# ESP-IDF toolchain needed — so it runs in seconds and only when assets change.
+name: Web assets sync check
+
+on:
+  push:
+    paths:
+      - 'vehicle/OVMS.V3/components/ovms_webserver/assets/**'
+      - '.github/scripts/check-web-assets.sh'
+      - '.github/workflows/web-assets-check.yml'
+  pull_request:
+    paths:
+      - 'vehicle/OVMS.V3/components/ovms_webserver/assets/**'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dos2unix
+        run: sudo apt-get update && sudo apt-get install -y dos2unix
+      - name: Verify committed web assets match their sources
+        run: bash .github/scripts/check-web-assets.sh
