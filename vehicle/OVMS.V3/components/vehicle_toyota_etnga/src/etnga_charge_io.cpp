@@ -20,10 +20,11 @@
 
 static const char* TAG = "v-etnga";
 
-static const int CHARGE_REPORT_MAX = 50;   // retain at most this many reports (moved from etnga_charge_report.cpp)
+static const int CHARGE_REPORT_MAX = 50;         // retain at most this many reports on the SD card
+static const int CHARGE_REPORT_MAX_STORE = 10;   // ...and on internal flash (shares /store with the config)
 
-// Retain only the newest CHARGE_REPORT_MAX sessions; delete both .html and .csv for each
-// pruned stem. Also removes orphan .csv files whose session never produced an .html.
+// Retain only the newest CHARGE_REPORT_MAX (CHARGE_REPORT_MAX_STORE on /store) sessions;
+// delete both .html and .csv for each pruned stem. Also removes orphan .csv files whose session never produced an .html.
 // (Relocated verbatim from etnga_charge_report.cpp so it runs on the worker, not Events.)
 static void PruneChargeReports(const std::string& dir)
 {
@@ -49,9 +50,10 @@ static void PruneChargeReports(const std::string& dir)
             unlink((dir + "/" + csv_stems[i] + ".csv").c_str());
     }
 
-    if ((int)stems.size() <= CHARGE_REPORT_MAX) return;
+    int keep = (dir.compare(0, 7, "/store/") == 0) ? CHARGE_REPORT_MAX_STORE : CHARGE_REPORT_MAX;
+    if ((int)stems.size() <= keep) return;
     std::sort(stems.begin(), stems.end());
-    int del = (int)stems.size() - CHARGE_REPORT_MAX;
+    int del = (int)stems.size() - keep;
     for (int i = 0; i < del; i++) {
         unlink((dir + "/" + stems[i] + ".html").c_str());
         unlink((dir + "/" + stems[i] + ".csv").c_str());

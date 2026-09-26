@@ -11,7 +11,7 @@ Open Vehicle Monitor System v3 - Change log
         battery replies at runtime so the 96-cell and the 2025/26 refresh packs both work
       Battery capacity and state of health (v.b.cac / v.b.soh / v.b.capacity)
       AC and DC charging: state, type, power, station and vehicle limits, charge port state
-      Charge session reports written to disk as HTML plus a per-sample CSV
+      Charge session reports written to the SD card as HTML plus a per-sample CSV
       TPMS pressures and temperatures via the gateway relay
       12V auxiliary battery voltage, current, temperature and capacity from the EV ECU
       Cabin and ambient temperature, HVAC power and per-trip cabin energy
@@ -26,6 +26,9 @@ Open Vehicle Monitor System v3 - Change log
     - [xte] bat.nominal.volt               -- Pack nominal voltage in V, used to convert the
                                               capacity to kWh for v.b.capacity (default 0 =
                                               derive from the detected pack)
+    - [xte] charge.report.storage          -- Charge report storage: sd (default, SD card
+                                              only), auto (fall back to the HTML report on
+                                              /store) or off
 - Server V3 (MQTT): added an optional liveness check that can be enabled in the web UI. When
     enabled, the MQTT client sends a ping probe after a configured idle period and reconnects if the
     broker remains silent beyond the timeout window. The check is off by default and can be toggled

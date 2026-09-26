@@ -23,7 +23,7 @@
    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
    THE SOFTWARE.
 
-   Writes a self-contained HTML report to /store/charge-reports/ at the end of each
+   Writes a self-contained HTML report to /sd/charge-reports/ at the end of each
    charging session (plug-in to unplug). This is the first increment: a single-phase,
    live-telemetry summary. Multi-phase tracking, sleep-survival / summary-mode,
    limiting-side attribution, the per-sample timeline and the error DID-dump
@@ -46,18 +46,38 @@
 #include <sdkconfig.h>
 #include "ovms_log.h"
 #include "metrics_standard.h"
+#include "ovms_config.h"
+#include "ovms_peripherals.h"
 #ifdef CONFIG_OVMS_COMP_LOCATION
 #include "ovms_location.h"
 #endif
 #include "vehicle_toyota_etnga.h"
 
-// Prefer the SD card (GBs, removable) for reports+CSV; fall back to internal flash.
+bool OvmsVehicleToyotaETNGA::ChargeSdAvailable()
+{
+#ifdef CONFIG_OVMS_COMP_SDCARD
+    return MyPeripherals && MyPeripherals->m_sdcard && MyPeripherals->m_sdcard->isavailable();
+#else
+    return false;
+#endif
+}
+
+// Where to write this session's report files, per [xte] charge.report.storage:
+//   sd   (default) SD card only; nothing is written when no card is mounted
+//   auto           SD card, falling back to internal flash (HTML report only, see below)
+//   off            no report files
+// Returns "" when nothing should be written. /store shares the 1 MB partition with the
+// module configuration, so it is only used on explicit opt-in.
 std::string OvmsVehicleToyotaETNGA::ChargeReportDir()
 {
-    struct stat st;
-    if (stat("/sd", &st) == 0 && S_ISDIR(st.st_mode))
+    std::string mode = MyConfig.GetParamValue("xte", "charge.report.storage", "sd");
+    if (mode == "off")
+        return "";
+    if (ChargeSdAvailable())
         return "/sd/charge-reports";
-    return "/store/charge-reports";
+    if (mode == "auto")
+        return "/store/charge-reports";
+    return "";
 }
 
 // Map a 0x1688 "Charging History Information" enum code to a human-readable label.
@@ -376,7 +396,9 @@ void OvmsVehicleToyotaETNGA::UpdateChargeSessionStats()
 
 void OvmsVehicleToyotaETNGA::AppendChargeCsvRow()
 {
-    if (m_charge_session.base.empty())
+    // The per-sample CSV is SD-only: an overnight AC session produces ~3 MB, which would
+    // fill the /store partition.
+    if (m_charge_session.base.compare(0, 4, "/sd/") != 0)
         return;
 
     if (!m_charge_session.csv_started) {
@@ -599,7 +621,7 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     CloseChargePhase();         // close any still-open phase (direct AC/DC->AWAKE safety net)
     const float energy_kwh = StandardMetrics.ms_v_charge_kwh->AsFloat();
     bool have_dump = (m_dump_phase_idx >= 0) || (m_dump_remaining.load() > 0);
-    if ((energy_kwh < 0.05f || m_charge_session.base.empty()) && !have_dump) {
+    if (m_charge_session.base.empty() || (energy_kwh < 0.05f && !have_dump)) {
         ESP_LOGD(TAG, "Charge report skipped (%.3f kWh)", energy_kwh);
         if (m_charge_session.csv_file_created) {  // remove the streamed stub CSV via the worker
             etnga_io_job* j = new etnga_io_job;
@@ -833,13 +855,12 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     }
     f << "</dl>\n";
 
-    {
+    if (m_charge_session.csv_file_created) {
         std::string csv = m_charge_session.base + ".csv";
         std::string name = csv.substr(csv.find_last_of('/') + 1);
-        // Include the storage location (the write side knows it) so WebChargeReport
-        // serves the right file without a fallback scan over every location.
-        const char* loc = (m_charge_session.base.compare(0, 4, "/sd/") == 0) ? "sd" : "store";
-        f << "<p><a href=\"/xte/report?file=" << name << "&amp;loc=" << loc
+        // The CSV is only ever written to the SD card (see AppendChargeCsvRow); the location
+        // lets WebChargeReport serve it without a fallback scan over every location.
+        f << "<p><a href=\"/xte/report?file=" << name << "&amp;loc=sd"
           << "\">Download per-sample CSV</a></p>\n";
     }
 
@@ -851,7 +872,7 @@ void OvmsVehicleToyotaETNGA::GenerateChargeReport()
     job->op        = etnga_io_job::WRITE_TRUNCATE;
     job->path      = m_charge_session.base + ".html";
     job->data      = f.str();
-    job->prune_dir = ChargeReportDir();
+    job->prune_dir = m_charge_session.base.substr(0, m_charge_session.base.find_last_of('/'));
     ChargeIoEnqueue(job);
     ESP_LOGI(TAG, "Charge report queued: %s.html (%.2f kWh, %d%%->%d%%)",
         m_charge_session.base.c_str(), energy_kwh, start_soc, end_soc);
