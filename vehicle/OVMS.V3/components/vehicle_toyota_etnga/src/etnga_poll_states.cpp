@@ -543,8 +543,13 @@ void OvmsVehicleToyotaETNGA::TransitionToChargeHandshakeState()
             } else {
                 snprintf(ts, sizeof(ts), "charge-%d", m_charge_session.start_monotonic);
             }
-            mkdir(ChargeReportDir().c_str(), 0755);
-            m_charge_session.base = ChargeReportDir() + "/" + ts;
+            std::string dir = ChargeReportDir();
+            if (dir.empty()) {
+                ESP_LOGI(TAG, "Charge report files disabled (no SD card or charge.report.storage=off)");
+            } else {
+                mkdir(dir.c_str(), 0755);
+                m_charge_session.base = dir + "/" + ts;
+            }
         }
         // INC-3: dump state is session-scoped — clear at session open so a fault dump from a
         // prior (possibly <0.05 kWh, report-skipped) session can never leak into this report.

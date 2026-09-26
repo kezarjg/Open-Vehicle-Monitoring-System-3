@@ -384,9 +384,15 @@ Charge session report
 ---------------------
 
 At the end of each charging session (plug-in to unplug), the module writes a self-contained HTML
-report and a per-sample CSV to ``/sd/charge-reports/`` when an SD card is mounted, falling back to
-``/store/charge-reports/`` on internal flash.  The newest 50 sessions are retained; older sessions
-and orphan CSV files whose session never produced a report are pruned automatically.
+report and a per-sample CSV to ``/sd/charge-reports/``.  The newest 50 sessions are retained; older
+sessions and orphan CSV files whose session never produced a report are pruned automatically.
+
+By default nothing is written when no SD card is mounted.  Setting ``charge.report.storage`` to
+``auto`` falls back to ``/store/charge-reports/`` on internal flash, which shares its 1 MB partition
+with the module configuration: only the HTML report is written there (the per-sample CSV of an
+overnight AC charge runs to about 3 MB) and only the newest 10 sessions are kept.  ``off`` disables
+the report files entirely.  The live charging page and the standard ``*-LOG-Grid`` session record
+(``config set notify log.grid.storetime <days>``) work regardless of this setting.
 
 The HTML report contains:
 
@@ -430,19 +436,22 @@ All e-TNGA vehicles share the ``xte`` config instance, registered by the base mo
 parameter can be set from the shell with ``config set xte <param> <value>`` or from the
 ``/xte/config`` web page.
 
-======================== ============= ==========================================================
-Parameter                Default       Meaning
-======================== ============= ==========================================================
-``tpms.pressure.warn``   240           Tyre pressure (kPa) below which a warning is raised
-``tpms.pressure.alert``  220           Tyre pressure (kPa) below which an alert is raised
-``tpms.temp.warn``       90            Tyre temperature (°C) above which a warning is raised
-``tpms.temp.alert``      100           Tyre temperature (°C) above which an alert is raised
-``bat.nominal.ah``       0             Pack nominal full-charge capacity (Ah), the denominator
-                                       for ``v.b.soh``.  ``0`` derives it from the detected pack,
-                                       which is only established for the 96-cell pack
-``bat.nominal.volt``     0             Pack nominal voltage (V), used to convert capacity to kWh
-                                       for ``v.b.capacity``.  ``0`` derives it, 96-cell only
-======================== ============= ==========================================================
+========================== ============= ==========================================================
+Parameter                  Default       Meaning
+========================== ============= ==========================================================
+``tpms.pressure.warn``     240           Tyre pressure (kPa) below which a warning is raised
+``tpms.pressure.alert``    220           Tyre pressure (kPa) below which an alert is raised
+``tpms.temp.warn``         90            Tyre temperature (°C) above which a warning is raised
+``tpms.temp.alert``        100           Tyre temperature (°C) above which an alert is raised
+``bat.nominal.ah``         0             Pack nominal full-charge capacity (Ah), the denominator
+                                         for ``v.b.soh``.  ``0`` derives it from the detected pack,
+                                         which is only established for the 96-cell pack
+``bat.nominal.volt``       0             Pack nominal voltage (V), used to convert capacity to kWh
+                                         for ``v.b.capacity``.  ``0`` derives it, 96-cell only
+``charge.report.storage``  sd            Where charge session reports are saved: ``sd`` (SD card
+                                         only), ``auto`` (SD card, else the HTML report on
+                                         internal flash) or ``off``
+========================== ============= ==========================================================
 
 -------
 Metrics

@@ -56,8 +56,7 @@ struct etnga_report_loc { const char* label; const char* dir; };
 static std::vector<etnga_report_loc> etnga_report_locs()
 {
     std::vector<etnga_report_loc> locs;
-    struct stat st;
-    if (stat("/sd", &st) == 0 && S_ISDIR(st.st_mode))
+    if (OvmsVehicleToyotaETNGA::ChargeSdAvailable())
         locs.push_back({ "sd", "/sd/charge-reports" });
     locs.push_back({ "store", "/store/charge-reports" });
     return locs;
@@ -121,9 +120,9 @@ void OvmsVehicleToyotaETNGA::WebDeInit()
     MyWebServer.DeregisterPage("/xte/config");
 }
 
-// WebCfgFeatures: configure the e-TNGA TPMS alert thresholds and the battery capacity
-// reference (config namespace "xte"). These are otherwise only settable from the shell
-// `config` command.
+// WebCfgFeatures: configure the e-TNGA TPMS alert thresholds, the battery capacity
+// reference and the charge report storage (config namespace "xte"). These are otherwise
+// only settable from the shell `config` command.
 void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
 {
     std::string error;
@@ -141,6 +140,7 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
         std::string nom_volt_s = c.getvar("bat_nominal_volt");
         float nom_ah   = nom_ah_s.empty()   ? 0.0f : atof(nom_ah_s.c_str());
         float nom_volt = nom_volt_s.empty() ? 0.0f : atof(nom_volt_s.c_str());
+        std::string report_storage = c.getvar("charge_report_storage");
 
         // Validate: pressures positive; alert at/below warn (low pressure is worse),
         // temperature alert at/above warn (high temperature is worse).
@@ -152,6 +152,8 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
             error += "<li>Temperature alert should be at or above the warning threshold (higher temperature is worse).</li>";
         if (nom_ah < 0 || nom_volt < 0)
             error += "<li>Battery nominal capacity and voltage cannot be negative. Leave a field empty to derive it from the detected pack.</li>";
+        if (report_storage != "sd" && report_storage != "auto" && report_storage != "off")
+            error += "<li>Invalid charge report storage.</li>";
 
         if (error == "") {
             // Hold the config lock across all writes. OvmsConfig::Transaction is a
@@ -166,6 +168,7 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
                 MyConfig.SetParamValueFloat("xte", "tpms.temp.alert",     t_alert);
                 MyConfig.SetParamValueFloat("xte", "bat.nominal.ah",      nom_ah);
                 MyConfig.SetParamValueFloat("xte", "bat.nominal.volt",    nom_volt);
+                MyConfig.SetParamValue("xte", "charge.report.storage",    report_storage);
             }
 
             c.head(200);
@@ -259,6 +262,21 @@ void OvmsVehicleToyotaETNGA::WebCfgFeatures(PageEntry_t& p, PageContext_t& c)
         "<p>Nominal pack voltage, used only to express capacity in kWh "
         "(<code>v.b.capacity</code>). Leave empty to derive it from the detected pack.</p>",
         "min=\"0\" step=\"1\"", "V");
+
+    c.fieldset_end();
+
+    c.fieldset_start("Charge reports");
+
+    std::string report_storage = MyConfig.GetParamValue("xte", "charge.report.storage", "sd");
+    c.input_select_start("Storage", "charge_report_storage");
+    c.input_select_option("SD card only", "sd", report_storage == "sd");
+    c.input_select_option("SD card, else internal flash", "auto", report_storage == "auto");
+    c.input_select_option("Off", "off", report_storage == "off");
+    c.input_select_end(
+        "<p>Where the end-of-session charge report is saved. With <strong>SD card only</strong>, "
+        "no report is written when no SD card is mounted. <strong>SD card, else internal "
+        "flash</strong> keeps the newest 10 HTML reports in <code>/store</code> when there is no "
+        "SD card; the per-sample CSV is only ever written to the SD card.</p>");
 
     c.fieldset_end();
 

@@ -78,6 +78,8 @@ public:
 
     void IncomingFrameCan2(CAN_frame_t* p_frame) override;
 
+    static bool ChargeSdAvailable();   // SD card mounted and usable (charge report storage)
+
 #ifdef CONFIG_OVMS_COMP_WEBSERVER
     // Webserver subsystem (implementation: etnga_web.cpp)
     void WebInit();
@@ -288,7 +290,7 @@ private:
     void LogChargeEvent(const char* label);            // append a timestamped event
     void AppendChargeCsvRow();                          // buffer one CSV row (header on first call)
     void FlushChargeCsv();                              // write buffered CSV rows to <base>.csv
-    std::string ChargeReportDir();                      // "/sd/charge-reports" if SD mounted else "/store/..."
+    std::string ChargeReportDir();                      // per [xte] charge.report.storage; "" = don't write
 
     // --- Async charge file-I/O worker (decouples SD writes from the Events task) ---
     // See docs/superpowers/specs/2026-06-20-etnga-charge-async-io-design.md
